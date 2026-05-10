@@ -1,65 +1,145 @@
-# Admin Agent v2.0
+# Vouza Admin Agent
 
-A powerful, self-improving AI office assistant designed to automate your digital life. Admin Agent supports multiple AI providers and seamlessly integrates with a massive list of communication and productivity tools. 
-
-## 🌟 Key Features
-
-### 🧠 Self-Improving & Scheduled Skills
-- **Auto-Learning**: The agent analyzes its own execution history to generate new skills and optimize existing ones based on past successes and failures.
-- **Persistent Memory**: Retains contextual memory via local storage.
-- **Cron Scheduling**: Execute recurring background tasks and reports on predefined schedules.
-
-### 🔌 Multi-Provider AI Support
-Mix and match the best AI providers through the dashboard setup.
-- Anthropic (Claude)
-- OpenAI (ChatGPT)
-- Google AI (Gemini)
-- xAI (Grok)
-- DeepSeek
-- Alibaba (Qwen)
-- Moonshot (Kimi)
-
-### 🛠️ Extensive Integrations
-- **Google Workspace Ecosystem**: Read/Write to Google Calendar, Google Sheets, Google Drive, and Google Docs using unified service account credentials.
-- **Communication Channels**:
-  - Email (via Gmail integration)
-  - Slack
-  - Telegram (Bot API)
-  - WhatsApp (supports Twilio, Meta Cloud API, WAHA Self-Hosted, and Whatsapp Web via QR code)
+AI-powered office automation — email, calendar, Telegram, WhatsApp, and more. Control your AI from your phone while your PC runs it in the background.
 
 ---
 
-## 🚀 Getting Started
-
-The agent is designed for easy deployment on Windows machines.
-
-1. **Setup Wizard**: 
-   Double click the `setup.bat` file to open the dashboard on your browser. 
-   Here you can configure all your API keys and authentication credentials visually without editing code.
-2. **Start the Agent**: 
-   Once configured, double click the `start.bat` file. 
-   This will automatically build the project and bootstrap the AI agent on your terminal.
-
-*(For advanced users, an `ecosystem.config.cjs` file is also included so the project can be run invisibly as a background service using PM2).*
-
----
-
-## 🤖 Basic Usage Examples
-
-Through the interactive REPL in the terminal, you can interact with the agent using natural language:
-
-- *"Read my unread emails and draft responses for any important ones."*
-- *"Find a free 30-minute slot on my Calendar tomorrow and send a summary to my Telegram."*
-- *"Append this week's key metrics into the Google Sheet."*
-
-You also have access to slash commands in the REPL:
-- `/schedule` - Set up default task schedules.
-- `/tasks` - List all scheduled tasks.
-- `/skills` - View the automatically learned and bundled skills of the agent.
-- `/improve` - Manually trigger the self-improvement and skill-learning cycle.
-- `/stats` - View self-improvement analytics.
-
----
+## Team Installation Guide
 
 ### Prerequisites
-- Node.js 18 or above
+
+Make sure these are installed on the laptop before starting:
+
+| Tool | Download | Check if installed |
+|------|----------|--------------------|
+| **Node.js 18+** | [nodejs.org](https://nodejs.org) | `node --version` |
+| **Git** | [git-scm.com](https://git-scm.com) | `git --version` |
+
+---
+
+### Step 1 — Clone the repo
+
+Open **PowerShell** or **Terminal** and run:
+
+```bash
+git clone https://github.com/geechun80/vouza-admin-agent.git
+cd vouza-admin-agent
+```
+
+> **Note:** The repo is private. You must be invited as a collaborator by @geechun80 before cloning.
+
+---
+
+### Step 2 — Install dependencies
+
+```bash
+npm install
+```
+
+---
+
+### Step 3 — Build the project
+
+```bash
+npm run build
+```
+
+---
+
+### Step 4 — Configure your environment
+
+Copy the example config file and fill in your details:
+
+```bash
+copy .env.example .env
+```
+
+Open `.env` in Notepad and set at minimum:
+
+```env
+ANTHROPIC_API_KEY=sk-ant-api03-your-key-here
+```
+
+Get your Anthropic API key at: https://console.anthropic.com/keys
+
+---
+
+### Step 5 — Launch the Setup Wizard
+
+Double-click **`start.bat`** — or run in terminal:
+
+```bash
+node dist/dashboard/launch.js
+```
+
+Then open your browser at: **http://localhost:3456**
+
+The setup wizard will guide you through:
+1. Naming your AI and choosing your AI model
+2. Connecting apps (Email, WhatsApp, Telegram, Slack, Calendar, etc.)
+3. Enabling skills (email triage, daily briefing, invoice processing)
+4. Going live
+
+---
+
+### Step 6 — Connect Telegram (recommended for mobile access)
+
+1. Open Telegram on your phone → search **@BotFather**
+2. Send `/newbot` → choose a name and username
+3. Copy the **Bot Token**
+4. In the setup wizard → Connect Apps → select **Telegram** → paste the token
+5. Message your bot from anywhere to control your AI
+
+---
+
+### Step 7 — Connect WhatsApp (optional)
+
+1. In the setup wizard → Connect Apps → select **WhatsApp** → choose **WhatsApp Web (Free)**
+2. Click **Connect** — a QR code appears on screen
+3. Open WhatsApp on your phone → tap **⋮ Menu → Linked Devices → Link a Device**
+4. Scan the QR code
+5. Done — message that number to give tasks to your AI
+
+---
+
+## Running in the background (recommended)
+
+Install PM2 to keep the agent running 24/7:
+
+```bash
+npm install -g pm2
+pm2 start ecosystem.config.cjs
+pm2 save
+pm2 startup
+```
+
+The agent will now auto-start on boot and stay running in the background.
+
+---
+
+## Updating to the latest version
+
+```bash
+git pull
+npm install
+npm run build
+```
+
+Then restart the agent (or PM2 will auto-restart it).
+
+---
+
+## Troubleshooting
+
+| Issue | Fix |
+|-------|-----|
+| `Port 3456 already in use` | Another agent instance is running — close it first or run `npx kill-port 3456` |
+| `Cannot find module` | Run `npm run build` again |
+| Telegram bot not responding | Check the Bot Token is correct — message @BotFather to verify |
+| WhatsApp disconnects | Re-scan the QR code in the setup wizard |
+
+---
+
+## Support
+
+Contact the Vouza team or raise an issue in this repo.
