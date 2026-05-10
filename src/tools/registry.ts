@@ -1,0 +1,166 @@
+// =============================================================================
+// Tool Registry — inspired by Claude Code's buildTool pattern
+// =============================================================================
+
+import { z } from "zod";
+import type { ToolDefinition, ToolCategory, ToolResult, AgentContext, APIToolSchema } from "../types/index.js";
+
+/**
+ * Build a tool definition with defaults filled in.
+ * Mirrors Claude Code's buildTool() pattern from Tool.ts
+ */
+export function buildTool<TInput, TOutput>(def: {
+  name: string;
+  description: string;
+  category: ToolCategory;
+  inputSchema: z.ZodType<TInput>;
+  isReadOnly?: boolean;
+  isConcurrencySafe?: boolean;
+  call: (input: TInput, context: AgentContext) => Promise<ToolResult<TOutput>>;
+}): ToolDefinition<TInput, TOutput> {
+  return {
+    name: def.name,
+    description: def.description,
+    category: def.category,
+    inputSchema: def.inputSchema,
+    isReadOnly: def.isReadOnly ?? false,
+    isConcurrencySafe: def.isConcurrencySafe ?? true,
+    call: def.call,
+    toAPISchema(): APIToolSchema {
+      return {
+        name: def.name,
+        description: def.description,
+        input_schema: zodToJsonSchema(def.inputSchema),
+      };
+    },
+  };
+}
+
+/**
+ * Tool registry — central store for all available tools.
+ * Mirrors Claude Code's tool orchestration pattern.
+ */
+export class ToolRegistry {
+  private tools = new Map<string, ToolDefinition>();
+
+  register(tool: ToolDefinition): void {
+    this.tools.set(tool.name, tool);
+  }
+
+  get(name: string): ToolDefinition | undefined {
+    return this.tools.get(name);
+  }
+
+  getAll(): ToolDefinition[] {
+    return Array.from(this.tools.values());
+  }
+
+  getByCategory(category: ToolCategory): ToolDefinition[] {
+    return this.getAll().filter((t) => t.category === category);
+  }
+
+  toAPISchemas(): APIToolSchema[] {
+    return this.getAll().map((t) => t.toAPISchema());
+  }
+
+  /**
+   * Execute tools with concurrency control.
+   * Read-only + concurrency-safe tools run in parallel; others run serially.
+   * Mirrors Claude Code's toolOrchestration.ts pattern.
+   */
+  async executeTools(
+    toolCalls: Array<{ id: string; name: string; input: unknown }>,
+    context: AgentContext
+  ): Promise<Array<{ tool_use_id: string; content: string; is_error: boolean }>> {
+    // Partition into parallel-safe and serial
+    const parallel: typeof toolCalls = [];
+    const serial: typeof toolCalls = [];
+
+    for (const call of toolCalls) {
+      const tool = this.tools.get(call.name);
+      if (!tool) {
+        serial.push(call); // unknown tools go serial for safety
+        continue;
+      }
+      if (tool.isReadOnly && tool.isConcurrencySafe) {
+        parallel.push(call);
+      } else {
+        serial.push(call);
+      }
+    }
+
+    const results: Array<{ tool_use_id: string; content: string; is_error: boolean }> = [];
+
+    // Run parallel batch
+    if (parallel.length > 0) {
+      const parallelResults = await Promise.all(
+        parallel.map((call) => this.executeSingle(call, context))
+      );
+      results.push(...parallelResults);
+    }
+
+    // Run serial sequentially
+    for (const call of serial) {
+      const result = await this.executeSingle(call, context);
+      results.push(result);
+    }
+
+    return results;
+  }
+
+  private async executeSingle(
+    call: { id: string; name: string; input: unknown },
+    context: AgentContext
+  ): Promise<{ tool_use_id: string; content: string; is_error: boolean }> {
+    const tool = this.tools.get(call.name);
+    if (!tool) {
+      return { tool_use_id: call.id, content: `Unknown tool: ${call.name}`, is_error: true };
+    }
+
+    try {
+      const parsed = tool.inputSchema.parse(call.input);
+      const result = await tool.call(parsed, context);
+      return {
+        tool_use_id: call.id,
+        content: JSON.stringify(result.data ?? result.error ?? "OK"),
+        is_error: !result.success,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { tool_use_id: call.id, content: `Tool error: ${message}`, is_error: true };
+    }
+  }
+}
+
+// --- Zod to JSON Schema (minimal conversion) ---
+
+function zodToJsonSchema(schema: z.ZodType): Record<string, unknown> {
+  if (schema instanceof z.ZodObject) {
+    const shape = schema.shape;
+    const properties: Record<string, unknown> = {};
+    const required: string[] = [];
+
+    for (const [key, value] of Object.entries(shape)) {
+      const zodField = value as z.ZodType;
+      properties[key] = zodToJsonSchema(zodField);
+      if (!(zodField instanceof z.ZodOptional)) {
+        required.push(key);
+      }
+    }
+
+    return { type: "object", properties, required };
+  }
+  if (schema instanceof z.ZodString) return { type: "string" };
+  if (schema instanceof z.ZodNumber) return { type: "number" };
+  if (schema instanceof z.ZodBoolean) return { type: "boolean" };
+  if (schema instanceof z.ZodArray) {
+    return { type: "array", items: zodToJsonSchema((schema as z.ZodArray<z.ZodType>)._def.type) };
+  }
+  if (schema instanceof z.ZodOptional) {
+    return zodToJsonSchema((schema as z.ZodOptional<z.ZodType>)._def.innerType);
+  }
+  if (schema instanceof z.ZodEnum) {
+    return { type: "string", enum: (schema as z.ZodEnum<[string, ...string[]]>)._def.values };
+  }
+  return { type: "string" };
+}

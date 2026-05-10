@@ -1,0 +1,2629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vouza AI — Admin Agent Setup</title>
+  <style>
+    /* ============================================================
+       Vouza.ai Design System — Glassmorphism + Soft Neon
+    ============================================================ */
+    :root {
+      --bg:              #080b16;
+      --bg-glass:        rgba(255,255,255,0.03);
+      --bg-glass-hover:  rgba(255,255,255,0.06);
+      --bg-glass-card:   rgba(255,255,255,0.04);
+      --border:          rgba(255,255,255,0.08);
+      --border-focus:    rgba(124,58,237,0.7);
+      --brand:           #7c3aed;
+      --brand-light:     #a78bfa;
+      --brand-cyan:      #06b6d4;
+      --brand-glow:      rgba(124,58,237,0.25);
+      --brand-glow-sm:   rgba(124,58,237,0.12);
+      --cyan-glow:       rgba(6,182,212,0.15);
+      --text:            #f1f5f9;
+      --text-dim:        #94a3b8;
+      --text-muted:      #475569;
+      --success:         #10b981;
+      --success-bg:      rgba(16,185,129,0.1);
+      --warning:         #f59e0b;
+      --warning-bg:      rgba(245,158,11,0.1);
+      --error:           #ef4444;
+      --error-bg:        rgba(239,68,68,0.1);
+      --radius:          14px;
+      --radius-sm:       8px;
+      --radius-xs:       6px;
+      --grad-brand:      linear-gradient(135deg,#7c3aed 0%,#a855f7 60%,#06b6d4 100%);
+      --grad-success:    linear-gradient(135deg,#10b981 0%,#059669 100%);
+      --grad-warm:       linear-gradient(135deg,#f59e0b 0%,#ef4444 100%);
+      --shadow-glass:    0 8px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.05);
+      --shadow-glow:     0 0 40px rgba(124,58,237,0.3);
+      --shadow-card:     0 4px 24px rgba(0,0,0,0.3);
+    }
+
+    *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Background glow blobs ── */
+    body::before {
+      content:'';
+      position:fixed; inset:0;
+      background:
+        radial-gradient(ellipse 800px 600px at 10% 20%, rgba(124,58,237,0.08) 0%, transparent 70%),
+        radial-gradient(ellipse 600px 400px at 90% 80%, rgba(6,182,212,0.06) 0%, transparent 70%);
+      pointer-events:none; z-index:0;
+    }
+
+    /* ============================================================
+       WELCOME SCREEN
+    ============================================================ */
+    #welcomeScreen {
+      position:fixed; inset:0;
+      display:flex; flex-direction:column;
+      align-items:center; justify-content:center;
+      z-index:100;
+      background: var(--bg);
+      padding:24px;
+    }
+
+    #welcomeScreen::before {
+      content:'';
+      position:absolute; inset:0;
+      background:
+        radial-gradient(ellipse 900px 700px at 30% 30%, rgba(124,58,237,0.12) 0%, transparent 70%),
+        radial-gradient(ellipse 700px 500px at 80% 70%, rgba(6,182,212,0.08) 0%, transparent 70%);
+    }
+
+    .welcome-inner {
+      position:relative; z-index:1;
+      text-align:center; max-width:520px;
+    }
+
+    .welcome-logo {
+      width:200px; height:auto; margin:0 auto 24px;
+      display:block;
+      filter: drop-shadow(0 0 40px rgba(0,140,255,0.5)) drop-shadow(0 0 100px rgba(0,140,255,0.2));
+      animation: float 4s ease-in-out infinite;
+    }
+
+    @keyframes float {
+      0%,100% { transform:translateY(0); }
+      50%      { transform:translateY(-8px); }
+    }
+
+    .welcome-brand {
+      font-size:13px; font-weight:700; letter-spacing:4px;
+      background:var(--grad-brand);
+      -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+      margin-bottom:12px; text-transform:uppercase;
+    }
+
+    .welcome-headline {
+      font-size:42px; font-weight:800; line-height:1.15;
+      margin-bottom:16px;
+      background:linear-gradient(135deg,#fff 0%,var(--brand-light) 100%);
+      -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+    }
+
+    .welcome-sub {
+      font-size:17px; color:var(--text-dim); line-height:1.6; margin-bottom:40px;
+    }
+
+    .welcome-features {
+      display:flex; gap:24px; justify-content:center; margin-bottom:40px; flex-wrap:wrap;
+    }
+
+    .welcome-feat {
+      display:flex; align-items:center; gap:8px;
+      font-size:13px; color:var(--text-dim);
+    }
+
+    .welcome-feat-dot {
+      width:6px; height:6px; border-radius:50%;
+      background:var(--grad-brand);
+    }
+
+    .btn-welcome {
+      display:inline-flex; align-items:center; gap:10px;
+      padding:16px 48px; border-radius:50px; border:none; cursor:pointer;
+      font-size:17px; font-weight:700; letter-spacing:0.5px;
+      background:var(--grad-brand); color:#fff;
+      box-shadow:0 0 40px rgba(124,58,237,0.5);
+      transition:all 0.3s;
+    }
+
+    .btn-welcome:hover {
+      transform:translateY(-2px);
+      box-shadow:0 0 60px rgba(124,58,237,0.7);
+    }
+
+    /* ============================================================
+       MAIN APP LAYOUT
+    ============================================================ */
+    #mainApp {
+      display:none;
+      min-height:100vh;
+      position:relative; z-index:1;
+    }
+
+    .app-layout {
+      display:grid;
+      grid-template-columns:1fr 340px;
+      min-height:100vh;
+      max-width:1300px;
+      margin:0 auto;
+    }
+
+    /* ── Main content column ── */
+    .main-col {
+      padding:40px 48px;
+      border-right:1px solid var(--border);
+    }
+
+    /* ── Guide panel column ── */
+    .guide-col {
+      display:flex; flex-direction:column;
+      background:rgba(124,58,237,0.03);
+      border-left:1px solid var(--border);
+      position:sticky; top:0; height:100vh; overflow:hidden;
+    }
+
+    /* ============================================================
+       PROGRESS RAIL
+    ============================================================ */
+    .progress-rail {
+      display:flex; align-items:center; gap:0;
+      margin-bottom:40px;
+    }
+
+    .prail-step {
+      display:flex; align-items:center; gap:10px;
+      padding:10px 0; cursor:pointer; flex:0 0 auto;
+      transition:all 0.2s;
+    }
+
+    /* connectors rendered as join divs in JS */
+
+    .prail-dot {
+      width:28px; height:28px; border-radius:50%;
+      display:flex; align-items:center; justify-content:center;
+      font-size:12px; font-weight:700;
+      border:2px solid var(--border);
+      background:var(--bg-glass); color:var(--text-muted);
+      transition:all 0.3s; flex-shrink:0;
+    }
+
+    .prail-step.active .prail-dot {
+      background:var(--grad-brand);
+      border-color:transparent;
+      color:#fff;
+      box-shadow:0 0 16px var(--brand-glow);
+    }
+
+    .prail-step.done .prail-dot {
+      background:var(--success-bg);
+      border-color:var(--success);
+      color:var(--success);
+    }
+
+    .prail-label {
+      font-size:12px; font-weight:600;
+      color:var(--text-muted);
+      white-space:nowrap;
+    }
+
+    .prail-step.active .prail-label { color:var(--brand-light); }
+    .prail-step.done .prail-label   { color:var(--success); }
+
+    /* ============================================================
+       STEP VIEWS
+    ============================================================ */
+    .step-view {
+      display:none; animation:fadeUp 0.35s ease;
+    }
+
+    .step-view.active { display:block; }
+
+    @keyframes fadeUp {
+      from { opacity:0; transform:translateY(16px); }
+      to   { opacity:1; transform:translateY(0); }
+    }
+
+    .step-eyebrow {
+      font-size:11px; font-weight:700; letter-spacing:3px;
+      text-transform:uppercase; color:var(--brand-light);
+      margin-bottom:8px;
+    }
+
+    .step-title {
+      font-size:28px; font-weight:800; line-height:1.2;
+      background:linear-gradient(135deg,#fff 0%,var(--brand-light) 100%);
+      -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+      margin-bottom:8px;
+    }
+
+    .step-subtitle {
+      color:var(--text-dim); font-size:15px; line-height:1.6;
+      margin-bottom:36px;
+    }
+
+    /* ============================================================
+       GLASS CARDS
+    ============================================================ */
+    .glass-card {
+      background:var(--bg-glass-card);
+      border:1px solid var(--border);
+      border-radius:var(--radius);
+      padding:24px;
+      backdrop-filter:blur(12px);
+      box-shadow:var(--shadow-glass);
+      margin-bottom:16px;
+    }
+
+    .glass-card-header {
+      display:flex; align-items:center; gap:12px;
+      margin-bottom:20px;
+    }
+
+    .glass-card-icon {
+      width:36px; height:36px; flex-shrink:0;
+      display:flex; align-items:center; justify-content:center;
+    }
+
+    .glass-card-icon svg { width:32px; height:32px; }
+
+    .glass-card-title { font-size:15px; font-weight:600; }
+
+    .glass-card-badge {
+      margin-left:auto; padding:4px 12px; border-radius:20px;
+      font-size:11px; font-weight:700;
+    }
+
+    .badge-connected { background:var(--success-bg); color:var(--success); }
+    .badge-pending   { background:rgba(245,158,11,0.1); color:var(--warning); }
+    .badge-error     { background:var(--error-bg); color:var(--error); }
+    .badge-optional  { background:var(--bg-glass); color:var(--text-muted); border:1px solid var(--border); }
+
+    /* ============================================================
+       FORM ELEMENTS
+    ============================================================ */
+    .form-row {
+      display:grid; grid-template-columns:1fr 1fr; gap:16px;
+      margin-bottom:16px;
+    }
+
+    .form-row.full { grid-template-columns:1fr; }
+
+    .form-group { margin-bottom:16px; }
+
+    .form-group label {
+      display:block; font-size:13px; font-weight:600;
+      color:var(--text-dim); margin-bottom:6px;
+    }
+
+    .form-group .hint {
+      font-size:11px; color:var(--text-muted); margin-top:5px;
+      line-height:1.5;
+    }
+
+    .form-group .hint a { color:var(--brand-light); text-decoration:none; }
+    .form-group .hint a:hover { text-decoration:underline; }
+
+    input[type="text"],
+    input[type="password"],
+    input[type="email"],
+    input[type="tel"],
+    input[type="number"],
+    select, textarea {
+      width:100%;
+      padding:11px 14px;
+      border-radius:var(--radius-sm);
+      border:1px solid var(--border);
+      background:rgba(255,255,255,0.03);
+      color:var(--text);
+      font-size:14px;
+      font-family:inherit;
+      transition:border-color 0.2s, box-shadow 0.2s;
+    }
+
+    input:focus, select:focus, textarea:focus {
+      outline:none;
+      border-color:var(--border-focus);
+      box-shadow:0 0 0 3px var(--brand-glow-sm);
+    }
+
+    input::placeholder, textarea::placeholder { color:var(--text-muted); }
+
+    .input-group {
+      display:flex; gap:8px; align-items:stretch;
+    }
+
+    .input-group input { flex:1; }
+
+    select option { background:#1a1d27; }
+
+    /* ============================================================
+       BUTTONS
+    ============================================================ */
+    .btn {
+      display:inline-flex; align-items:center; justify-content:center; gap:8px;
+      padding:10px 20px; border-radius:var(--radius-sm);
+      border:none; cursor:pointer; font-size:14px; font-weight:600;
+      font-family:inherit; transition:all 0.2s; white-space:nowrap;
+    }
+
+    .btn-primary {
+      background:var(--grad-brand); color:#fff;
+      box-shadow:0 0 24px var(--brand-glow);
+    }
+
+    .btn-primary:hover {
+      transform:translateY(-1px);
+      box-shadow:0 0 36px rgba(124,58,237,0.5);
+    }
+
+    .btn-success {
+      background:var(--grad-success); color:#fff;
+      box-shadow:0 0 24px rgba(16,185,129,0.3);
+    }
+
+    .btn-success:hover {
+      transform:translateY(-1px);
+      box-shadow:0 0 36px rgba(16,185,129,0.5);
+    }
+
+    .btn-go-live {
+      background:linear-gradient(135deg,#7c3aed 0%,#2563eb 100%);
+      color:#fff; font-size:17px; padding:16px 48px; border-radius:50px;
+      box-shadow:0 0 40px rgba(124,58,237,0.5);
+    }
+
+    .btn-go-live:hover {
+      transform:translateY(-2px);
+      box-shadow:0 0 60px rgba(124,58,237,0.7);
+    }
+
+    .btn-secondary {
+      background:var(--bg-glass); color:var(--text-dim);
+      border:1px solid var(--border);
+    }
+
+    .btn-secondary:hover {
+      background:var(--bg-glass-hover); color:var(--text);
+      border-color:rgba(255,255,255,0.15);
+    }
+
+    .btn-ghost {
+      background:transparent; color:var(--text-muted);
+      border:1px solid var(--border); font-size:13px; padding:8px 16px;
+    }
+
+    .btn-ghost:hover { color:var(--text); border-color:rgba(255,255,255,0.15); }
+
+    .btn-test {
+      background:var(--bg-glass); color:var(--brand-light);
+      border:1px solid rgba(124,58,237,0.3); font-size:12px;
+      padding:7px 14px;
+    }
+
+    .btn-test:hover { background:var(--brand-glow-sm); }
+
+    .btn-sm { padding:7px 14px; font-size:12px; }
+    .btn-icon { padding:8px; border-radius:var(--radius-xs); }
+
+    .btn-nav-group {
+      display:flex; justify-content:space-between; align-items:center;
+      margin-top:36px; padding-top:24px;
+      border-top:1px solid var(--border);
+    }
+
+    .btn-nav-right { display:flex; gap:12px; align-items:center; }
+
+    .skip-link {
+      font-size:13px; color:var(--text-muted); cursor:pointer;
+      text-decoration:underline; background:none; border:none;
+      font-family:inherit;
+    }
+
+    .skip-link:hover { color:var(--text-dim); }
+
+    /* ============================================================
+       SELECTABLE CARDS (Channels, Tools)
+    ============================================================ */
+    .selectable-grid {
+      display:grid;
+      grid-template-columns:repeat(auto-fill, minmax(260px, 1fr));
+      gap:14px; margin-bottom:24px;
+    }
+
+    .sel-card {
+      background:var(--bg-glass-card);
+      border:2px solid var(--border);
+      border-radius:var(--radius);
+      padding:20px; cursor:pointer;
+      transition:all 0.2s; position:relative;
+      backdrop-filter:blur(8px);
+    }
+
+    .sel-card:hover {
+      background:var(--bg-glass-hover);
+      border-color:rgba(255,255,255,0.14);
+      transform:translateY(-2px);
+      box-shadow:var(--shadow-card);
+    }
+
+    .sel-card.selected {
+      border-color:var(--brand);
+      background:var(--brand-glow-sm);
+      box-shadow:0 0 24px var(--brand-glow);
+    }
+
+    .sel-card-top {
+      display:flex; align-items:flex-start;
+      justify-content:space-between; margin-bottom:12px;
+    }
+
+    .sel-card-icon { width:36px; height:36px; flex-shrink:0; }
+    .sel-card-icon svg { width:36px; height:36px; }
+
+    .sel-check {
+      width:22px; height:22px; border-radius:50%;
+      background:var(--brand); color:#fff;
+      display:none; align-items:center; justify-content:center;
+      font-size:13px; flex-shrink:0;
+    }
+
+    .sel-card.selected .sel-check { display:flex; }
+
+    .sel-card-badge {
+      position:absolute; top:12px; right:12px;
+      padding:3px 10px; border-radius:20px;
+      font-size:10px; font-weight:700;
+    }
+
+    .sel-card.selected .sel-card-badge { display:none; }
+
+    .badge-popular { background:var(--brand-glow-sm); color:var(--brand-light); }
+    .badge-free    { background:var(--success-bg); color:var(--success); }
+
+    .sel-card-name { font-size:15px; font-weight:600; margin-bottom:4px; }
+    .sel-card-desc { font-size:12px; color:var(--text-dim); line-height:1.5; }
+
+    .sel-card-extra { margin-top:12px; display:none; }
+    .sel-card.selected .sel-card-extra { display:block; }
+
+    .sel-card-extra label {
+      display:block; font-size:11px; color:var(--text-muted); margin-bottom:4px;
+    }
+
+    .sel-card-extra select {
+      padding:6px 10px; font-size:12px; width:auto; min-width:160px;
+    }
+
+    /* Remote access tip banner */
+    .remote-access-tip {
+      display:flex; align-items:flex-start; gap:12px;
+      background:linear-gradient(135deg,rgba(99,102,241,0.08),rgba(139,92,246,0.06));
+      border:1px solid rgba(99,102,241,0.2);
+      border-radius:12px; padding:14px 16px; margin-bottom:16px;
+      font-size:13px; color:var(--text-dim); line-height:1.5;
+    }
+    .remote-access-tip strong { color:var(--text); }
+    .remote-tip-icon { font-size:20px; flex-shrink:0; margin-top:1px; }
+
+    /* Mobile access badge on card */
+    .sel-card-mobile-tag {
+      display:inline-flex; align-items:center; gap:4px;
+      font-size:10px; font-weight:600; color:#34d399;
+      background:rgba(52,211,153,0.1); border:1px solid rgba(52,211,153,0.2);
+      border-radius:20px; padding:2px 8px; margin-top:6px; margin-bottom:10px;
+    }
+
+    /* How-to steps inside card */
+    .sel-card-howto {
+      margin-top:10px; padding-top:10px;
+      border-top:1px solid rgba(255,255,255,0.07);
+    }
+    .howto-label {
+      font-size:10px; font-weight:700; color:var(--text-muted);
+      text-transform:uppercase; letter-spacing:0.6px; margin-bottom:7px;
+    }
+    .howto-steps { display:flex; flex-direction:column; gap:5px; }
+    .howto-step {
+      display:flex; align-items:flex-start; gap:8px;
+      font-size:11px; color:var(--text-dim); line-height:1.45;
+    }
+    .howto-num {
+      width:16px; height:16px; border-radius:50%; flex-shrink:0;
+      background:rgba(99,102,241,0.15); border:1px solid rgba(99,102,241,0.3);
+      color:#818cf8; font-size:9px; font-weight:700;
+      display:flex; align-items:center; justify-content:center; margin-top:1px;
+    }
+    .howto-step a { color:#818cf8; text-decoration:none; }
+    .howto-step a:hover { text-decoration:underline; }
+
+    /* ============================================================
+       MODEL SELECTOR
+    ============================================================ */
+    .provider-tabs {
+      display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px;
+    }
+
+    .ptab {
+      display:flex; align-items:center; gap:6px;
+      padding:7px 14px; border-radius:20px;
+      font-size:12px; font-weight:600; cursor:pointer;
+      border:1px solid var(--border);
+      background:var(--bg-glass); color:var(--text-muted);
+      transition:all 0.2s;
+    }
+
+    .ptab:hover { border-color:rgba(255,255,255,0.15); color:var(--text-dim); }
+
+    .ptab.active {
+      background:var(--brand-glow-sm);
+      border-color:rgba(124,58,237,0.4); color:var(--brand-light);
+    }
+
+    .ptab-dot {
+      width:7px; height:7px; border-radius:50%;
+    }
+
+    .model-list { display:flex; flex-direction:column; gap:8px; }
+
+    .model-opt {
+      display:flex; align-items:flex-start; gap:12px;
+      padding:14px 16px; border-radius:var(--radius-sm);
+      border:1px solid var(--border);
+      background:var(--bg-glass); cursor:pointer;
+      transition:all 0.2s;
+    }
+
+    .model-opt:hover { background:var(--bg-glass-hover); border-color:rgba(255,255,255,0.12); }
+
+    .model-opt.selected {
+      border-color:rgba(124,58,237,0.5);
+      background:var(--brand-glow-sm);
+    }
+
+    .model-radio {
+      width:16px; height:16px; border-radius:50%;
+      border:2px solid var(--border); flex-shrink:0; margin-top:2px;
+      transition:all 0.2s;
+    }
+
+    .model-opt.selected .model-radio {
+      border-color:var(--brand);
+      background:var(--brand);
+      box-shadow:0 0 8px var(--brand-glow);
+    }
+
+    .model-info { flex:1; }
+
+    .model-name {
+      font-size:14px; font-weight:600;
+      display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+    }
+
+    .model-desc { font-size:12px; color:var(--text-dim); margin-top:3px; }
+
+    .model-meta {
+      display:flex; gap:10px; margin-top:6px;
+    }
+
+    .model-meta span {
+      font-size:10px; color:var(--text-muted);
+      background:var(--bg-glass); padding:2px 8px; border-radius:10px;
+      border:1px solid var(--border);
+    }
+
+    .badge-recommended {
+      font-size:10px; font-weight:700; padding:2px 8px; border-radius:10px;
+      background:linear-gradient(135deg,rgba(124,58,237,0.2),rgba(168,85,247,0.2));
+      color:#c4b5fd; border:1px solid rgba(124,58,237,0.3);
+    }
+
+    .model-tier {
+      font-size:10px; font-weight:600; padding:2px 8px; border-radius:10px;
+    }
+
+    .tier-flagship  { background:rgba(245,158,11,0.1); color:#fbbf24; }
+    .tier-balanced  { background:rgba(6,182,212,0.1); color:#22d3ee; }
+    .tier-fast      { background:rgba(16,185,129,0.1); color:#34d399; }
+
+    /* ============================================================
+       SKILL CARDS
+    ============================================================ */
+    .skill-list { display:flex; flex-direction:column; gap:10px; }
+
+    .skill-card {
+      display:flex; align-items:center; gap:16px;
+      padding:16px 20px; border-radius:var(--radius);
+      background:var(--bg-glass-card); border:1px solid var(--border);
+      cursor:pointer; transition:all 0.2s;
+    }
+
+    .skill-card:hover { background:var(--bg-glass-hover); }
+
+    .skill-card.enabled {
+      border-color:rgba(124,58,237,0.35);
+      background:var(--brand-glow-sm);
+    }
+
+    .skill-icon { font-size:24px; flex-shrink:0; }
+
+    .skill-body { flex:1; }
+    .skill-name { font-size:14px; font-weight:600; margin-bottom:2px; }
+    .skill-desc { font-size:12px; color:var(--text-dim); }
+
+    .skill-toggle {
+      width:40px; height:22px; border-radius:11px;
+      background:var(--border); position:relative;
+      transition:background 0.2s; flex-shrink:0;
+    }
+
+    .skill-card.enabled .skill-toggle { background:var(--brand); }
+
+    .skill-toggle::after {
+      content:''; position:absolute;
+      width:16px; height:16px; border-radius:50%;
+      background:#fff; top:3px; left:3px;
+      transition:transform 0.2s;
+    }
+
+    .skill-card.enabled .skill-toggle::after { transform:translateX(18px); }
+
+    .skill-sched { flex-shrink:0; }
+
+    .skill-sched select {
+      padding:5px 10px; font-size:11px;
+      width:auto; min-width:140px; border-radius:var(--radius-xs);
+    }
+
+    /* ============================================================
+       REVIEW GRID
+    ============================================================ */
+    .review-grid {
+      display:grid;
+      grid-template-columns:repeat(auto-fill, minmax(240px, 1fr));
+      gap:14px; margin-bottom:32px;
+    }
+
+    .review-card {
+      background:var(--bg-glass-card); border:1px solid var(--border);
+      border-radius:var(--radius); padding:20px;
+    }
+
+    .review-card h3 {
+      font-size:13px; color:var(--text-dim);
+      margin-bottom:14px; display:flex; align-items:center; gap:8px;
+    }
+
+    .review-row {
+      display:flex; justify-content:space-between; align-items:center;
+      padding:6px 0; font-size:13px;
+    }
+
+    .review-row+.review-row { border-top:1px solid var(--border); }
+
+    .review-val { color:var(--brand-light); font-weight:500; }
+    .review-ok  { color:var(--success); }
+    .review-no  { color:var(--text-muted); }
+
+    /* ============================================================
+       GO LIVE SECTION
+    ============================================================ */
+    .go-live-center {
+      text-align:center; padding:48px 0;
+    }
+
+    .go-live-icon { font-size:64px; margin-bottom:20px; animation:float 3s ease-in-out infinite; }
+
+    .go-live-title {
+      font-size:32px; font-weight:800;
+      background:var(--grad-brand);
+      -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+      margin-bottom:8px;
+    }
+
+    .go-live-sub { color:var(--text-dim); font-size:16px; margin-bottom:40px; }
+
+    .go-live-actions { display:flex; gap:16px; justify-content:center; flex-wrap:wrap; }
+
+    .terminal-block {
+      background:#050810; border:1px solid var(--border);
+      border-radius:var(--radius); padding:20px 24px;
+      font-family:'SF Mono','Fira Code',monospace; font-size:13px;
+      line-height:1.8; max-width:560px; margin:0 auto 32px;
+      text-align:left;
+    }
+
+    .t-cmd { color:var(--success); }
+    .t-out { color:var(--text-muted); }
+    .t-hi  { color:var(--brand-light); }
+    .t-blink { animation:blink 1s step-end infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+    /* ============================================================
+       AI GUIDE PANEL
+    ============================================================ */
+    .guide-header {
+      display:flex; align-items:center; gap:12px;
+      padding:20px 24px; border-bottom:1px solid var(--border);
+      background:rgba(124,58,237,0.05);
+    }
+
+    .guide-avatar {
+      width:48px; height:48px; border-radius:50%;
+      background:rgba(255,255,255,0.06);
+      display:flex; align-items:center; justify-content:center;
+      flex-shrink:0; overflow:hidden;
+      box-shadow:0 0 20px var(--brand-glow);
+    }
+
+    .guide-avatar img {
+      width:100%; height:100%; object-fit:contain;
+    }
+
+    .guide-name { font-size:14px; font-weight:700; }
+
+    .guide-status {
+      font-size:11px; color:var(--success);
+      display:flex; align-items:center; gap:4px;
+    }
+
+    .guide-status::before {
+      content:''; width:6px; height:6px; border-radius:50%;
+      background:var(--success); display:inline-block;
+      animation:pulse-dot 2s infinite;
+    }
+
+    @keyframes pulse-dot {
+      0%,100% { opacity:1; } 50% { opacity:0.4; }
+    }
+
+    .guide-messages {
+      flex:1; overflow-y:auto; padding:16px;
+      display:flex; flex-direction:column; gap:12px;
+      scrollbar-width:thin; scrollbar-color:var(--border) transparent;
+    }
+
+    .guide-msg {
+      max-width:90%; line-height:1.5;
+    }
+
+    .guide-msg.bot {
+      align-self:flex-start;
+    }
+
+    .guide-msg.user {
+      align-self:flex-end;
+    }
+
+    .msg-bubble {
+      padding:10px 14px; border-radius:14px; font-size:13px;
+    }
+
+    .bot .msg-bubble {
+      background:var(--bg-glass-card);
+      border:1px solid var(--border);
+      border-bottom-left-radius:4px;
+      color:var(--text);
+    }
+
+    .user .msg-bubble {
+      background:var(--brand-glow-sm);
+      border:1px solid rgba(124,58,237,0.3);
+      border-bottom-right-radius:4px;
+      color:var(--text);
+    }
+
+    .msg-time {
+      font-size:10px; color:var(--text-muted);
+      margin-top:4px; padding:0 4px;
+    }
+
+    .bot .msg-time { text-align:left; }
+    .user .msg-time { text-align:right; }
+
+    .guide-typing {
+      align-self:flex-start;
+      padding:10px 14px; border-radius:14px; border-bottom-left-radius:4px;
+      background:var(--bg-glass-card); border:1px solid var(--border);
+      display:none;
+    }
+
+    .guide-typing.visible { display:flex; gap:4px; align-items:center; }
+
+    .typing-dot {
+      width:6px; height:6px; border-radius:50%;
+      background:var(--text-muted); animation:typing 1.2s infinite;
+    }
+
+    .typing-dot:nth-child(2) { animation-delay:0.2s; }
+    .typing-dot:nth-child(3) { animation-delay:0.4s; }
+
+    @keyframes typing {
+      0%,80%,100% { transform:scale(0.7); opacity:0.4; }
+      40%          { transform:scale(1); opacity:1; }
+    }
+
+    .guide-input-area {
+      padding:16px; border-top:1px solid var(--border);
+      background:rgba(0,0,0,0.2);
+    }
+
+    .guide-input-row {
+      display:flex; gap:8px; align-items:center;
+    }
+
+    .guide-input-row input {
+      flex:1; padding:9px 14px;
+      background:var(--bg-glass-card);
+      border:1px solid var(--border);
+      border-radius:20px; font-size:13px; color:var(--text);
+    }
+
+    .guide-input-row input:focus {
+      border-color:rgba(124,58,237,0.5);
+      box-shadow:0 0 0 2px var(--brand-glow-sm);
+    }
+
+    .btn-send {
+      width:36px; height:36px; border-radius:50%;
+      background:var(--grad-brand); border:none; cursor:pointer;
+      display:flex; align-items:center; justify-content:center;
+      font-size:14px; color:#fff; flex-shrink:0;
+      transition:transform 0.2s, box-shadow 0.2s;
+    }
+
+    .btn-send:hover { transform:scale(1.1); box-shadow:0 0 16px var(--brand-glow); }
+
+    .guide-tips {
+      display:flex; gap:6px; flex-wrap:wrap; margin-top:10px;
+    }
+
+    .tip-chip {
+      padding:5px 11px; border-radius:14px; font-size:11px;
+      background:var(--bg-glass); border:1px solid var(--border);
+      color:var(--text-dim); cursor:pointer; transition:all 0.2s;
+    }
+
+    .tip-chip:hover {
+      background:var(--brand-glow-sm); border-color:rgba(124,58,237,0.3);
+      color:var(--brand-light);
+    }
+
+    /* ============================================================
+       CHAT ELEMENTS — tool cards, streaming bubble, image preview
+    ============================================================ */
+    .btn-icon-sm {
+      width:32px; height:32px; border-radius:8px; border:1px solid var(--border);
+      background:var(--bg-glass); cursor:pointer; display:flex;
+      align-items:center; justify-content:center; font-size:15px;
+      color:var(--text-dim); flex-shrink:0; transition:all 0.15s;
+    }
+    .btn-icon-sm:hover { border-color:rgba(124,58,237,0.4); color:var(--brand-light); }
+
+    #imagePreview {
+      display:none; padding:8px 0 0;
+    }
+    .img-preview-inner {
+      display:inline-flex; align-items:center; gap:8px;
+      padding:6px 10px; border-radius:10px;
+      background:var(--bg-glass-card); border:1px solid var(--border);
+      font-size:12px; color:var(--text-dim);
+    }
+    .img-preview-inner img {
+      width:40px; height:40px; border-radius:6px; object-fit:cover;
+    }
+    .img-preview-inner button {
+      background:none; border:none; cursor:pointer; color:var(--text-muted);
+      font-size:14px; line-height:1; padding:0 2px;
+    }
+    .img-preview-inner button:hover { color:#ef4444; }
+
+    .streaming-bubble {
+      white-space:pre-wrap; word-break:break-word; line-height:1.6;
+    }
+    .streaming-bubble p { margin:0 0 6px; }
+    .streaming-bubble p:last-child { margin-bottom:0; }
+
+    .tool-card {
+      margin:6px 0; padding:8px 12px; border-radius:10px;
+      background:rgba(124,58,237,0.06); border:1px solid rgba(124,58,237,0.15);
+      font-size:12px; display:flex; align-items:flex-start; gap:8px;
+    }
+    .tool-card.running { border-color:rgba(168,85,247,0.3); background:rgba(168,85,247,0.08); }
+    .tool-card.done    { border-color:rgba(34,197,94,0.25);  background:rgba(34,197,94,0.06); }
+    .tool-card.fail    { border-color:rgba(239,68,68,0.25);  background:rgba(239,68,68,0.06); }
+
+    .tool-dot { font-size:14px; flex-shrink:0; margin-top:1px; }
+    .tool-label { color:var(--text-dim); font-weight:500; flex:1; }
+    .tool-input {
+      color:var(--text-muted); font-size:11px; margin-top:2px;
+      word-break:break-all; opacity:0.7;
+    }
+
+    /* ============================================================
+       SECTION DIVIDER / OPTIONAL TAG
+    ============================================================ */
+    .section-label {
+      display:flex; align-items:center; gap:12px;
+      margin:24px 0 16px;
+    }
+
+    .section-label span {
+      font-size:11px; font-weight:700; letter-spacing:2px;
+      text-transform:uppercase; color:var(--text-muted); white-space:nowrap;
+    }
+
+    .section-label::before, .section-label::after {
+      content:''; flex:1; height:1px; background:var(--border);
+    }
+
+    .optional-tag {
+      display:inline-flex; align-items:center;
+      font-size:11px; color:var(--text-muted);
+      background:var(--bg-glass); border:1px solid var(--border);
+      border-radius:10px; padding:2px 10px; margin-left:8px;
+    }
+
+    /* ============================================================
+       COLLAPSIBLE ADVANCED
+    ============================================================ */
+    .advanced-toggle {
+      display:flex; align-items:center; gap:8px;
+      cursor:pointer; padding:10px 0; color:var(--text-muted);
+      font-size:13px; border:none; background:none;
+      font-family:inherit; width:100%;
+    }
+
+    .advanced-toggle:hover { color:var(--text-dim); }
+
+    .advanced-arrow { transition:transform 0.2s; font-size:10px; }
+    .advanced-toggle.open .advanced-arrow { transform:rotate(180deg); }
+
+    .advanced-content { display:none; padding-top:12px; }
+    .advanced-content.open { display:block; }
+
+    /* ============================================================
+       TOASTS
+    ============================================================ */
+    .toast-box {
+      position:fixed; bottom:24px; right:24px; z-index:9999;
+    }
+
+    .toast {
+      padding:12px 20px; border-radius:var(--radius-sm);
+      font-size:13px; margin-top:8px;
+      display:flex; align-items:center; gap:8px;
+      box-shadow:var(--shadow-card);
+      animation:slideIn 0.3s ease;
+    }
+
+    .toast-success { background:#064e3b; color:#6ee7b7; border:1px solid rgba(16,185,129,0.2); }
+    .toast-error   { background:#7f1d1d; color:#fca5a5; border:1px solid rgba(239,68,68,0.2); }
+
+    @keyframes slideIn {
+      from { opacity:0; transform:translateX(24px); }
+      to   { opacity:1; transform:translateX(0); }
+    }
+
+    /* ============================================================
+       AGENT STATUS BOX
+    ============================================================ */
+    .agent-status-box {
+      margin-top:24px; padding:20px 24px;
+      border-radius:var(--radius); border:1px solid var(--border);
+      background:var(--bg-glass-card); font-size:14px;
+      display:none;
+    }
+
+    .agent-status-box.show { display:block; }
+
+    /* ============================================================
+       RESPONSIVE
+    ============================================================ */
+    @media (max-width: 900px) {
+      .app-layout { grid-template-columns:1fr; }
+      .guide-col { display:none; }
+      .main-col  { padding:24px 20px; }
+      .form-row  { grid-template-columns:1fr; }
+    }
+
+    @media (max-width: 600px) {
+      .selectable-grid { grid-template-columns:1fr; }
+      .review-grid     { grid-template-columns:1fr; }
+    }
+
+    /* ── Agent type badge (welcome screen) ── */
+    .agent-type-badge {
+      display:inline-flex; align-items:center; gap:6px;
+      background:rgba(124,58,237,0.15); border:1px solid rgba(124,58,237,0.35);
+      color:#a78bfa; border-radius:20px; padding:5px 14px;
+      font-size:12px; font-weight:700; letter-spacing:0.5px;
+      margin-bottom:16px;
+    }
+
+    /* ── Agent identity bar (wizard top) ── */
+    .agent-identity-bar {
+      display:flex; align-items:center; justify-content:space-between;
+      padding:10px 16px; margin-bottom:20px;
+      background:rgba(255,255,255,0.03); border:1px solid var(--border);
+      border-radius:12px;
+    }
+    .agent-identity-left { display:flex; align-items:center; gap:0; }
+    .agent-identity-name {
+      font-weight:700; font-size:14px; color:var(--text);
+      margin-right:10px;
+    }
+    .agent-identity-pill {
+      font-size:10px; font-weight:700; letter-spacing:0.8px; text-transform:uppercase;
+      color:#7c3aed; background:rgba(124,58,237,0.12);
+      border:1px solid rgba(124,58,237,0.25); border-radius:10px;
+      padding:2px 8px;
+    }
+    .agent-memory-btn {
+      background:rgba(124,58,237,0.1); border:1px solid rgba(124,58,237,0.25);
+      color:#a78bfa; border-radius:8px; padding:6px 14px;
+      font-size:12px; font-weight:600; cursor:pointer; transition:all 0.2s;
+    }
+    .agent-memory-btn:hover { background:rgba(124,58,237,0.2); }
+
+    /* ── Memory panel entries ── */
+    .memory-entry {
+      display:flex; align-items:flex-start; gap:12px;
+      padding:14px 16px; margin-bottom:10px;
+      background:rgba(255,255,255,0.03); border:1px solid var(--border);
+      border-radius:10px; transition:border-color 0.2s;
+    }
+    .memory-entry:hover { border-color:rgba(124,58,237,0.3); }
+    .memory-type-dot {
+      width:8px; height:8px; border-radius:50%; flex-shrink:0; margin-top:6px;
+    }
+    .memory-entry-body { flex:1; min-width:0; }
+    .memory-entry-title { font-weight:600; font-size:13px; color:var(--text); margin-bottom:4px; }
+    .memory-entry-content { font-size:12px; color:var(--text-dim); line-height:1.5; }
+    .memory-entry-meta { font-size:10px; color:rgba(148,163,184,0.5); margin-top:6px; }
+    .memory-entry-tags { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
+    .memory-tag {
+      font-size:10px; color:#7c3aed; background:rgba(124,58,237,0.1);
+      border-radius:4px; padding:1px 6px;
+    }
+    .memory-delete-btn {
+      background:none; border:none; color:rgba(148,163,184,0.4);
+      cursor:pointer; font-size:16px; padding:2px 4px; border-radius:4px;
+      transition:color 0.2s; flex-shrink:0;
+    }
+    .memory-delete-btn:hover { color:#f87171; }
+    .memory-group-label {
+      font-size:10px; font-weight:700; letter-spacing:1px; text-transform:uppercase;
+      color:var(--text-dim); margin:20px 0 10px;
+    }
+    .memory-empty {
+      text-align:center; padding:40px 20px;
+      color:var(--text-dim); font-size:14px;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ============================================================
+     WELCOME SCREEN
+============================================================ -->
+<div id="welcomeScreen">
+  <div class="welcome-inner">
+    <img class="welcome-logo" src="/images/vouza-logo.png" alt="Vouza">
+    <div class="welcome-brand">Vouza AI</div>
+    <div class="agent-type-badge">🤖 Admin Agent</div>
+    <h1 class="welcome-headline">Your AI Employee<br>Starts Here</h1>
+    <p class="welcome-sub">
+      Set up your personal AI assistant in under 5 minutes.<br>
+      No technical skills required.
+    </p>
+    <div class="welcome-features">
+      <div class="welcome-feat"><div class="welcome-feat-dot"></div>Manages your emails</div>
+      <div class="welcome-feat"><div class="welcome-feat-dot"></div>Books your meetings</div>
+      <div class="welcome-feat"><div class="welcome-feat-dot"></div>Replies on WhatsApp</div>
+      <div class="welcome-feat"><div class="welcome-feat-dot"></div>Never sleeps</div>
+    </div>
+    <button class="btn-welcome" onclick="startSetup()">
+      Get Started &nbsp;→
+    </button>
+  </div>
+</div>
+
+<!-- ============================================================
+     MAIN APP
+============================================================ -->
+<div id="mainApp">
+  <div class="app-layout">
+
+    <!-- Main Content -->
+    <div class="main-col">
+
+      <!-- Agent Identity Bar -->
+      <div class="agent-identity-bar">
+        <div class="agent-identity-left">
+          <img src="/images/vouza-logo.png" alt="Vouza" style="height:22px;width:auto;vertical-align:middle;margin-right:8px;">
+          <span class="agent-identity-name">Admin Agent</span>
+          <span class="agent-identity-pill">Setup Wizard</span>
+        </div>
+        <button class="agent-memory-btn" onclick="toggleMemoryPanel()" title="View what your agent has learned">
+          🧠 Memories <span id="memoryCount" style="font-size:11px;opacity:0.7"></span>
+        </button>
+      </div>
+
+      <!-- Progress Rail -->
+      <div class="progress-rail" id="progressRail"></div>
+
+      <!-- ════ STEP 1: Create Your AI ════ -->
+      <div class="step-view" id="step-1">
+        <div class="step-eyebrow">Step 1 of 4</div>
+        <h2 class="step-title">Create Your AI</h2>
+        <p class="step-subtitle">Tell us a little about yourself so we can set up your AI assistant.</p>
+
+        <div class="glass-card">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Your AI's Name</label>
+              <input type="text" id="agentName" value="" placeholder="e.g. Alice, Max, OfficeBot">
+              <div class="hint">This is what your AI will be called</div>
+            </div>
+            <div class="form-group">
+              <label>Your Name</label>
+              <input type="text" id="userName" placeholder="e.g. Sarah">
+              <div class="hint">Your AI will address you by this name</div>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Your Email Address</label>
+              <input type="email" id="userEmail" placeholder="you@yourcompany.com">
+              <div class="hint">Your AI will send and receive emails from here</div>
+            </div>
+            <div class="form-group">
+              <label>Your Phone Number <span class="optional-tag">Optional</span></label>
+              <input type="tel" id="userPhone" placeholder="+65 9123 4567">
+              <div class="hint">For WhatsApp and SMS notifications</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI Brain Selection -->
+        <div class="section-label"><span>Choose Your AI Brain</span></div>
+
+        <div class="glass-card">
+          <div class="form-group" style="margin-bottom:0">
+            <div class="provider-tabs" id="providerTabs"></div>
+            <div class="model-list" id="modelList"></div>
+          </div>
+        </div>
+
+        <!-- Advanced: Timezone + Language -->
+        <button class="advanced-toggle" id="advToggle" onclick="toggleAdvanced()">
+          <span class="advanced-arrow">▾</span>
+          Advanced settings (timezone, language)
+        </button>
+        <div class="advanced-content" id="advContent">
+          <div class="glass-card" style="margin-top:0">
+            <div class="form-row">
+              <div class="form-group" style="margin-bottom:0">
+                <label>Timezone</label>
+                <select id="agentTimezone">
+                  <option value="Asia/Singapore">Asia/Singapore (UTC+8)</option>
+                  <option value="Asia/Kuala_Lumpur">Asia/Kuala Lumpur (UTC+8)</option>
+                  <option value="Asia/Hong_Kong">Asia/Hong Kong (UTC+8)</option>
+                  <option value="Asia/Tokyo">Asia/Tokyo (UTC+9)</option>
+                  <option value="Asia/Shanghai">Asia/Shanghai (UTC+8)</option>
+                  <option value="Asia/Jakarta">Asia/Jakarta (UTC+7)</option>
+                  <option value="Asia/Bangkok">Asia/Bangkok (UTC+7)</option>
+                  <option value="America/New_York">America/New York (UTC-5)</option>
+                  <option value="America/Los_Angeles">America/Los Angeles (UTC-8)</option>
+                  <option value="Europe/London">Europe/London (UTC+0)</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin-bottom:0">
+                <label>Language</label>
+                <select id="agentLanguage">
+                  <option value="en">English</option>
+                  <option value="zh">Chinese (Mandarin)</option>
+                  <option value="ms">Malay</option>
+                  <option value="ta">Tamil</option>
+                  <option value="ja">Japanese</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="btn-nav-group">
+          <div></div>
+          <div class="btn-nav-right">
+            <button class="btn btn-primary" onclick="goNext()">Continue →</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ════ STEP 2: Connect Apps ════ -->
+      <div class="step-view" id="step-2">
+        <div class="step-eyebrow">Step 2 of 4 — Optional</div>
+        <h2 class="step-title">Connect Your Apps</h2>
+        <p class="step-subtitle">Choose where your AI works. You can connect more apps anytime after setup.</p>
+
+        <!-- AI API Key (required) -->
+        <div class="section-label"><span>AI Account Access (Required)</span></div>
+        <div id="aiKeySection"></div>
+
+        <!-- Messaging Channels -->
+        <div class="section-label"><span>Where Your AI Works</span></div>
+
+        <div class="remote-access-tip">
+          <span class="remote-tip-icon">📱</span>
+          <div>
+            <strong>Control your AI from your phone</strong> — Connect Telegram or WhatsApp and send tasks, get results, manage your work from anywhere.
+            Your PC runs the AI in the background. You just message it.
+          </div>
+        </div>
+
+        <div class="selectable-grid" id="channelGrid"></div>
+
+        <!-- Credential sections that appear when channels are selected -->
+        <div id="channelCredentials"></div>
+
+        <!-- Google unified -->
+        <div id="googleUnifiedSection" style="display:none">
+          <div class="section-label"><span>Google Account Access</span></div>
+          <div class="glass-card">
+            <div class="glass-card-header">
+              <div class="glass-card-icon" id="googleIcon"></div>
+              <div class="glass-card-title">Google (Gmail, Calendar, Sheets, Drive)</div>
+              <span class="glass-card-badge badge-pending" id="status-google">Not Connected</span>
+            </div>
+            <div class="form-group">
+              <label>Service Account Key (JSON)</label>
+              <textarea id="googleSaKey" rows="3" placeholder='{"type":"service_account","project_id":"..."}' style="font-family:monospace;font-size:12px;"></textarea>
+              <div class="hint">One key covers all Google apps. Get from <a href="https://console.cloud.google.com/iam-admin/serviceaccounts" target="_blank">Google Cloud Console →</a></div>
+            </div>
+            <button class="btn btn-test" onclick="testConn('google-unified',{key:document.getElementById('googleSaKey').value})">🔌 Test Connection</button>
+          </div>
+        </div>
+
+        <!-- Productivity Tools -->
+        <div class="section-label"><span>What Your AI Can Access</span></div>
+        <div class="selectable-grid" id="toolGrid"></div>
+
+        <div class="btn-nav-group">
+          <button class="btn btn-secondary" onclick="goPrev()">← Back</button>
+          <div class="btn-nav-right">
+            <button class="skip-link" onclick="goNext()">Skip for now</button>
+            <button class="btn btn-primary" onclick="goNext()">Continue →</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ════ STEP 3: Train Your AI ════ -->
+      <div class="step-view" id="step-3">
+        <div class="step-eyebrow">Step 3 of 4 — Optional</div>
+        <h2 class="step-title">What Your AI Can Do</h2>
+        <p class="step-subtitle">Switch on the tasks you want your AI to handle. It learns and improves over time.</p>
+
+        <div class="skill-list" id="skillList"></div>
+
+        <!-- Self-improve -->
+        <div class="glass-card" style="margin-top:20px">
+          <div class="glass-card-header" style="margin-bottom:12px">
+            <div style="font-size:24px">🧠</div>
+            <div>
+              <div class="glass-card-title">Self-Learning Engine</div>
+              <div style="font-size:12px;color:var(--text-dim)">Your AI automatically gets better over time</div>
+            </div>
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label>Check for improvements every</label>
+            <select id="selfImproveInterval" style="width:auto">
+              <option value="12">12 hours</option>
+              <option value="24" selected>24 hours (Recommended)</option>
+              <option value="48">48 hours</option>
+              <option value="168">Weekly</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="btn-nav-group">
+          <button class="btn btn-secondary" onclick="goPrev()">← Back</button>
+          <div class="btn-nav-right">
+            <button class="skip-link" onclick="goNext()">Skip for now</button>
+            <button class="btn btn-primary" onclick="goNext()">Continue →</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ════ STEP 4: Go Live ════ -->
+      <div class="step-view" id="step-4">
+        <div class="step-eyebrow">Step 4 of 4</div>
+        <h2 class="step-title">Review &amp; Go Live</h2>
+        <p class="step-subtitle">Everything looks good. Review your setup and launch your AI.</p>
+
+        <div class="review-grid" id="reviewGrid"></div>
+
+        <div class="go-live-center" id="goLiveCenter" style="display:none">
+          <div class="go-live-icon">🚀</div>
+          <div class="go-live-title">Your AI is Ready!</div>
+          <div class="go-live-sub" id="goLiveSub">Configuration saved. Your AI assistant is standing by.</div>
+
+          <div class="terminal-block">
+            <div><span class="t-cmd">$</span> npm run dev</div>
+            <div>&nbsp;</div>
+            <div class="t-out">✅ <span id="termToolCount">24</span> tools registered</div>
+            <div class="t-out">✅ <span id="termSkillCount">4</span> skills loaded</div>
+            <div class="t-out">✅ Self-learning engine initialized</div>
+            <div>&nbsp;</div>
+            <div class="t-hi">Ready. Type any task or ask me anything.</div>
+            <div><span class="t-cmd">You &gt;</span> <span class="t-hi t-blink">_</span></div>
+          </div>
+
+          <div class="go-live-actions">
+            <button class="btn btn-go-live" onclick="startAgentNow()">⚡ Go Live Now</button>
+            <button class="btn btn-success" onclick="saveFinalConfig()" style="padding:14px 32px;font-size:15px;border-radius:50px;">✅ Save &amp; Set Up Later</button>
+          </div>
+
+          <div class="agent-status-box" id="agentStatusBox"></div>
+        </div>
+
+        <div id="reviewActions" class="btn-nav-group">
+          <button class="btn btn-secondary" onclick="goPrev()">← Back</button>
+          <button class="btn btn-go-live" onclick="revealGoLive()">Go Live ⚡</button>
+        </div>
+      </div>
+
+      <!-- ════ MEMORY PANEL (hidden by default) ════ -->
+      <div class="step-view" id="memory-panel" style="display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
+          <div>
+            <div class="step-eyebrow">Admin Agent Brain</div>
+            <h2 class="step-title" style="margin:0">🧠 Memories</h2>
+            <p class="step-subtitle" style="margin:4px 0 0">What your agent has learned about you. Edit or delete any entry.</p>
+          </div>
+          <button class="btn" onclick="toggleMemoryPanel()" style="min-width:80px">← Back</button>
+        </div>
+        <div id="memoryPanelContent">
+          <div style="color:var(--text-dim);font-size:14px">Loading memories...</div>
+        </div>
+      </div>
+
+    </div><!-- /main-col -->
+
+    <!-- AI Guide Panel -->
+    <div class="guide-col">
+      <div class="guide-header">
+        <div class="guide-avatar"><img src="/images/vee-bot.png" alt="Vee"></div>
+        <div>
+          <div class="guide-name">Vouza Guide</div>
+          <div class="guide-status">Online &amp; ready to help</div>
+        </div>
+      </div>
+
+      <div class="guide-messages" id="guideMessages">
+        <div class="guide-typing" id="guideTyping">
+          <div class="typing-dot"></div>
+          <div class="typing-dot"></div>
+          <div class="typing-dot"></div>
+        </div>
+      </div>
+
+      <div class="guide-input-area">
+        <input type="file" id="fileUpload" style="display:none" accept="image/*,.pdf,.docx,.xlsx,.csv" onchange="handleFileSelect(event)">
+        <div id="imagePreview"></div>
+        <div class="guide-input-row">
+          <button class="btn-icon-sm" onclick="openAttachment()" title="Attach file or image">📎</button>
+          <input type="text" id="guideInput" placeholder="Ask me anything..." onkeydown="if(event.key==='Enter')sendGuideMsg()">
+          <button class="btn-icon-sm" onclick="clearConversation()" title="Clear conversation">🗑️</button>
+          <button class="btn-send" onclick="sendGuideMsg()">↑</button>
+        </div>
+        <div class="guide-tips" id="guideTips"></div>
+      </div>
+    </div>
+
+  </div><!-- /app-layout -->
+</div><!-- /mainApp -->
+
+<!-- Toasts -->
+<div class="toast-box" id="toastBox"></div>
+
+<script>
+// ============================================================
+// SVG Icons
+// ============================================================
+const ICONS = {
+  gmail:    `<svg viewBox="0 0 24 24" fill="none"><rect x="2" y="4" width="20" height="16" rx="2" stroke="#4285F4" stroke-width="1.5"/><path d="M2 6l10 7 10-7" stroke="#EA4335" stroke-width="1.5"/><path d="M2 20l7-5M22 20l-7-5" stroke="#34A853" stroke-width="1.2"/></svg>`,
+  whatsapp: `<svg viewBox="0 0 24 24"><path d="M12 2C6.477 2 2 6.477 2 12c0 1.89.525 3.66 1.438 5.168L2 22l4.832-1.438A9.955 9.955 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2z" fill="#25D366"/><path d="M8.5 7.5c-.3 0-.7.1-.9.5-.3.4-1 1.1-1 2.7s1.1 3.1 1.2 3.3c.2.2 2.1 3.2 5.1 4.5.7.3 1.3.5 1.7.6.7.2 1.4.2 1.9.1.6-.1 1.8-.7 2-1.4.3-.7.3-1.3.2-1.4-.1-.1-.4-.2-.8-.4s-1.8-.9-2.1-1c-.3-.1-.5-.2-.7.2-.2.3-.8 1-1 1.2-.2.2-.3.2-.7 0s-1.3-.5-2.4-1.5c-.9-.8-1.5-1.8-1.7-2.1-.2-.3 0-.5.1-.6.1-.1.3-.3.4-.5.1-.2.2-.3.3-.5.1-.2 0-.4 0-.5-.1-.2-.7-1.7-1-2.4-.3-.5-.5-.5-.7-.5h-.6z" fill="white"/></svg>`,
+  telegram: `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#0088cc"/><path d="M6.5 11.5l2.5-1 8.5-4.5-1.5 5-3 5.5-2.5-2.5z" fill="white" opacity="0.9"/><path d="M9 10.5l5.5-3.5-3 5.5z" fill="#cce5ff" opacity="0.5"/></svg>`,
+  slack:    `<svg viewBox="0 0 24 24"><path d="M6 15a2 2 0 01-2-2 2 2 0 012-2h2v2a2 2 0 01-2 2zm3-2a2 2 0 012-2 2 2 0 012 2v5a2 2 0 01-2 2 2 2 0 01-2-2v-5z" fill="#E01E5A"/><path d="M11 6a2 2 0 01-2-2 2 2 0 012-2 2 2 0 012 2v2h-2zm0 3a2 2 0 012 2 2 2 0 01-2 2H6a2 2 0 01-2-2 2 2 0 012-2h5z" fill="#36C5F0"/><path d="M18 11a2 2 0 012 2 2 2 0 01-2 2h-2v-2a2 2 0 012-2zm-3 2a2 2 0 01-2 2 2 2 0 01-2-2V8a2 2 0 012-2 2 2 0 012 2v5z" fill="#2EB67D"/><path d="M13 18a2 2 0 012 2 2 2 0 01-2 2 2 2 0 01-2-2v-2h2zm0-3a2 2 0 01-2-2 2 2 0 012-2h5a2 2 0 012 2 2 2 0 01-2 2h-5z" fill="#ECB22E"/></svg>`,
+  calendar: `<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" stroke="#4285F4" stroke-width="1.5" fill="none"/><path d="M3 9h18" stroke="#4285F4" stroke-width="1.5"/><path d="M8 2v4M16 2v4" stroke="#4285F4" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="14" r="1.5" fill="#EA4335"/><circle cx="12" cy="14" r="1.5" fill="#34A853"/><circle cx="16" cy="14" r="1.5" fill="#FBBC05"/></svg>`,
+  sheets:   `<svg viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2" fill="#34A853"/><path d="M8 8h8M8 12h8M8 16h5" stroke="white" stroke-width="1.2" stroke-linecap="round"/><path d="M12 6v14" stroke="white" stroke-width="0.8" opacity="0.5"/></svg>`,
+  drive:    `<svg viewBox="0 0 24 24"><path d="M8 4l4 7H2l4-7z" fill="#4285F4"/><path d="M16 4l-4 7h10l-4-7z" fill="#FBBC05"/><path d="M6 20l4-9h8l-4 9z" fill="#34A853"/><path d="M10 11l4 9H6z" fill="#EA4335" opacity="0.7"/></svg>`,
+  crm:      `<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" stroke="#8b5cf6" stroke-width="1.5" fill="none"/><path d="M4 20c0-4 4-7 8-7s8 3 8 7" stroke="#8b5cf6" stroke-width="1.5" fill="none"/></svg>`,
+  google:   `<svg viewBox="0 0 24 24"><path d="M12 11v2.5h4.2c-.3 1.5-1.7 3-4.2 3-2.5 0-4.5-2-4.5-4.5S9.5 7.5 12 7.5c1.2 0 2.3.5 3.1 1.3l1.8-1.8C15.6 5.8 13.9 5 12 5c-3.9 0-7 3.1-7 7s3.1 7 7 7c4 0 6.7-2.8 6.7-6.8 0-.4 0-.8-.1-1.2H12z" fill="#4285F4"/></svg>`,
+  anthropic:`<svg viewBox="0 0 24 24"><path d="M12 3l8 18H4L12 3z" fill="#D97757" opacity="0.85"/><path d="M12 7l5 12H7L12 7z" fill="#D97757"/></svg>`,
+  openai:   `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke="#10a37f" stroke-width="1.5" fill="none"/><path d="M8 12l3 3 5-6" stroke="#10a37f" stroke-width="2" stroke-linecap="round" fill="none"/></svg>`,
+  googleai: `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke="#4285F4" stroke-width="1.5" fill="none"/><path d="M9 9l3 3-3 3M12 12h3" stroke="#4285F4" stroke-width="1.5" stroke-linecap="round" fill="none"/></svg>`,
+  xai:      `<svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="4" fill="#111"/><path d="M5 5l14 14M5 19L19 5" stroke="white" stroke-width="2.5" stroke-linecap="round"/></svg>`,
+  deepseek: `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke="#4D6BFE" stroke-width="1.5" fill="none"/><path d="M8 12c0-2.2 1.8-4 4-4s4 1.8 4 4" stroke="#4D6BFE" stroke-width="1.5" fill="none"/><circle cx="12" cy="12" r="1.5" fill="#4D6BFE"/></svg>`,
+  alibaba:  `<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4" fill="none" stroke="#6236FF" stroke-width="1.5"/><text x="12" y="16" text-anchor="middle" font-size="10" font-weight="bold" fill="#6236FF">Q</text></svg>`,
+  moonshot: `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke="#555" stroke-width="1.5" fill="none"/><path d="M9 8a6 6 0 000 8 4 4 0 010-8z" fill="#888"/></svg>`,
+  openrouter:`<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="#7c3aed" stroke-width="1.5"/><path d="M7 12h10M14 9l3 3-3 3" stroke="#a855f7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="7" cy="12" r="1.5" fill="#7c3aed"/></svg>`,
+};
+
+const PROVIDER_COLORS = {
+  anthropic:'#D97757', openai:'#10a37f', google:'#4285F4',
+  xai:'#888', deepseek:'#4D6BFE', alibaba:'#6236FF', moonshot:'#888',
+  openrouter:'#7c3aed',
+};
+
+// ============================================================
+// Data Definitions
+// ============================================================
+const CHANNELS = [
+  { id:'email',    name:'Email',    desc:'Read, send, and triage emails automatically.',           icon:'gmail',    badge:'popular',
+    providers:[{v:'gmail',l:'Gmail'},{v:'outlook',l:'Outlook / Microsoft 365'},{v:'smtp',l:'Custom SMTP'}] },
+  { id:'whatsapp', name:'WhatsApp', desc:'Send tasks, get results — straight from your WhatsApp. Your PC runs the AI, you chat from anywhere.',
+    icon:'whatsapp', badge:'popular', mobile:true,
+    howTo:[
+      { text:'Select <strong>WhatsApp Web (Free)</strong> as provider below' },
+      { text:'Click <strong>Connect</strong> — a QR code will appear on screen' },
+      { text:'Open WhatsApp on your phone → <strong>Linked Devices → Scan QR</strong>' },
+      { text:'Message this number anytime to give tasks to your AI' },
+    ],
+    providers:[{v:'web',l:'WhatsApp Web (Free - scan QR)'},{v:'twilio',l:'Twilio'},{v:'meta',l:'Meta Cloud API'},{v:'waha',l:'WAHA (Self-hosted)'}] },
+  { id:'telegram', name:'Telegram', desc:'Create a private Telegram bot — message it from your phone to control your AI from anywhere.',
+    icon:'telegram', badge:'free', mobile:true,
+    howTo:[
+      { text:'Open Telegram → search <a href="https://t.me/BotFather" target="_blank"><strong>@BotFather</strong></a>' },
+      { text:'Send <strong>/newbot</strong> → choose a name and a username' },
+      { text:'Copy the <strong>Bot Token</strong> and paste it in the field below' },
+      { text:'Message your bot from any device to control your AI' },
+    ],
+  },
+  { id:'slack',    name:'Slack',    desc:'Post updates and respond in Slack channels.',              icon:'slack' },
+];
+
+const TOOLS = [
+  { id:'calendar',    name:'Calendar',     desc:'Book meetings and manage your schedule.',   icon:'calendar', badge:'popular',
+    providers:[{v:'google',l:'Google Calendar'},{v:'outlook',l:'Outlook Calendar'}] },
+  { id:'spreadsheet', name:'Spreadsheets', desc:'Track data, invoices, and records.',       icon:'sheets',
+    providers:[{v:'google',l:'Google Sheets'},{v:'excel',l:'Excel Online'},{v:'airtable',l:'Airtable'}] },
+  { id:'fileStorage', name:'File Storage', desc:'Organise and manage your documents.',      icon:'drive',
+    providers:[{v:'local',l:'Local Files (Free)'},{v:'gdrive',l:'Google Drive'},{v:'onedrive',l:'OneDrive'}] },
+  { id:'crm',         name:'CRM',          desc:'Manage contacts and customer records.',    icon:'crm',
+    providers:[{v:'hubspot',l:'HubSpot'},{v:'notion',l:'Notion'}] },
+];
+
+const SKILLS = [
+  { id:'triage-email',     name:'Email Triage',        desc:'Sorts and prioritises your inbox automatically.',                icon:'📧', on:true,  schedules:[{v:'',l:'Manual only'},{v:'0 */2 * * 1-5',l:'Every 2 hours (weekdays)',sel:true},{v:'0 */1 * * 1-5',l:'Every hour'},{v:'0 9,13,17 * * 1-5',l:'3× daily'}] },
+  { id:'daily-briefing',   name:'Morning Briefing',    desc:'A daily summary of your calendar, emails, and tasks.',          icon:'☀️', on:true,  schedules:[{v:'',l:'Manual only'},{v:'30 8 * * 1-5',l:'8:30 AM weekdays',sel:true},{v:'0 9 * * 1-5',l:'9:00 AM weekdays'},{v:'0 8 * * *',l:'8:00 AM daily'}] },
+  { id:'schedule-meeting', name:'Meeting Scheduler',   desc:'Finds free slots and books meetings for you.',                   icon:'📅', on:true,  schedules:[{v:'',l:'Manual only',sel:true}] },
+  { id:'draft-reply',      name:'Email Reply Writer',  desc:'Drafts professional replies in your tone and style.',            icon:'✏️', on:true,  schedules:[{v:'',l:'Manual only',sel:true}] },
+  { id:'process-invoice',  name:'Invoice Processor',   desc:'Extracts invoice data and logs it in your spreadsheets.',        icon:'📋', on:false, schedules:[{v:'',l:'Manual only',sel:true},{v:'0 10 * * 1-5',l:'Daily 10 AM'},{v:'0 10 * * 1',l:'Weekly Monday'}] },
+  { id:'data-entry',       name:'Data Entry Assistant',desc:'Pulls data from sources and enters it into your spreadsheets.', icon:'📝', on:false, schedules:[{v:'',l:'Manual only',sel:true}] },
+];
+
+const CRED_CONFIGS = {
+  whatsapp: {
+    web:    { title:'WhatsApp Web (QR Code)', icon:'whatsapp', testType:'whatsapp-web', fields:[{id:'waWebServer',label:'Server URL',type:'text',placeholder:'http://localhost:3001',hint:'Start the QR server, then scan with your phone'}] },
+    twilio: { title:'WhatsApp via Twilio', icon:'whatsapp', testType:'whatsapp', fields:[{id:'twilioSid',label:'Account SID',type:'text',placeholder:'ACxxx'},{id:'twilioToken',label:'Auth Token',type:'password',placeholder:'token'},{id:'twilioNum',label:'WhatsApp Number',type:'text',placeholder:'+1415...'}] },
+    meta:   { title:'WhatsApp Cloud API', icon:'whatsapp', testType:'whatsapp-meta', fields:[{id:'metaToken',label:'Access Token',type:'password',placeholder:'EAAxx'},{id:'metaPhoneId',label:'Phone Number ID',type:'text',placeholder:'123456'}] },
+    waha:   { title:'WAHA (Self-hosted)', icon:'whatsapp', testType:'waha', fields:[{id:'wahaUrl',label:'WAHA Server URL',type:'text',placeholder:'http://localhost:3000'},{id:'wahaKey',label:'API Key',type:'password',placeholder:'optional'}] },
+  },
+  telegram: { default:{ title:'Telegram Bot', icon:'telegram', testType:'telegram', fields:[{id:'telegramToken',label:'Bot Token',type:'password',placeholder:'123456789:ABCdef...',hint:'Get from <a href="https://t.me/BotFather" target="_blank">@BotFather on Telegram →</a>'}] } },
+  slack:    { default:{ title:'Slack Bot', icon:'slack', testType:'slack', fields:[{id:'slackToken',label:'Bot Token',type:'password',placeholder:'xoxb-...',hint:'Create at <a href="https://api.slack.com/apps" target="_blank">api.slack.com →</a>'}] } },
+  email: {
+    gmail:   { title:'Gmail', icon:'gmail', testType:'gmail', fields:[{id:'gmailUser',label:'Gmail Address',type:'email',placeholder:'you@gmail.com'},{id:'gmailPass',label:'App Password',type:'password',placeholder:'xxxx-xxxx-xxxx-xxxx',hint:'Generate at <a href="https://myaccount.google.com/apppasswords" target="_blank">Google App Passwords →</a>'}] },
+    outlook: { title:'Outlook / Microsoft 365', icon:'gmail', testType:'outlook', fields:[{id:'outlookClientId',label:'Azure App Client ID',type:'text',placeholder:'xxxxxxxx-xxxx'},{id:'outlookSecret',label:'Client Secret',type:'password',placeholder:'secret'},{id:'outlookTenant',label:'Tenant ID',type:'text',placeholder:'xxxxxxxx-xxxx'}] },
+  },
+};
+
+// ============================================================
+// App State
+// ============================================================
+const state = {
+  step: 1, totalSteps: 4,
+  selectedChannels: new Set(),
+  selectedTools: new Set(),
+  enabledSkills: new Set(['triage-email','daily-briefing','schedule-meeting','draft-reply']),
+  connStatus: {},
+  selectedModel: 'claude-sonnet-4-6',
+  selectedProvider: 'anthropic',
+  modelCatalog: [],
+  // OpenRouter tiered model selections
+  orTiers: {
+    fast:     'meta-llama/llama-3.1-8b-instruct',
+    balanced: 'google/gemini-2.5-flash-lite',
+    flagship: 'google/gemini-3-flash-preview',
+  },
+};
+
+const STEPS = [
+  { num:1, label:'Create Your AI' },
+  { num:2, label:'Connect Apps'   },
+  { num:3, label:'Train Your AI'  },
+  { num:4, label:'Go Live'        },
+];
+
+// ============================================================
+// Welcome → Main App
+// ============================================================
+function startSetup() {
+  document.getElementById('welcomeScreen').style.display = 'none';
+  document.getElementById('mainApp').style.display = 'block';
+  init();
+}
+
+// ============================================================
+// Init
+// ============================================================
+async function init() {
+  renderProgressRail();
+  renderChannelGrid();
+  renderToolGrid();
+  renderSkillList();
+  document.getElementById('googleIcon').innerHTML = ICONS.google;
+
+  try {
+    const res = await fetch('/api/models');
+    state.modelCatalog = await res.json();
+  } catch { state.modelCatalog = []; }
+
+  renderModelSelector();
+  showStep(1);
+  updateMemoryCount();
+}
+
+// ============================================================
+// Advanced Toggle
+// ============================================================
+function toggleAdvanced() {
+  const btn = document.getElementById('advToggle');
+  const box = document.getElementById('advContent');
+  btn.classList.toggle('open');
+  box.classList.toggle('open');
+}
+
+// ============================================================
+// Progress Rail
+// ============================================================
+function renderProgressRail() {
+  const rail = document.getElementById('progressRail');
+  const parts = [];
+  STEPS.forEach((s, i) => {
+    const cls = s.num === state.step ? 'active' : (s.num < state.step ? 'done' : '');
+    const icon = s.num < state.step ? '✓' : s.num;
+    parts.push(`<div class="prail-step ${cls}" onclick="tryGoStep(${s.num})">
+      <div class="prail-dot">${icon}</div>
+      <span class="prail-label">${s.label}</span>
+    </div>`);
+    if (i < STEPS.length - 1) {
+      const done = s.num < state.step;
+      parts.push(`<div style="flex:1;height:1px;background:${done?'var(--success)':'var(--border)'};max-width:40px;margin:0 2px;opacity:${done?'0.5':'1'}"></div>`);
+    }
+  });
+  rail.innerHTML = parts.join('');
+}
+
+function tryGoStep(n) {
+  if (n <= state.step + 1) showStep(n);
+}
+
+// ============================================================
+// Navigation
+// ============================================================
+function showStep(n) {
+  document.querySelectorAll('.step-view').forEach(el => el.classList.remove('active'));
+  const el = document.getElementById(`step-${n}`);
+  if (el) el.classList.add('active');
+  state.step = n;
+  renderProgressRail();
+  window.scrollTo(0, 0);
+
+  if (n === 2) { renderAIKeySection(); renderChannelCredentials(); checkGoogleUnified(); }
+  if (n === 4) { renderReview(); }
+
+  guideForStep(n);
+  updateTips();
+}
+
+function goNext() {
+  if (state.step < state.totalSteps) showStep(state.step + 1);
+}
+
+function goPrev() {
+  if (state.step > 1) showStep(state.step - 1);
+}
+
+// ============================================================
+// Model Selector
+// ============================================================
+function renderModelSelector() {
+  const tabs = document.getElementById('providerTabs');
+  const list = document.getElementById('modelList');
+
+  if (!state.modelCatalog.length) {
+    tabs.innerHTML = '';
+    list.innerHTML = `<div class="glass-card" style="margin-bottom:0">
+      <div class="form-group" style="margin-bottom:0">
+        <label>AI Provider API Key</label>
+        <input type="password" id="aiProviderKey" placeholder="sk-ant-api03-...">
+        <div class="hint">Using Anthropic Claude (default). Get your key at <a href="https://console.anthropic.com/keys" target="_blank">console.anthropic.com →</a></div>
+      </div>
+    </div>`;
+    return;
+  }
+
+  tabs.innerHTML = state.modelCatalog.map(g => {
+    const isActive = g.provider.id === state.selectedProvider;
+    return `<div class="ptab ${isActive ? 'active' : ''}" onclick="selectProvider('${g.provider.id}')">
+      <div class="ptab-dot" style="background:${PROVIDER_COLORS[g.provider.id]||'#888'}"></div>
+      ${g.provider.name}
+    </div>`;
+  }).join('');
+
+  const group = state.modelCatalog.find(g => g.provider.id === state.selectedProvider);
+  if (!group) return;
+
+  // ── OpenRouter: show smart routing tier picker ──
+  if (state.selectedProvider === 'openrouter') {
+    const tiers = [
+      { key:'fast',     label:'⚡ Fast',     desc:'Simple queries, status checks, quick answers', color:'#10b981' },
+      { key:'balanced', label:'⚖️ Balanced',  desc:'Email drafting, scheduling, file management',  color:'#f59e0b' },
+      { key:'flagship', label:'🚀 Flagship',  desc:'Analysis, reports, image processing, complex multi-step tasks', color:'#8b5cf6' },
+    ];
+    const orModels = group.models;
+    const byTier = (tier) => orModels.filter(m => m.tier === tier);
+
+    list.innerHTML = `
+      <div style="padding:12px;background:rgba(124,58,237,0.07);border:1px solid rgba(124,58,237,0.2);border-radius:12px;margin-bottom:16px">
+        <div style="font-size:12px;font-weight:700;color:#a78bfa;margin-bottom:4px">🧠 Smart Model Routing</div>
+        <div style="font-size:12px;color:var(--text-dim);line-height:1.5">
+          Your AI automatically picks the most cost-effective model based on task complexity.
+          Simple questions use cheap models; complex analysis uses powerful ones.
+        </div>
+      </div>
+      ${tiers.map(tier => `
+        <div style="margin-bottom:16px">
+          <div style="font-size:11px;font-weight:700;color:${tier.color};letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;display:flex;align-items:center;gap:8px">
+            ${tier.label}
+            <span style="font-size:10px;color:var(--text-muted);text-transform:none;letter-spacing:0;font-weight:400">${tier.desc}</span>
+          </div>
+          <select onchange="state.orTiers['${tier.key}']=this.value" style="width:100%;padding:8px 12px;background:var(--bg-glass-card);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12px">
+            ${byTier(tier.key).map(m => `
+              <option value="${m.id}" ${state.orTiers[tier.key]===m.id||(!state.orTiers[tier.key]&&m.recommended)?'selected':''}>
+                ${m.displayName} — $${m.pricing.input}/$${m.pricing.output}/1M${m.supportsVision?' 👁️':''}
+              </option>
+            `).join('')}
+          </select>
+        </div>
+      `).join('')}
+      <div style="font-size:11px;color:var(--text-muted);padding:8px 12px;background:var(--bg-glass);border-radius:8px">
+        💡 All models via <a href="https://openrouter.ai" target="_blank" style="color:var(--brand-light)">openrouter.ai</a> — one key, 200+ models, pay per use.
+      </div>`;
+
+    // Set defaults if not already set
+    if (!state.orTiers) state.orTiers = {};
+    tiers.forEach(t => {
+      if (!state.orTiers[t.key]) {
+        const def = byTier(t.key).find(m => m.recommended) || byTier(t.key)[0];
+        if (def) state.orTiers[t.key] = def.id;
+      }
+    });
+    return;
+  }
+
+  list.innerHTML = group.models.map(m => {
+    const sel = m.id === state.selectedModel;
+    return `<div class="model-opt ${sel ? 'selected' : ''}" onclick="selectModel('${m.id}','${m.provider}')">
+      <div class="model-radio"></div>
+      <div class="model-info">
+        <div class="model-name">
+          ${m.displayName}
+          ${m.recommended ? `<span class="badge-recommended">★ Recommended</span>` : ''}
+          <span class="model-tier tier-${m.tier}">${m.tier}</span>
+        </div>
+        <div class="model-desc">${m.description}</div>
+        <div class="model-meta">
+          <span>${(m.contextWindow/1000).toFixed(0)}K context</span>
+          <span>$${m.pricing.input}/$${m.pricing.output}/1M tok</span>
+          ${m.supportsVision ? '<span>Vision</span>' : ''}
+        </div>
+        ${m.recommended && m.recommendedReason ? `<div style="font-size:11px;color:#c4b5fd;margin-top:4px">${m.recommendedReason}</div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function selectProvider(id) {
+  state.selectedProvider = id;
+  renderModelSelector();
+  renderAIKeySection();
+}
+
+function selectModel(id, provider) {
+  state.selectedModel = id;
+  state.selectedProvider = provider;
+  renderModelSelector();
+  renderAIKeySection();
+}
+
+// ============================================================
+// Channel & Tool Grids
+// ============================================================
+function renderChannelGrid() {
+  const g = document.getElementById('channelGrid');
+  g.innerHTML = CHANNELS.map(ch => `
+    <div class="sel-card" onclick="toggleChannel(this,'${ch.id}')" data-id="${ch.id}">
+      <div class="sel-card-top">
+        <div class="sel-card-icon">${ICONS[ch.icon]||''}</div>
+        <div class="sel-check">✓</div>
+      </div>
+      ${ch.badge ? `<div class="sel-card-badge badge-${ch.badge}">${ch.badge==='popular'?'Popular':'Free'}</div>` : ''}
+      <div class="sel-card-name">${ch.name}</div>
+      ${ch.mobile ? `<div class="sel-card-mobile-tag">📱 Mobile access</div>` : ''}
+      <div class="sel-card-desc">${ch.desc}</div>
+      ${ch.howTo ? `<div class="sel-card-howto">
+        <div class="howto-label">How to connect</div>
+        <div class="howto-steps">
+          ${ch.howTo.map((s,i)=>`<div class="howto-step">
+            <div class="howto-num">${i+1}</div>
+            <div>${s.text}</div>
+          </div>`).join('')}
+        </div>
+      </div>` : ''}
+      ${ch.providers ? `<div class="sel-card-extra" onclick="event.stopPropagation()">
+        <label>Provider</label>
+        <select id="${ch.id}Provider" onchange="renderChannelCredentials();checkGoogleUnified()">
+          ${ch.providers.map(p=>`<option value="${p.v}">${p.l}</option>`).join('')}
+        </select>
+      </div>` : ''}
+    </div>`).join('');
+}
+
+function renderToolGrid() {
+  const g = document.getElementById('toolGrid');
+  g.innerHTML = TOOLS.map(t => `
+    <div class="sel-card" onclick="toggleTool(this,'${t.id}')" data-id="${t.id}">
+      <div class="sel-card-top">
+        <div class="sel-card-icon">${ICONS[t.icon]||''}</div>
+        <div class="sel-check">✓</div>
+      </div>
+      ${t.badge ? `<div class="sel-card-badge badge-${t.badge}">${t.badge==='popular'?'Popular':'Free'}</div>` : ''}
+      <div class="sel-card-name">${t.name}</div>
+      <div class="sel-card-desc">${t.desc}</div>
+      ${t.providers ? `<div class="sel-card-extra" onclick="event.stopPropagation()">
+        <label>Provider</label>
+        <select id="${t.id}Provider" onchange="checkGoogleUnified()">
+          ${t.providers.map(p=>`<option value="${p.v}">${p.l}</option>`).join('')}
+        </select>
+      </div>` : ''}
+    </div>`).join('');
+}
+
+function toggleChannel(card, id) {
+  card.classList.toggle('selected');
+  if (card.classList.contains('selected')) state.selectedChannels.add(id);
+  else state.selectedChannels.delete(id);
+  renderChannelCredentials();
+  checkGoogleUnified();
+}
+
+function toggleTool(card, id) {
+  card.classList.toggle('selected');
+  if (card.classList.contains('selected')) state.selectedTools.add(id);
+  else state.selectedTools.delete(id);
+  checkGoogleUnified();
+}
+
+// ============================================================
+// Skill List
+// ============================================================
+function renderSkillList() {
+  const list = document.getElementById('skillList');
+  list.innerHTML = SKILLS.map(sk => `
+    <div class="skill-card ${state.enabledSkills.has(sk.id)?'enabled':''}" onclick="toggleSkill(this,'${sk.id}')">
+      <div class="skill-icon">${sk.icon}</div>
+      <div class="skill-body">
+        <div class="skill-name">${sk.name}</div>
+        <div class="skill-desc">${sk.desc}</div>
+      </div>
+      <div class="skill-sched" onclick="event.stopPropagation()">
+        <select data-sched="${sk.id}">
+          ${sk.schedules.map(s=>`<option value="${s.v}" ${s.sel?'selected':''}>${s.l}</option>`).join('')}
+        </select>
+      </div>
+      <div class="skill-toggle"></div>
+    </div>`).join('');
+}
+
+function toggleSkill(card, id) {
+  card.classList.toggle('enabled');
+  if (card.classList.contains('enabled')) state.enabledSkills.add(id);
+  else state.enabledSkills.delete(id);
+}
+
+// ============================================================
+// AI Key Section (Step 2)
+// ============================================================
+function renderAIKeySection() {
+  const box = document.getElementById('aiKeySection');
+  const group = state.modelCatalog.find(g => g.provider.id === state.selectedProvider);
+  const p = group?.provider;
+  const isOR = state.selectedProvider === 'openrouter';
+  const iconKey = isOR ? 'openrouter' : (state.selectedProvider === 'google' ? 'googleai' : (state.selectedProvider || 'anthropic'));
+  const icon = ICONS[iconKey] || ICONS.anthropic;
+  const provName = p ? p.name : 'Anthropic';
+  const placeholder = p ? p.apiKeyPlaceholder : 'sk-ant-api03-...';
+  const hint = p ? p.apiKeyHint : 'https://console.anthropic.com/keys';
+  const statusKey = 'ai-provider';
+  const connected = state.connStatus[statusKey];
+
+  box.innerHTML = `
+    <div class="glass-card">
+      <div class="glass-card-header">
+        <div class="glass-card-icon">${icon}</div>
+        <div class="glass-card-title">${provName} API Key</div>
+        <span class="glass-card-badge ${connected?'badge-success':'badge-pending'}" id="status-${statusKey}">${connected?'✓ Connected':'Not Connected'}</span>
+      </div>
+      ${isOR ? `
+        <div style="font-size:12px;color:var(--text-dim);margin-bottom:12px;padding:8px 12px;background:rgba(124,58,237,0.06);border-radius:8px;line-height:1.5">
+          🧠 <strong style="color:#a78bfa">Smart Routing active</strong> — one key unlocks 200+ models.
+          Simple questions automatically use cheap models; complex tasks escalate to powerful ones.
+        </div>
+      ` : ''}
+      <div class="form-group" style="margin-bottom:0">
+        <label>${isOR ? 'OpenRouter' : provName} API Key</label>
+        <div class="input-group">
+          <input type="password" id="aiProviderKey" placeholder="${placeholder}">
+          <button class="btn btn-test" onclick="testAIProvider()">🔌 Test</button>
+        </div>
+        <div class="hint">Get your key at <a href="${hint}" target="_blank">${hint} →</a></div>
+      </div>
+    </div>`;
+}
+
+async function testAIProvider() {
+  const key = document.getElementById('aiProviderKey')?.value;
+  if (!key) { toast('Please enter an API key','error'); return; }
+  if (state.selectedProvider === 'openrouter') {
+    await testConn('openrouter', { apiKey: key });
+  } else {
+    await testConn('ai-provider',{ apiKey:key, provider:state.selectedProvider, model:state.selectedModel });
+  }
+}
+
+// ============================================================
+// Channel Credentials
+// ============================================================
+function renderChannelCredentials() {
+  const box = document.getElementById('channelCredentials');
+  let html = '';
+  for (const ch of state.selectedChannels) {
+    if (ch === 'email' && document.getElementById('emailProvider')?.value === 'gmail') continue;
+    const provEl = document.getElementById(`${ch}Provider`);
+    const prov = provEl ? provEl.value : 'default';
+    const conf = CRED_CONFIGS[ch]?.[prov];
+    if (conf) html += buildCredCard(ch, conf);
+  }
+  box.innerHTML = html;
+}
+
+function buildCredCard(id, conf) {
+  const sc = state.connStatus[id];
+  return `
+    <div class="glass-card">
+      <div class="glass-card-header">
+        <div class="glass-card-icon">${ICONS[conf.icon]||''}</div>
+        <div class="glass-card-title">${conf.title}</div>
+        <span class="glass-card-badge ${sc?'badge-connected':'badge-pending'}" id="status-${id}">${sc?'Connected':'Not Connected'}</span>
+      </div>
+      ${conf.fields.map(f=>`
+        <div class="form-group">
+          <label>${f.label}</label>
+          <div class="input-group">
+            <input type="${f.type}" id="${f.id}" placeholder="${f.placeholder}">
+            ${f.type==='password'?`<button class="btn btn-icon btn-ghost" onclick="toggleVis('${f.id}')" title="Show/hide">👁</button>`:''}
+          </div>
+          ${f.hint?`<div class="hint">${f.hint}</div>`:''}
+        </div>`).join('')}
+      <button class="btn btn-test" onclick="testConnFor('${id}','${conf.testType}')">🔌 Test Connection</button>
+    </div>`;
+}
+
+function checkGoogleUnified() {
+  const needs =
+    (state.selectedChannels.has('email')    && document.getElementById('emailProvider')?.value === 'gmail') ||
+    (state.selectedTools.has('calendar')    && document.getElementById('calendarProvider')?.value === 'google') ||
+    (state.selectedTools.has('spreadsheet') && document.getElementById('spreadsheetProvider')?.value === 'google') ||
+    (state.selectedTools.has('fileStorage') && document.getElementById('fileStorageProvider')?.value === 'gdrive');
+  document.getElementById('googleUnifiedSection').style.display = needs ? 'block' : 'none';
+}
+
+// ============================================================
+// Review Summary
+// ============================================================
+function renderReview() {
+  const grid = document.getElementById('reviewGrid');
+  const name  = document.getElementById('agentName')?.value || 'My AI';
+  const user  = document.getElementById('userName')?.value  || '—';
+  const email = document.getElementById('userEmail')?.value || '—';
+  const phone = document.getElementById('userPhone')?.value || '—';
+  const mg = state.modelCatalog.find(g => g.provider.id === state.selectedProvider);
+  const mi = mg?.models.find(m => m.id === state.selectedModel);
+  const modelDisplay = mi ? `${mi.displayName} (${mg.provider.name})` : state.selectedModel;
+
+  const chans  = [...state.selectedChannels];
+  const tools  = [...state.selectedTools];
+  const skills = [...state.enabledSkills];
+
+  grid.innerHTML = `
+    <div class="review-card">
+      <h3><img src="/images/vee-bot.png" alt="Vee" style="width:28px;height:28px;object-fit:contain;vertical-align:middle;margin-right:6px">Your AI</h3>
+      <div class="review-row"><span>AI Name</span><span class="review-val">${name}</span></div>
+      <div class="review-row"><span>Your Name</span><span class="review-val">${user}</span></div>
+      <div class="review-row"><span>Email</span><span class="review-val" style="font-size:12px">${email}</span></div>
+      <div class="review-row"><span>AI Model</span><span class="review-val" style="font-size:11px">${modelDisplay}</span></div>
+    </div>
+    <div class="review-card">
+      <h3>🔗 Where It Works (${chans.length})</h3>
+      ${chans.length ? chans.map(c=>{
+        const ch = CHANNELS.find(x=>x.id===c);
+        return `<div class="review-row"><span>${ch?.name||c}</span><span class="${state.connStatus[c]?'review-ok':'review-no'}">${state.connStatus[c]?'✓ Connected':'Pending'}</span></div>`;
+      }).join('') : '<div style="color:var(--text-muted);font-size:13px">None connected</div>'}
+    </div>
+    <div class="review-card">
+      <h3>🛠️ What It Can Access (${tools.length})</h3>
+      ${tools.length ? tools.map(t=>{
+        const tool = TOOLS.find(x=>x.id===t);
+        return `<div class="review-row"><span>${tool?.name||t}</span><span class="review-ok">✓ Enabled</span></div>`;
+      }).join('') : '<div style="color:var(--text-muted);font-size:13px">None selected</div>'}
+    </div>
+    <div class="review-card">
+      <h3>⚡ What It Can Do (${skills.length})</h3>
+      ${skills.map(s=>{
+        const el = document.querySelector(`[data-sched="${s}"]`);
+        const sched = el?.value || '';
+        const sk = SKILLS.find(x=>x.id===s);
+        return `<div class="review-row"><span>${sk?.name||s}</span><span class="review-val">${sched||'Manual'}</span></div>`;
+      }).join('')}
+    </div>`;
+
+  document.getElementById('termSkillCount').textContent = skills.length;
+}
+
+function revealGoLive() {
+  document.getElementById('reviewActions').style.display = 'none';
+  document.getElementById('goLiveCenter').style.display = 'block';
+  window.scrollTo(0, document.body.scrollHeight);
+  guideMsg('bot', "🚀 You're all set! Click **Go Live Now** to start your AI in this terminal, or **Save & Set Up Later** to come back whenever you're ready.");
+}
+
+// ============================================================
+// Test Connection
+// ============================================================
+async function testConn(type, config) {
+  const el = document.getElementById(`status-${type}`) || document.getElementById('status-ai-provider');
+  if (el) { el.className='glass-card-badge badge-pending'; el.textContent='Testing...'; }
+
+  try {
+    const res = await fetch('/api/test-connection',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({type, config}),
+    });
+    const d = await res.json();
+    if (d.success) {
+      if (el) { el.className='glass-card-badge badge-connected'; el.textContent='Connected'; }
+      state.connStatus[type] = true;
+      toast(d.message, 'success');
+    } else {
+      if (el) { el.className='glass-card-badge badge-error'; el.textContent='Failed'; }
+      toast(d.message || d.error, 'error');
+    }
+  } catch(err) {
+    if (el) { el.className='glass-card-badge badge-error'; el.textContent='Error'; }
+    toast('Connection test failed: ' + err, 'error');
+  }
+}
+
+function testConnFor(id, testType) {
+  const chCfg = CRED_CONFIGS[id];
+  const provEl = document.getElementById(`${id}Provider`);
+  const prov = provEl ? provEl.value : 'default';
+  const conf = chCfg?.[prov];
+  if (!conf) return;
+  const vals = {};
+  conf.fields.forEach(f => { const el = document.getElementById(f.id); if (el) vals[f.id]=el.value; });
+  testConn(testType, vals);
+}
+
+function toggleVis(id) {
+  const el = document.getElementById(id);
+  el.type = el.type==='password' ? 'text' : 'password';
+}
+
+// ============================================================
+// Save & Launch
+// ============================================================
+async function saveFinalConfig() {
+  const cfg = collectConfig();
+  try {
+    await fetch('/api/config',{
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(cfg),
+    });
+    toast('Configuration saved!', 'success');
+  } catch(err) { toast('Save failed: '+err, 'error'); }
+}
+
+async function startAgentNow() {
+  await saveFinalConfig();
+  const box = document.getElementById('agentStatusBox');
+  box.classList.add('show');
+  box.innerHTML = '<div style="color:var(--brand-light)">Starting your AI...</div>';
+  try {
+    const res = await fetch('/api/agent/launch',{method:'POST'});
+    const d = await res.json();
+    if (d.success) {
+      box.innerHTML = `<div style="color:var(--success);font-size:15px;font-weight:600">✅ ${d.name} is now live!</div>
+        <div style="font-size:13px;color:var(--text-dim);margin-top:6px">Model: ${d.model} · ${d.toolCount} tools · ${d.skillCount} skills</div>`;
+      document.getElementById('goLiveSub').textContent = `${d.name} is running and ready to work.`;
+      toast('Your AI is live! 🚀','success');
+      guideMsg('bot','✅ Your AI is now running! You can close this setup window. Your AI will handle tasks automatically.');
+    } else {
+      box.innerHTML = `<div style="color:var(--error)">Failed to start: ${d.error}</div>`;
+      toast('Failed: '+d.error,'error');
+    }
+  } catch(err) {
+    box.innerHTML = `<div style="color:var(--error)">Error: ${err}</div>`;
+    toast('Error: '+err,'error');
+  }
+}
+
+function collectConfig() {
+  return {
+    agent: {
+      name:     document.getElementById('agentName')?.value || 'AdminAgent',
+      userName: document.getElementById('userName')?.value  || '',
+      email:    document.getElementById('userEmail')?.value || '',
+      phone:    document.getElementById('userPhone')?.value || '',
+      model:    state.selectedProvider === 'openrouter' ? state.orTiers.balanced : state.selectedModel,
+      provider: state.selectedProvider,
+      timezone: document.getElementById('agentTimezone')?.value || 'Asia/Singapore',
+      language: document.getElementById('agentLanguage')?.value || 'en',
+      ...(state.selectedProvider === 'openrouter' ? { openrouterTiers: { ...state.orTiers } } : {}),
+    },
+    channels: Object.fromEntries([...state.selectedChannels].map(ch => {
+      const p = document.getElementById(`${ch}Provider`);
+      return [ch, {enabled:true, provider:p?p.value:'default', config:{}}];
+    })),
+    tools: Object.fromEntries([...state.selectedTools].map(t => {
+      const p = document.getElementById(`${t}Provider`);
+      return [t, {enabled:true, provider:p?p.value:'default', config:{}}];
+    })),
+    credentials: {
+      [`${state.selectedProvider}ApiKey`]: document.getElementById('aiProviderKey')?.value || '',
+      openrouterApiKey: state.selectedProvider === 'openrouter' ? (document.getElementById('aiProviderKey')?.value || '') : undefined,
+      googleSaKey: document.getElementById('googleSaKey')?.value || '',
+    },
+    skills: {
+      enabled: [...state.enabledSkills],
+      schedules: Object.fromEntries([...state.enabledSkills].map(s => {
+        const el = document.querySelector(`[data-sched="${s}"]`);
+        return [s, el?el.value:''];
+      })),
+    },
+    selfImproveIntervalHours: parseInt(document.getElementById('selfImproveInterval')?.value||'24'),
+    setupCompleted: true,
+    setupCompletedAt: new Date().toISOString(),
+  };
+}
+
+// ============================================================
+// Toast
+// ============================================================
+function toast(msg, type='success') {
+  const box = document.getElementById('toastBox');
+  const t = document.createElement('div');
+  t.className = `toast toast-${type}`;
+  t.innerHTML = `${type==='success'?'✅':'❌'} ${msg}`;
+  box.appendChild(t);
+  setTimeout(()=>t.remove(), 4000);
+}
+
+// ============================================================
+// AI Guide — Live Streaming Agent
+// ============================================================
+
+// Stable session ID for this browser tab
+const CHAT_SESSION_ID = 'sess-' + Math.random().toString(36).slice(2, 10);
+
+// State for the chat panel
+const chat = {
+  busy: false,
+  pendingImage: null,  // { base64: string, mimeType: string, preview: string }
+};
+
+// Step-specific opening messages (displayed before the user types anything)
+const GUIDE_SCRIPTS = {
+  1: [
+    "👋 Hi! I'm your Vouza AI assistant. I'm here to help with both setup **and** any office tasks.",
+    "Start by filling in your name and email above. Then pick your AI model below — Claude Sonnet is the best choice for most people.",
+    "Once you add your API key in Step 2, I'll be fully live and can help you send emails, read documents, analyse images, and more!",
+  ],
+  2: [
+    "Now let's connect your apps. 🔌 Enter your **AI API key** first — that's what powers me.",
+    "Once your key is in, type anything in the chat below and I'll respond as a real AI assistant, not a script.",
+    "You can also attach an **image or document** using the 📎 button — I can analyse invoices, charts, screenshots, and any office documents.",
+  ],
+  3: [
+    "Great progress! Now choose which tasks you want me to handle automatically. ⚡",
+    "**Email Triage** and **Morning Briefing** are the most popular — they save most people 30–60 minutes a day.",
+    "Everything here can be changed later, so just toggle what feels right for now.",
+  ],
+  4: [
+    "You're all set! 🎉 Review your configuration below.",
+    "Click **Go Live** to start your AI. After that, I'll be available 24/7 to handle your emails, meetings, messages, and more.",
+  ],
+};
+
+const TIPS_BY_STEP = {
+  1: ['What AI model is best?', 'Do I need an API key?', 'What can you do for me?'],
+  2: ['Read my latest emails', 'List files in my Documents folder', 'What can you do?'],
+  3: ['What does Email Triage do?', 'Analyse this image 📎', 'What is self-learning?'],
+  4: ['How much does this cost?', 'Draft an email for me', 'Show me what you can do'],
+};
+
+// ── Scripted step messages (no API key needed) ──────────────────────────────
+
+function guideForStep(n) {
+  const msgs = GUIDE_SCRIPTS[n];
+  if (!msgs) return;
+  const delay = n === 1 ? 900 : 400;
+  let t = delay;
+  for (const m of msgs) {
+    setTimeout(() => guideBotScripted(m), t);
+    t += m.length * 14 + 700;
+  }
+  setTimeout(updateTips, t);
+}
+
+function guideBotScripted(text) {
+  const box      = document.getElementById('guideMessages');
+  const typingEl = document.getElementById('guideTyping');
+  typingEl.classList.add('visible');
+  setTimeout(() => {
+    typingEl.classList.remove('visible');
+    const el = document.createElement('div');
+    el.className = 'guide-msg bot';
+    el.innerHTML = `<div class="msg-bubble">${renderMd(text)}</div><div class="msg-time">${timeNow()}</div>`;
+    box.insertBefore(el, typingEl);
+    box.scrollTop = box.scrollHeight;
+  }, Math.min(text.length * 10, 1000));
+}
+
+// ── User sends a message ────────────────────────────────────────────────────
+
+function sendGuideMsg() {
+  const inp  = document.getElementById('guideInput');
+  const text = inp.value.trim();
+  if (!text && !chat.pendingImage) return;
+  if (chat.busy) { toast('Please wait — I\'m still responding…', 'error'); return; }
+
+  inp.value = '';
+
+  // Show user message in chat
+  appendUserMsg(text, chat.pendingImage);
+
+  // Call the live agent
+  callLiveAgent(text, chat.pendingImage);
+
+  // Clear pending image
+  chat.pendingImage = null;
+  clearImagePreview();
+}
+
+function appendUserMsg(text, image) {
+  const box      = document.getElementById('guideMessages');
+  const typingEl = document.getElementById('guideTyping');
+  const el       = document.createElement('div');
+  el.className   = 'guide-msg user';
+
+  let content = '';
+  if (image) {
+    content += `<img src="${image.preview}" style="max-width:180px;border-radius:8px;margin-bottom:6px;display:block">`;
+  }
+  if (text) content += `<span>${escHtml(text)}</span>`;
+
+  el.innerHTML = `<div class="msg-bubble">${content}</div><div class="msg-time">${timeNow()}</div>`;
+  box.insertBefore(el, typingEl);
+  box.scrollTop = box.scrollHeight;
+}
+
+// ── Live agent call with SSE streaming ─────────────────────────────────────
+
+async function callLiveAgent(text, image) {
+  chat.busy = true;
+  setInputEnabled(false);
+
+  const box      = document.getElementById('guideMessages');
+  const typingEl = document.getElementById('guideTyping');
+
+  // Show typing indicator
+  typingEl.classList.add('visible');
+
+  // Get the API key from the form (if entered during setup wizard)
+  const apiKey = document.getElementById('aiProviderKey')?.value?.trim() || '';
+
+  try {
+    const body = {
+      message:     text || '(image attached)',
+      sessionId:   CHAT_SESSION_ID,
+      apiKey:      apiKey || undefined,
+      imageBase64: image?.base64  || undefined,
+      imageMimeType: image?.mimeType || undefined,
+    };
+
+    const resp = await fetch('/api/chat', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(body),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: resp.statusText }));
+      throw new Error(err.error || resp.statusText);
+    }
+
+    // Create the streaming bot bubble
+    typingEl.classList.remove('visible');
+    const botEl = document.createElement('div');
+    botEl.className = 'guide-msg bot';
+    botEl.innerHTML = `<div class="msg-bubble streaming-bubble" id="stream-bubble"></div>
+      <div class="msg-time">${timeNow()}</div>`;
+    box.insertBefore(botEl, typingEl);
+
+    const bubble    = document.getElementById('stream-bubble');
+    let   fullText  = '';
+    let   toolCards = '';
+
+    // Read SSE stream
+    const reader  = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let   buffer  = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop(); // keep incomplete line
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        let event;
+        try { event = JSON.parse(line.slice(6)); } catch { continue; }
+
+        switch (event.type) {
+          case 'text_delta':
+            fullText += event.text;
+            bubble.innerHTML = toolCards + renderMd(fullText) + '<span class="t-blink">▌</span>';
+            box.scrollTop = box.scrollHeight;
+            break;
+
+          case 'tool_start':
+            toolCards += buildToolCard(event.toolName, 'running', event.input);
+            bubble.innerHTML = toolCards + (fullText ? renderMd(fullText) : '') + '<span class="t-blink">▌</span>';
+            box.scrollTop = box.scrollHeight;
+            break;
+
+          case 'tool_result': {
+            const ok   = event.result?.success !== false;
+            const last = toolCards.lastIndexOf('tool-card running');
+            if (last !== -1) {
+              toolCards = toolCards.slice(0, last) + toolCards.slice(last).replace('tool-card running', `tool-card ${ok ? 'done' : 'fail'}`);
+            }
+            bubble.innerHTML = toolCards + (fullText ? renderMd(fullText) : '') + '<span class="t-blink">▌</span>';
+            box.scrollTop = box.scrollHeight;
+            break;
+          }
+
+          case 'turn_complete':
+          case 'done':
+            // Remove blinking cursor
+            bubble.innerHTML = toolCards + (fullText ? renderMd(fullText) : '(Done)');
+            box.scrollTop = box.scrollHeight;
+            break;
+
+          case 'error':
+            bubble.innerHTML = toolCards + `<span style="color:var(--error)">⚠️ ${escHtml(event.error)}</span>`;
+            break;
+        }
+      }
+    }
+
+  } catch (err) {
+    typingEl.classList.remove('visible');
+    // Show a helpful fallback when no API key yet
+    const msg = String(err);
+    const isAuthErr = msg.includes('401') || msg.includes('API key') || msg.includes('authentication');
+    const fallback = isAuthErr
+      ? "🔑 I need an API key to respond. Enter it in **Step 2 → AI Account Access**, then I'll be fully live!"
+      : `⚠️ ${msg}`;
+    guideBotScripted(fallback);
+  } finally {
+    chat.busy = false;
+    setInputEnabled(true);
+  }
+}
+
+// ── Tool call card UI ───────────────────────────────────────────────────────
+
+const TOOL_LABELS = {
+  read_emails:          '📧 Reading emails',
+  send_email:           '📤 Sending email',
+  draft_email:          '✏️ Drafting email',
+  triage_emails:        '🗂️ Triaging inbox',
+  list_events:          '📅 Checking calendar',
+  create_event:         '📅 Creating event',
+  update_event:         '📅 Updating event',
+  find_free_slots:      '🕐 Finding free time',
+  read_spreadsheet:     '📊 Reading spreadsheet',
+  write_spreadsheet:    '📊 Writing spreadsheet',
+  search_spreadsheet:   '🔍 Searching spreadsheet',
+  list_files:           '📁 Listing files',
+  read_file:            '📄 Reading file',
+  write_file:           '💾 Saving file',
+  organize_files:       '🗂️ Organising files',
+  send_slack_message:   '💬 Sending Slack message',
+  read_slack_messages:  '💬 Reading Slack',
+  send_telegram_message:'✈️ Sending Telegram',
+  read_telegram_updates:'✈️ Reading Telegram',
+  send_whatsapp_message:'📱 Sending WhatsApp',
+  read_whatsapp_messages:'📱 Reading WhatsApp',
+};
+
+function buildToolCard(toolName, status, input) {
+  const label = TOOL_LABELS[toolName] || `⚙️ ${toolName.replace(/_/g,' ')}`;
+  const dot = status === 'running' ? '🔄' : (status === 'done' ? '✅' : '❌');
+  const inputSnippet = input ? JSON.stringify(input).slice(0, 80) + (JSON.stringify(input).length > 80 ? '…' : '') : '';
+  return `<div class="tool-card ${status}">
+    <span class="tool-dot">${dot}</span>
+    <span class="tool-label">${label}</span>
+    ${inputSnippet ? `<div class="tool-input">${escHtml(inputSnippet)}</div>` : ''}
+  </div>`;
+}
+
+// ── Image / File Upload ─────────────────────────────────────────────────────
+
+function openAttachment() {
+  document.getElementById('fileUpload').click();
+}
+
+function handleFileSelect(e) {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  e.target.value = ''; // reset so same file can be reselected
+
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    const dataUrl  = ev.target.result;
+    const mimeType = file.type || 'image/jpeg';
+    const base64   = dataUrl.replace(/^data:[^;]+;base64,/, '');
+
+    chat.pendingImage = { base64, mimeType, preview: dataUrl };
+    showImagePreview(dataUrl, file.name);
+  };
+  reader.readAsDataURL(file);
+}
+
+function showImagePreview(src, name) {
+  const prev = document.getElementById('imagePreview');
+  prev.style.display = 'block';
+  prev.innerHTML = `<div class="img-preview-inner">
+    <img src="${escHtml(src)}" alt="preview">
+    <span>${escHtml(name)}</span>
+    <button onclick="clearAttachment()" title="Remove">✕</button>
+  </div>`;
+}
+
+function clearImagePreview() {
+  chat.pendingImage = null;
+  const prev = document.getElementById('imagePreview');
+  if (prev) { prev.style.display = 'none'; prev.innerHTML = ''; }
+}
+
+/** Alias for the ✕ button in the image preview bar */
+function clearAttachment() { clearImagePreview(); }
+
+// ── Clear conversation ──────────────────────────────────────────────────────
+
+async function clearConversation() {
+  await fetch(`/api/chat/session/${CHAT_SESSION_ID}`, { method: 'DELETE' });
+  const box = document.getElementById('guideMessages');
+  // Keep only the typing indicator
+  while (box.firstChild && box.firstChild.id !== 'guideTyping') box.firstChild.remove();
+  guideBotScripted('Conversation cleared. How can I help you?');
+}
+
+// ── Input enable/disable ────────────────────────────────────────────────────
+
+function setInputEnabled(on) {
+  const inp  = document.getElementById('guideInput');
+  const send = document.querySelector('.btn-send');
+  if (inp)  inp.disabled  = !on;
+  if (send) send.disabled = !on;
+  if (send) send.style.opacity = on ? '1' : '0.4';
+}
+
+// ── Tips chips ──────────────────────────────────────────────────────────────
+
+function updateTips() {
+  const tips = document.getElementById('guideTips');
+  const arr  = TIPS_BY_STEP[state.step] || [];
+  tips.innerHTML = arr.map(t => {
+    const safe = t.replace(/'/g, "\\'");
+    return `<div class="tip-chip" onclick="document.getElementById('guideInput').value='${safe}';sendGuideMsg()">${t}</div>`;
+  }).join('');
+}
+
+// ── Utilities ───────────────────────────────────────────────────────────────
+
+function renderMd(t) {
+  return t
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g,'<em>$1</em>')
+    .replace(/`([^`]+)`/g,'<code style="background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:4px;font-size:12px">$1</code>')
+    .replace(/\n/g,'<br>');
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function timeNow() {
+  return new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+}
+
+// ============================================================
+// Start
+// ============================================================
+
+// ============================================================
+// Memory Panel
+// ============================================================
+const MEMORY_TYPE_COLORS = {
+  contact: '#10b981', process: '#f59e0b', preference: '#8b5cf6',
+  feedback: '#ef4444', learned_skill: '#06b6d4', pattern: '#6366f1',
+};
+
+let memoryPanelOpen = false;
+let memorySavedStep = 1;
+
+async function toggleMemoryPanel() {
+  memoryPanelOpen = !memoryPanelOpen;
+  if (memoryPanelOpen) {
+    memorySavedStep = state.currentStep;
+    // Hide all step views, show memory panel
+    document.querySelectorAll('.step-view').forEach(el => el.style.display = 'none');
+    const panel = document.getElementById('memory-panel');
+    panel.style.display = 'block';
+    await loadMemoryPanel();
+  } else {
+    document.getElementById('memory-panel').style.display = 'none';
+    showStep(memorySavedStep);
+  }
+}
+
+async function loadMemoryPanel() {
+  const el = document.getElementById('memoryPanelContent');
+  el.innerHTML = '<div style="color:var(--text-dim);font-size:14px">Loading memories...</div>';
+  try {
+    const res = await fetch('/api/memories');
+    const data = await res.json();
+    renderMemoryPanel(data.entries || []);
+    const countEl = document.getElementById('memoryCount');
+    if (countEl) countEl.textContent = data.total > 0 ? `(${data.total})` : '';
+  } catch {
+    el.innerHTML = '<div class="memory-empty">Could not load memories. Make sure the agent server is running.</div>';
+  }
+}
+
+function renderMemoryPanel(entries) {
+  const el = document.getElementById('memoryPanelContent');
+  if (!entries.length) {
+    el.innerHTML = `<div class="memory-empty">
+      <div style="font-size:40px;margin-bottom:12px">🧠</div>
+      <div style="font-weight:600;margin-bottom:8px">No memories yet</div>
+      <div style="font-size:13px">As you chat with your agent and complete tasks,<br>it will automatically remember useful facts here.</div>
+    </div>`;
+    return;
+  }
+
+  // Group by type
+  const groups = {};
+  for (const e of entries) {
+    if (!groups[e.type]) groups[e.type] = [];
+    groups[e.type].push(e);
+  }
+
+  const typeLabels = {
+    contact:'👤 Contacts', process:'⚙️ Processes', preference:'⭐ Preferences',
+    feedback:'💬 Feedback', learned_skill:'🎓 Learned Skills', pattern:'🔁 Patterns'
+  };
+
+  let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <div style="font-size:13px;color:var(--text-dim)">${entries.length} total memories stored</div>
+    <button class="btn" style="font-size:12px;padding:6px 14px" onclick="loadMemoryPanel()">↻ Refresh</button>
+  </div>`;
+
+  for (const [type, typeEntries] of Object.entries(groups)) {
+    html += `<div class="memory-group-label">${typeLabels[type] || type}</div>`;
+    for (const entry of typeEntries) {
+      const color = MEMORY_TYPE_COLORS[entry.type] || '#888';
+      const age = formatMemoryAge(entry.updatedAt);
+      const tags = (entry.tags || []).map(t => `<span class="memory-tag">${t}</span>`).join('');
+      html += `<div class="memory-entry">
+        <div class="memory-type-dot" style="background:${color}"></div>
+        <div class="memory-entry-body">
+          <div class="memory-entry-title">${escHtml(entry.title)}</div>
+          <div class="memory-entry-content">${escHtml(entry.content)}</div>
+          ${tags ? `<div class="memory-entry-tags">${tags}</div>` : ''}
+          <div class="memory-entry-meta">${age}</div>
+        </div>
+        <button class="memory-delete-btn" onclick="deleteMemory('${entry.id}')" title="Forget this">✕</button>
+      </div>`;
+    }
+  }
+
+  el.innerHTML = html;
+}
+
+async function deleteMemory(id) {
+  if (!confirm('Remove this memory?')) return;
+  try {
+    await fetch(`/api/memories/${id}`, { method: 'DELETE' });
+    await loadMemoryPanel();
+  } catch {
+    alert('Could not delete memory.');
+  }
+}
+
+function formatMemoryAge(ts) {
+  const h = (Date.now() - ts) / 3600000;
+  if (h < 1) return 'just now';
+  if (h < 24) return `${Math.floor(h)}h ago`;
+  if (h < 720) return `${Math.floor(h/24)}d ago`;
+  return `${Math.floor(h/720)}mo ago`;
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Update memory count badge on init
+async function updateMemoryCount() {
+  try {
+    const res = await fetch('/api/memories');
+    const data = await res.json();
+    const el = document.getElementById('memoryCount');
+    if (el && data.total > 0) el.textContent = `(${data.total})`;
+  } catch {}
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,136 @@
+// =============================================================================
+// Messenger Tool — Slack integration for team communication
+// =============================================================================
+
+import { z } from "zod";
+import { buildTool } from "./registry.js";
+
+// --- Send Slack Message ---
+
+export const sendSlackMessageTool = buildTool({
+  name: "send_slack_message",
+  description: "Send a message to a Slack channel or user via Slack Bot API.",
+  category: "messaging",
+  isReadOnly: false,
+  isConcurrencySafe: true,
+  inputSchema: z.object({
+    channel: z.string().describe("Slack channel ID or name (e.g., '#general' or 'C01ABCDEF')"),
+    text: z.string().describe("Message text (supports Slack markdown)"),
+    threadTs: z.string().optional().describe("Thread timestamp to reply in a thread"),
+  }),
+  async call(input, context) {
+    try {
+      const token = context.config.tools.slack?.botToken;
+      if (!token) return { success: false, error: "Slack not configured" };
+
+      const res = await fetch("https://slack.com/api/chat.postMessage", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          channel: input.channel,
+          text: input.text,
+          thread_ts: input.threadTs,
+        }),
+      });
+
+      const data = await res.json();
+      if (!data.ok) return { success: false, error: `Slack error: ${data.error}` };
+
+      return { success: true, data: { ts: data.ts, channel: data.channel } };
+    } catch (err) {
+      return { success: false, error: `Failed to send Slack message: ${err}` };
+    }
+  },
+});
+
+// --- Read Slack Messages ---
+
+export const readSlackMessagesTool = buildTool({
+  name: "read_slack_messages",
+  description: "Read recent messages from a Slack channel.",
+  category: "messaging",
+  isReadOnly: true,
+  isConcurrencySafe: true,
+  inputSchema: z.object({
+    channel: z.string().describe("Slack channel ID"),
+    limit: z.number().optional().default(20),
+    oldest: z.string().optional().describe("Unix timestamp — only messages after this time"),
+  }),
+  async call(input, context) {
+    try {
+      const token = context.config.tools.slack?.botToken;
+      if (!token) return { success: false, error: "Slack not configured" };
+
+      const params = new URLSearchParams({
+        channel: input.channel,
+        limit: String(input.limit),
+      });
+      if (input.oldest) params.set("oldest", input.oldest);
+
+      const res = await fetch(`https://slack.com/api/conversations.history?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const data = await res.json();
+      if (!data.ok) return { success: false, error: `Slack error: ${data.error}` };
+
+      const messages = (data.messages || []).map((m: any) => ({
+        user: m.user,
+        text: m.text,
+        ts: m.ts,
+        threadTs: m.thread_ts,
+        reactions: m.reactions,
+      }));
+
+      return { success: true, data: { count: messages.length, messages } };
+    } catch (err) {
+      return { success: false, error: `Failed to read Slack messages: ${err}` };
+    }
+  },
+});
+
+// --- List Slack Channels ---
+
+export const listSlackChannelsTool = buildTool({
+  name: "list_slack_channels",
+  description: "List available Slack channels the bot has access to.",
+  category: "messaging",
+  isReadOnly: true,
+  isConcurrencySafe: true,
+  inputSchema: z.object({
+    limit: z.number().optional().default(50),
+    types: z.string().optional().default("public_channel,private_channel"),
+  }),
+  async call(input, context) {
+    try {
+      const token = context.config.tools.slack?.botToken;
+      if (!token) return { success: false, error: "Slack not configured" };
+
+      const params = new URLSearchParams({
+        limit: String(input.limit),
+        types: input.types ?? "public_channel,private_channel",
+      });
+
+      const res = await fetch(`https://slack.com/api/conversations.list?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const data = await res.json();
+      if (!data.ok) return { success: false, error: `Slack error: ${data.error}` };
+
+      const channels = (data.channels || []).map((c: any) => ({
+        id: c.id,
+        name: c.name,
+        topic: c.topic?.value,
+        memberCount: c.num_members,
+      }));
+
+      return { success: true, data: { channels } };
+    } catch (err) {
+      return { success: false, error: `Failed to list channels: ${err}` };
+    }
+  },
+});

@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment & secrets
+.env
+.env.local
+*.env
+
+# User data (agent memories, logs, credentials)
+data/
+logs/
+build_errors.log
+build_errors.txt
+
+# Credential files
+*.key
+*.pem
+firebase-service-key.json
+google-credentials.json
+service-account.json
+
+# Backup files
+*.bak
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/settings.json
+.idea/
