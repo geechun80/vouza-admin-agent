@@ -54,13 +54,17 @@ Copy the example config file and fill in your details:
 copy .env.example .env
 ```
 
-Open `.env` in Notepad and set at minimum:
+Open `.env` in Notepad and set **one** API key for whichever AI provider you want to use:
 
-```env
-ANTHROPIC_API_KEY=sk-ant-api03-your-key-here
-```
+| Provider | Key to set | Where to get it |
+|----------|-----------|-----------------|
+| **Anthropic** (Claude) | `ANTHROPIC_API_KEY=sk-ant-...` | https://console.anthropic.com/keys |
+| **OpenAI** (GPT-4o) | `OPENAI_API_KEY=sk-proj-...` | https://platform.openai.com/api-keys |
+| **Google** (Gemini) | `GOOGLE_AI_API_KEY=AIza...` | https://aistudio.google.com/app/apikey |
+| **DeepSeek** | `DEEPSEEK_API_KEY=sk-...` | https://platform.deepseek.com |
+| **xAI** (Grok) | `XAI_API_KEY=xai-...` | https://console.x.ai |
 
-Get your Anthropic API key at: https://console.anthropic.com/keys
+> **You only need one key** — whichever provider you select in the Setup Wizard. The others can be left blank.
 
 ---
 

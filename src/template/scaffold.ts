@@ -180,7 +180,7 @@ pause
       "@anthropic-ai/sdk": "^0.74.0",
       express: "^4.21.0",
       googleapis: "^144.0.0",
-      nodemailer: "^6.9.0",
+      nodemailer: "^8.0.7",
       "node-cron": "^3.0.3",
       "gray-matter": "^4.0.3",
       zod: "^3.23.0",
@@ -192,7 +192,7 @@ pause
       tsx: "^4.19.0",
       "@types/node": "^22.0.0",
       "@types/express": "^5.0.0",
-      "@types/nodemailer": "^6.4.0",
+      "@types/nodemailer": "^6.4.17",
       "@types/node-cron": "^3.0.0",
     },
   };
