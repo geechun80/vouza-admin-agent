@@ -46,27 +46,23 @@ npm run build
 
 ---
 
-### Step 4 — Configure your environment
+### Step 4 — Get your AI API key (just one)
 
-Copy the example config file and fill in your details:
+You need **one** API key for whichever AI provider you want to use. Get it now so it's ready for the Setup Wizard in Step 5:
 
-```bash
-copy .env.example .env
-```
+| Provider | Where to get your key | Key looks like |
+|----------|-----------------------|----------------|
+| **Anthropic** (Claude) | https://console.anthropic.com/keys | `sk-ant-...` |
+| **OpenAI** (GPT-4o) | https://platform.openai.com/api-keys | `sk-proj-...` |
+| **Google** (Gemini) | https://aistudio.google.com/app/apikey | `AIza...` |
+| **DeepSeek** | https://platform.deepseek.com | `sk-...` |
+| **xAI** (Grok) | https://console.x.ai | `xai-...` |
+| **OpenRouter** (100+ models) | https://openrouter.ai/keys | `sk-or-...` |
 
-Open `.env` in Notepad and set **one** API key for whichever AI provider you want to use:
+> **You only need one key.** You will paste it directly into the Setup Wizard — **no need to edit any files manually.**
+> OpenRouter is a great choice if you want access to many different AI models under a single key.
 
-| Provider | Key to set | Where to get it |
-|----------|-----------|-----------------|
-| **Anthropic** (Claude) | `ANTHROPIC_API_KEY=sk-ant-...` | https://console.anthropic.com/keys |
-| **OpenAI** (GPT-4o) | `OPENAI_API_KEY=sk-proj-...` | https://platform.openai.com/api-keys |
-| **Google** (Gemini) | `GOOGLE_AI_API_KEY=AIza...` | https://aistudio.google.com/app/apikey |
-| **DeepSeek** | `DEEPSEEK_API_KEY=sk-...` | https://platform.deepseek.com |
-| **xAI** (Grok) | `XAI_API_KEY=xai-...` | https://console.x.ai |
-| **OpenRouter** (100+ models) | `OPENROUTER_API_KEY=sk-or-...` | https://openrouter.ai/keys |
-
-> **You only need one key** — whichever provider you select in the Setup Wizard. The others can be left blank.
-> OpenRouter is great if you want access to many different AI models under a single key.
+> ⚠️ **Do NOT edit `.env` manually** — the Setup Wizard handles everything for you. The `.env` file is only needed for advanced server deployments.
 
 ---
 
