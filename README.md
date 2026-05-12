@@ -63,8 +63,10 @@ Open `.env` in Notepad and set **one** API key for whichever AI provider you wan
 | **Google** (Gemini) | `GOOGLE_AI_API_KEY=AIza...` | https://aistudio.google.com/app/apikey |
 | **DeepSeek** | `DEEPSEEK_API_KEY=sk-...` | https://platform.deepseek.com |
 | **xAI** (Grok) | `XAI_API_KEY=xai-...` | https://console.x.ai |
+| **OpenRouter** (100+ models) | `OPENROUTER_API_KEY=sk-or-...` | https://openrouter.ai/keys |
 
 > **You only need one key** — whichever provider you select in the Setup Wizard. The others can be left blank.
+> OpenRouter is great if you want access to many different AI models under a single key.
 
 ---
 
@@ -130,6 +132,26 @@ npm run build
 ```
 
 Then restart the agent (or PM2 will auto-restart it).
+
+---
+
+## Already installed? Apply security updates
+
+If you installed the agent **before 12 May 2026**, run these 3 commands to patch a high-severity vulnerability in the email library (nodemailer):
+
+```bash
+git pull
+npm install
+npm audit
+```
+
+You should see **found 0 vulnerabilities** after `npm install`. If you see any remaining issues, run:
+
+```bash
+npm audit fix
+```
+
+> **What was fixed:** nodemailer was upgraded from v6.9 → v8.0.7, patching 4 security issues including SMTP command injection. Your `.env` keys and saved config are not affected — no need to reconfigure anything.
 
 ---
 
