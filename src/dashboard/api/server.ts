@@ -451,7 +451,7 @@ async function testConnection(type: string, config: Record<string, string>): Pro
 
     case "telegram":
       try {
-        const token = config.telegramBotToken || config.botToken;
+        const token = config.telegramBotToken || config.botToken || config.telegramToken;
         const res = await fetch(`https://api.telegram.org/bot${token}/getMe`);
         const data = await res.json();
         if (data.ok) return { success: true, message: `Connected as @${data.result.username}` };
@@ -462,7 +462,7 @@ async function testConnection(type: string, config: Record<string, string>): Pro
 
     case "slack":
       try {
-        const token = config.slackBotToken || config.botToken;
+        const token = config.slackBotToken || config.botToken || config.slackToken;
         const res = await fetch("https://slack.com/api/auth.test", {
           headers: { Authorization: `Bearer ${token}` },
         });

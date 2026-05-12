@@ -184,17 +184,22 @@ export async function loadConfigFromJson(): Promise<AgentConfig> {
     }
 
     // Merge tool configs from channels
-    if (saved.channels?.telegram?.enabled && saved.channels.telegram.config?.botToken) {
-      baseConfig.tools.telegram = { botToken: saved.channels.telegram.config.botToken };
+    // Note: wizard saves fields using their DOM id as the key (telegramToken, slackToken, gmailPass etc.)
+    if (saved.channels?.telegram?.enabled) {
+      const cfg = saved.channels.telegram.config || {};
+      const botToken = cfg.botToken || cfg.telegramToken || cfg.telegramBotToken;
+      if (botToken) baseConfig.tools.telegram = { botToken, webhookUrl: cfg.webhookUrl };
     }
-    if (saved.channels?.slack?.enabled && saved.channels.slack.config?.botToken) {
-      baseConfig.tools.slack = { botToken: saved.channels.slack.config.botToken };
+    if (saved.channels?.slack?.enabled) {
+      const cfg = saved.channels.slack.config || {};
+      const botToken = cfg.botToken || cfg.slackToken || cfg.slackBotToken;
+      if (botToken) baseConfig.tools.slack = { botToken };
     }
     if (saved.channels?.email?.enabled && saved.channels.email.config) {
       const ec = saved.channels.email.config;
       baseConfig.tools.gmail = {
         user: ec.gmailUser || ec.user || "",
-        appPassword: ec.gmailAppPassword || ec.appPassword || "",
+        appPassword: ec.gmailAppPassword || ec.gmailPass || ec.appPassword || "",
         emailAddress: ec.emailAddress || ec.gmailUser || "",
       };
     }

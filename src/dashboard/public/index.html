@@ -2107,11 +2107,29 @@ function collectConfig() {
     },
     channels: Object.fromEntries([...state.selectedChannels].map(ch => {
       const p = document.getElementById(`${ch}Provider`);
-      return [ch, {enabled:true, provider:p?p.value:'default', config:{}}];
+      const prov = p ? p.value : 'default';
+      const provCfg = CRED_CONFIGS[ch]?.[prov];
+      const config = {};
+      if (provCfg?.fields) {
+        provCfg.fields.forEach(f => {
+          const el = document.getElementById(f.id);
+          if (el && el.value) config[f.id] = el.value;
+        });
+      }
+      return [ch, {enabled:true, provider:prov, config}];
     })),
     tools: Object.fromEntries([...state.selectedTools].map(t => {
       const p = document.getElementById(`${t}Provider`);
-      return [t, {enabled:true, provider:p?p.value:'default', config:{}}];
+      const prov = p ? p.value : 'default';
+      const provCfg = CRED_CONFIGS[t]?.[prov];
+      const config = {};
+      if (provCfg?.fields) {
+        provCfg.fields.forEach(f => {
+          const el = document.getElementById(f.id);
+          if (el && el.value) config[f.id] = el.value;
+        });
+      }
+      return [t, {enabled:true, provider:prov, config}];
     })),
     credentials: {
       [`${state.selectedProvider}ApiKey`]: document.getElementById('aiProviderKey')?.value || '',
