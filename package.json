@@ -5,7 +5,7 @@
   "type": "module",
   "engines": { "node": ">=18.0.0" },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node -e \"const fs=require('fs');fs.cpSync('src/dashboard/public','dist/dashboard/public',{recursive:true,force:true});console.log('✓ public/ copied to dist/')\"",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "setup": "tsx src/dashboard/launch.ts"
