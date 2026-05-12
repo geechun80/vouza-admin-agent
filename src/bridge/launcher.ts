@@ -15,6 +15,7 @@ import { initSelfImproveLoop } from "../self-improve/optimizer.js";
 import { TaskScheduler } from "../tasks/scheduler.js";
 
 // Import all tools
+import { startTelegramListener, stopTelegramListener } from "../telegram/listener.js";
 import { readEmailsTool, sendEmailTool, draftEmailTool, triageEmailsTool } from "../tools/email.js";
 import { listEventsTool, createEventTool, updateEventTool, findFreeSlotsTool } from "../tools/calendar.js";
 import { readSpreadsheetTool, writeSpreadsheetTool, searchSpreadsheetTool } from "../tools/spreadsheet.js";
@@ -121,6 +122,11 @@ export async function launchAgent(): Promise<AgentInstance> {
 
   console.log(chalk.bold.green(`\n  ${config.name} is running!\n`));
 
+  // --- Start Telegram Listener (if configured) ---
+  // Runs in background — starts a long-polling loop so users can message the
+  // bot and receive real AI responses back. Silently skips if not configured.
+  await startTelegramListener(context, registry);
+
   return {
     context,
     registry,
@@ -129,6 +135,7 @@ export async function launchAgent(): Promise<AgentInstance> {
     selfImprove,
     runTask: (message: string) => agentLoop(message, context, registry),
     stop: async () => {
+      stopTelegramListener();
       scheduler.stopAll();
       await memory.save();
       console.log(chalk.cyan(`\n  ${config.name} stopped. Memory saved.\n`));

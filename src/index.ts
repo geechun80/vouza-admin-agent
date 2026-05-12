@@ -17,6 +17,7 @@ import chalk from "chalk";
 import { loadConfig, loadConfigFromJson } from "./config/loader.js";
 import { createAgentFromTemplate, ADMIN_TEMPLATE, BUILT_IN_TEMPLATES, scaffoldAgent, findTemplate } from "./template/index.js";
 import { setupDefaultSchedules } from "./tasks/scheduler.js";
+import { startTelegramListener, stopTelegramListener } from "./telegram/listener.js";
 import { join } from "path";
 
 async function main() {
@@ -48,10 +49,17 @@ async function main() {
     skillsDir: config.skillsDir,
   });
 
+  // Pass tool credentials (Telegram, Slack, Gmail, etc.) into the agent context.
+  // createAgentFromTemplate builds an empty tools:{} — we fill it from config.json here.
+  agent.context.config.tools = config.tools;
+
   console.log(chalk.green(`\n  ${agent.registry.getAll().length} tools registered`));
   console.log(chalk.green(`  ${agent.context.memory.entries.size} memories loaded`));
   console.log(chalk.green(`  ${agent.skills.size} skills loaded: ${Array.from(agent.skills.keys()).join(", ")}`));
   console.log(chalk.green(`  Self-improvement engine initialized (interval: ${config.selfImproveIntervalHours}h)`));
+
+  // --- Start Telegram listener if configured ---
+  await startTelegramListener(agent.context, agent.registry);
 
   // --- Interactive REPL ---
   const rl = createInterface({
@@ -80,6 +88,7 @@ async function main() {
       // --- Handle Commands ---
       if (trimmed === "/quit" || trimmed === "/exit") {
         console.log(chalk.cyan("\n  Goodbye! Saving memory...\n"));
+        stopTelegramListener();
         await agent.stop();
         rl.close();
         process.exit(0);
