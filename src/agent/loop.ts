@@ -51,6 +51,34 @@ Log insights using the memory and self-improvement tools.
 - Prioritize accuracy over speed`;
 
 /**
+ * Turn a raw API error string into a human-readable message the user can act on.
+ */
+function formatApiError(message: string, isOpenRouter = false): string {
+  const msg = message.toLowerCase();
+  if (msg.includes("402") || msg.includes("insufficient") || msg.includes("credits") || msg.includes("no credits")) {
+    return isOpenRouter
+      ? "Your OpenRouter account has no credits. Add even $5 at **openrouter.ai/credits** — it lasts months at typical usage rates."
+      : "Payment required — your API account may be out of credits.";
+  }
+  if (msg.includes("401") || msg.includes("unauthorized") || msg.includes("invalid api key") || msg.includes("authentication")) {
+    return "Invalid API key — please re-enter it in the setup wizard (Step 2 → AI Account Access).";
+  }
+  if (msg.includes("429") || msg.includes("rate limit") || msg.includes("too many requests")) {
+    return "Rate limit reached. Please wait a moment and try again.";
+  }
+  if (msg.includes("503") || msg.includes("overload") || msg.includes("unavailable")) {
+    return "The AI model is temporarily overloaded. Please try again in a moment.";
+  }
+  if (msg.includes("404") || msg.includes("not found") || msg.includes("model")) {
+    return isOpenRouter
+      ? "Model not found on OpenRouter. Try a different model in the setup wizard."
+      : "Model not found. Please check your model selection.";
+  }
+  // Truncate very long raw errors
+  return message.length > 300 ? message.slice(0, 300) + "…" : message;
+}
+
+/**
  * Build an OpenAI-compatible client for non-Anthropic providers.
  * Most providers (OpenAI, Gemini, xAI, DeepSeek, Qwen, Kimi) use the OpenAI API format.
  */
@@ -227,7 +255,7 @@ export async function* agentLoop(
     const complexity = classifyTask(userMessage, hasImage);
     activeModel = selectModelForComplexity(complexity, tiers);
     // Emit routing decision so the UI can show which tier was selected
-    yield { type: "text_delta", text: `_${TIER_LABELS[complexity]}_ — routing to \`${activeModel}\`\n\n` };
+    yield { type: "text_delta", text: `${TIER_LABELS[complexity]} — routing to ${activeModel}\n\n` };
   }
 
   let client: Anthropic | null = null;
@@ -317,6 +345,19 @@ export async function* agentLoop(
         }
       }
 
+      // ── Empty response guard ───────────────────────────────────────────────
+      // If the model returned no text AND no tool calls, something went wrong
+      // (e.g. no OpenRouter credits, model returned null content). Surface it.
+      if (assistantText === "" && toolCalls.length === 0) {
+        const hint = isOpenRouter
+          ? "\n\n⚠️ The AI model returned an empty response.\n\nMost likely cause: **no OpenRouter credits**. Top up at openrouter.ai/credits — even $5 lasts months.\n\nOr open the setup wizard and switch to a different AI provider (Anthropic, Google, etc.)."
+          : "\n\n⚠️ The AI model returned an empty response. Please check your API key and try again.";
+        yield { type: "text_delta", text: hint };
+        yield { type: "error", error: "Empty model response" };
+        state.shouldContinue = false;
+        break;
+      }
+
       // Record assistant message
       state.messages.push({
         role: "assistant",
@@ -365,8 +406,11 @@ export async function* agentLoop(
         state.shouldContinue = false;
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      yield { type: "error", error: message };
+      const raw = err instanceof Error ? err.message : String(err);
+      const friendly = formatApiError(raw, isOpenRouter);
+      yield { type: "error", error: raw };
+      // Also emit as text_delta so ALL consumers (Telegram, WhatsApp, dashboard) see the error
+      yield { type: "text_delta", text: `\n\n⚠️ ${friendly}` };
       state.shouldContinue = false;
     }
   }

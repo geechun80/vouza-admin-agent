@@ -6,9 +6,9 @@
 //
 // Tier | Best for                                    | Default model
 // ─────┼─────────────────────────────────────────────┼──────────────────────────────────────
-// fast │ Short queries, status checks, yes/no        │ meta-llama/llama-3.1-8b-instruct
+// fast │ Short queries, status checks, yes/no        │ meta-llama/llama-3.1-8b-instruct:free
 // balanced │ Email drafting, scheduling, file ops     │ google/gemini-2.5-flash-lite
-// flagship │ Analysis, reports, image processing,    │ google/gemini-3-flash-preview
+// flagship │ Analysis, reports, image processing,    │ google/gemini-2.5-flash
 //          │ multi-step agentic workflows             │
 // =============================================================================
 
@@ -21,9 +21,9 @@ export interface OpenRouterTiers {
 }
 
 export const DEFAULT_OPENROUTER_TIERS: OpenRouterTiers = {
-  fast:     "meta-llama/llama-3.1-8b-instruct",  // $0.02/$0.05 per 1M tokens
-  balanced: "google/gemini-2.5-flash-lite",        // ultra-low, optional thinking
-  flagship: "google/gemini-3-flash-preview",        // multimodal, reasoning levels
+  fast:     "meta-llama/llama-3.1-8b-instruct:free",  // Free tier on OpenRouter — no credits needed
+  balanced: "google/gemini-2.5-flash-lite",            // Ultra-low cost (~$0.10/1M tokens)
+  flagship: "google/gemini-2.5-flash",                  // Capable multimodal model
 };
 
 export const TIER_LABELS: Record<TaskComplexity, string> = {

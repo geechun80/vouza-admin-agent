@@ -188,6 +188,10 @@ async function handleMessage(
       if (ev.type === "tool_start") {
         await sendTyping(token, chatId);
       }
+      // Surface API / model errors directly in the chat so users know what happened
+      if (ev.type === "error" && !response.includes("⚠️")) {
+        response += `\n\n⚠️ ${ev.error}`;
+      }
     }
 
     const reply = response.trim();

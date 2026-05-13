@@ -130,6 +130,10 @@ async function processWAMessage(job: WAMessageJob): Promise<void> {
 
     for await (const ev of agentLoop(userText, session.context, registry)) {
       if (ev.type === "text_delta") response += ev.text;
+      // Surface API / model errors so WhatsApp users know what happened
+      if (ev.type === "error" && !response.includes("⚠️")) {
+        response += `\n\n⚠️ ${ev.error}`;
+      }
     }
 
     const reply = response.trim();
