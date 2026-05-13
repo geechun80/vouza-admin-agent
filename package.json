@@ -3,7 +3,9 @@
   "version": "2.0.0",
   "description": "Self-improving AI agent framework — multi-provider, template-ready, inspired by Claude Code architecture",
   "type": "module",
-  "engines": { "node": ">=18.0.0" },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "build": "tsc && node -e \"const fs=require('fs');fs.cpSync('src/dashboard/public','dist/dashboard/public',{recursive:true,force:true});console.log('✓ public/ copied to dist/')\"",
     "start": "node dist/index.js",
@@ -12,21 +14,25 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",
+    "chalk": "^5.3.0",
+    "dotenv": "^16.4.0",
+    "exceljs": "^4.4.0",
     "express": "^4.21.0",
     "googleapis": "^144.0.0",
-    "nodemailer": "^8.0.7",
-    "node-cron": "^3.0.3",
     "gray-matter": "^4.0.3",
-    "zod": "^3.23.0",
-    "chalk": "^5.3.0",
-    "dotenv": "^16.4.0"
+    "mammoth": "^1.12.0",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^8.0.7",
+    "pdf-parse": "^2.4.5",
+    "zod": "^3.23.0"
   },
   "devDependencies": {
-    "typescript": "^5.5.0",
-    "tsx": "^4.19.0",
-    "@types/node": "^22.0.0",
     "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "@types/node-cron": "^3.0.0",
     "@types/nodemailer": "^6.4.17",
-    "@types/node-cron": "^3.0.0"
+    "@types/pdf-parse": "^1.1.5",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
   }
 }

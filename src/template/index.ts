@@ -26,7 +26,7 @@ import { readEmailsTool, sendEmailTool, draftEmailTool, triageEmailsTool } from 
 import { listEventsTool, createEventTool, updateEventTool, findFreeSlotsTool } from "../tools/calendar.js";
 import { readSpreadsheetTool, writeSpreadsheetTool, searchSpreadsheetTool } from "../tools/spreadsheet.js";
 import { sendSlackMessageTool, readSlackMessagesTool, listSlackChannelsTool } from "../tools/messenger.js";
-import { listFilesTool, readFileTool, writeFileTool, organizeFilesTool } from "../tools/fileManager.js";
+import { listFilesTool, readFileTool, readExcelFileTool, writeFileTool, organizeFilesTool } from "../tools/fileManager.js";
 import { sendTelegramMessageTool, readTelegramUpdatesTool, getTelegramBotInfoTool, forwardTelegramMessageTool } from "../tools/telegram.js";
 import { sendWhatsAppMessageTool, readWhatsAppMessagesTool } from "../tools/whatsapp.js";
 
@@ -42,7 +42,7 @@ const TOOL_CATALOG: Record<string, any[]> = {
     sendTelegramMessageTool, readTelegramUpdatesTool, getTelegramBotInfoTool, forwardTelegramMessageTool,
     sendWhatsAppMessageTool, readWhatsAppMessagesTool,
   ],
-  file: [listFilesTool, readFileTool, writeFileTool, organizeFilesTool],
+  file: [listFilesTool, readFileTool, readExcelFileTool, writeFileTool, organizeFilesTool],
 };
 
 // ─── Template Instance ─────────────────────────────────────────────────────
