@@ -912,6 +912,47 @@
     }
     .btn-icon-sm:hover { border-color:rgba(124,58,237,0.4); color:var(--brand-light); }
 
+    /* ── Voice recording button ── */
+    .btn-icon-sm.recording {
+      background: rgba(239,68,68,0.15);
+      border-color: #ef4444;
+      color: #ef4444;
+      animation: mic-pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes mic-pulse {
+      0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.4); }
+      50%      { box-shadow: 0 0 0 6px rgba(239,68,68,0); }
+    }
+
+    /* ── Voice preview bar (transcript chip + report actions) ── */
+    #voicePreview {
+      padding: 8px 0 0;
+    }
+    .voice-preview-inner {
+      display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+      padding: 8px 12px; border-radius: 10px;
+      background: rgba(124,58,237,0.08); border: 1px solid rgba(124,58,237,0.25);
+    }
+    .voice-status {
+      font-size: 12px; color: var(--brand-light); font-weight: 500; flex-shrink: 0;
+    }
+    .voice-action-chip {
+      padding: 4px 10px; border-radius: 12px; font-size: 11px; cursor: pointer;
+      border: 1px solid rgba(124,58,237,0.35); background: rgba(124,58,237,0.12);
+      color: var(--brand-light); transition: all 0.15s; flex-shrink: 0;
+    }
+    .voice-action-chip:hover {
+      background: rgba(124,58,237,0.25); border-color: rgba(124,58,237,0.5);
+    }
+    .voice-dismiss {
+      margin-left: auto; background: none; border: none; cursor: pointer;
+      color: var(--text-muted); font-size: 14px; line-height: 1; padding: 0 2px;
+    }
+    .voice-dismiss:hover { color: #ef4444; }
+    .rec-timer {
+      font-size: 11px; color: #ef4444; font-weight: 600; font-variant-numeric: tabular-nums;
+    }
+
     #imagePreview {
       display:none; padding:8px 0 0;
     }
@@ -1479,10 +1520,13 @@
       </div>
 
       <div class="guide-input-area">
-        <input type="file" id="fileUpload" style="display:none" accept="image/*,.pdf,.docx,.xlsx,.csv" onchange="handleFileSelect(event)">
+        <input type="file" id="fileUpload" style="display:none" accept="image/*,.pdf,.docx,.xlsx,.csv,.mp3,.mp4,.m4a,.wav,.webm,.ogg,.flac" onchange="handleFileSelect(event)">
         <div id="imagePreview"></div>
+        <div id="voicePreview" style="display:none"></div>
         <div class="guide-input-row">
-          <button class="btn-icon-sm" onclick="openAttachment()" title="Attach file or image">📎</button>
+          <button class="btn-icon-sm" onclick="openAttachment()" title="Attach image, document, or audio file">📎</button>
+          <button class="btn-icon-sm" id="micBtn" onclick="toggleVoiceRecording()" title="Record voice message (click to start, click again to stop)">🎤</button>
+          <span class="rec-timer" id="recTimer" style="display:none">⏺ 0:00</span>
           <input type="text" id="guideInput" placeholder="Ask me anything..." onkeydown="if(event.key==='Enter')sendGuideMsg()">
           <button class="btn-icon-sm" onclick="clearConversation()" title="Clear conversation">🗑️</button>
           <button class="btn-send" onclick="sendGuideMsg()">↑</button>
@@ -2622,6 +2666,9 @@ const TOOL_LABELS = {
   read_file:            '📄 Reading file',
   write_file:           '💾 Saving file',
   organize_files:       '🗂️ Organising files',
+  read_excel_file:      '📊 Reading spreadsheet',
+  transcribe_audio:         '🎙️ Transcribing audio',
+  transcribe_and_summarize: '🎙️ Transcribing & summarising',
   send_slack_message:   '💬 Sending Slack message',
   read_slack_messages:  '💬 Reading Slack',
   send_telegram_message:'✈️ Sending Telegram',
@@ -2652,6 +2699,15 @@ function handleFileSelect(e) {
   if (!file) return;
   e.target.value = ''; // reset so same file can be reselected
 
+  // Route audio files to the voice transcription path
+  const AUDIO_TYPES = /^audio\//;
+  const AUDIO_EXTS  = /\.(mp3|mp4|m4a|wav|webm|ogg|flac)$/i;
+  if (AUDIO_TYPES.test(file.type) || AUDIO_EXTS.test(file.name)) {
+    transcribeAudioFile(file);
+    return;
+  }
+
+  // Images and documents → existing preview/chat flow
   const reader = new FileReader();
   reader.onload = (ev) => {
     const dataUrl  = ev.target.result;
@@ -2682,6 +2738,248 @@ function clearImagePreview() {
 
 /** Alias for the ✕ button in the image preview bar */
 function clearAttachment() { clearImagePreview(); }
+
+// ── Voice Recording & Transcription ────────────────────────────────────────
+
+const voice = {
+  recorder:   null,   // MediaRecorder instance
+  chunks:     [],     // audio chunks collected during recording
+  mimeType:   '',     // chosen MIME type (webm or ogg or mp4)
+  timerID:    null,   // setInterval for the recording timer
+  startedAt:  0,      // Date.now() when recording started
+  transcript: '',     // last successful transcript
+};
+
+/** Toggle recording on/off. */
+async function toggleVoiceRecording() {
+  if (voice.recorder && voice.recorder.state === 'recording') {
+    stopVoiceRecording();
+  } else {
+    await startVoiceRecording();
+  }
+}
+
+async function startVoiceRecording() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+    // Pick best supported MIME type
+    const mimes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'];
+    voice.mimeType = mimes.find(m => MediaRecorder.isTypeSupported(m)) || '';
+
+    voice.chunks  = [];
+    voice.recorder = new MediaRecorder(stream, voice.mimeType ? { mimeType: voice.mimeType } : {});
+
+    voice.recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) voice.chunks.push(e.data);
+    };
+
+    voice.recorder.onstop = async () => {
+      // Stop all mic tracks so the browser releases the mic
+      stream.getTracks().forEach(t => t.stop());
+      const blob = new Blob(voice.chunks, { type: voice.mimeType || 'audio/webm' });
+      await transcribeBlob(blob, voice.mimeType || 'audio/webm');
+    };
+
+    voice.recorder.start(250); // collect in 250 ms chunks
+    voice.startedAt = Date.now();
+
+    // Update UI
+    document.getElementById('micBtn').classList.add('recording');
+    document.getElementById('micBtn').title = 'Recording... click to stop';
+    document.getElementById('recTimer').style.display = '';
+    updateRecTimer();
+    voice.timerID = setInterval(updateRecTimer, 1000);
+
+    // Show voice preview in "recording" state
+    showVoicePreview('recording', null);
+
+  } catch (err) {
+    showToast('Microphone access denied. Please allow mic access in browser settings.', 'error');
+  }
+}
+
+function stopVoiceRecording() {
+  if (voice.recorder && voice.recorder.state !== 'inactive') {
+    voice.recorder.stop();
+  }
+  clearInterval(voice.timerID);
+
+  // Reset mic button
+  const btn = document.getElementById('micBtn');
+  btn.classList.remove('recording');
+  btn.title = 'Record voice message';
+  document.getElementById('recTimer').style.display = 'none';
+
+  // Show transcribing state
+  showVoicePreview('transcribing', null);
+}
+
+function updateRecTimer() {
+  const elapsed = Math.floor((Date.now() - voice.startedAt) / 1000);
+  const m = Math.floor(elapsed / 60);
+  const s = elapsed % 60;
+  document.getElementById('recTimer').textContent = `⏺ ${m}:${String(s).padStart(2,'0')}`;
+}
+
+/** Transcribe a Blob via the /api/transcribe endpoint. */
+async function transcribeBlob(blob, mimeType) {
+  try {
+    // Convert blob → base64
+    const base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload  = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+
+    const ext = mimeType.split('/')[1]?.split(';')[0] || 'webm';
+
+    const res  = await fetch('/api/transcribe', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        audioBase64: base64,
+        mimeType,
+        filename: `recording.${ext}`,
+      }),
+    });
+
+    const data = await res.json();
+
+    if (!data.success) {
+      showVoicePreview('error', data.error || 'Transcription failed');
+      return;
+    }
+
+    voice.transcript = data.transcript || '';
+    if (!voice.transcript) {
+      showVoicePreview('error', 'No speech detected in the recording.');
+      return;
+    }
+
+    // Fill transcript into input and show action chips
+    document.getElementById('guideInput').value = voice.transcript;
+    showVoicePreview('ready', voice.transcript);
+
+  } catch (err) {
+    showVoicePreview('error', `Network error: ${err}`);
+  }
+}
+
+/** Handle audio files selected via the file picker (📎 button). */
+async function transcribeAudioFile(file) {
+  showVoicePreview('transcribing', null);
+
+  const base64 = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload  = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+
+  try {
+    const res  = await fetch('/api/transcribe', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        audioBase64: base64,
+        mimeType:    file.type || 'audio/mpeg',
+        filename:    file.name,
+      }),
+    });
+
+    const data = await res.json();
+
+    if (!data.success) {
+      showVoicePreview('error', data.error || 'Transcription failed');
+      return;
+    }
+
+    voice.transcript = data.transcript || '';
+    if (!voice.transcript) {
+      showVoicePreview('error', 'No speech detected in the audio file.');
+      return;
+    }
+
+    document.getElementById('guideInput').value = voice.transcript;
+    showVoicePreview('ready', voice.transcript);
+
+  } catch (err) {
+    showVoicePreview('error', `Network error: ${err}`);
+  }
+}
+
+/**
+ * Render the voice preview bar in different states.
+ * state: 'recording' | 'transcribing' | 'ready' | 'error'
+ */
+function showVoicePreview(state, payload) {
+  const el = document.getElementById('voicePreview');
+  el.style.display = 'block';
+
+  const states = {
+    recording:    `<div class="voice-preview-inner">
+                    <span class="voice-status">⏺ Recording... speak now</span>
+                    <button class="voice-dismiss" onclick="stopVoiceRecording()">⏹ Stop</button>
+                  </div>`,
+    transcribing: `<div class="voice-preview-inner">
+                    <span class="voice-status">🔄 Transcribing audio...</span>
+                  </div>`,
+    ready:        `<div class="voice-preview-inner">
+                    <span class="voice-status">🎙️ Transcribed — send or transform:</span>
+                    <button class="voice-action-chip" onclick="sendVoiceAs('raw')"     title="Send the plain transcript">💬 Send as-is</button>
+                    <button class="voice-action-chip" onclick="sendVoiceAs('meeting')" title="Format as meeting notes with action items">📋 Meeting Report</button>
+                    <button class="voice-action-chip" onclick="sendVoiceAs('summary')" title="Extract key bullet points">📝 Key Points</button>
+                    <button class="voice-action-chip" onclick="sendVoiceAs('actions')" title="Pull out all tasks and deadlines">✅ Action Items</button>
+                    <button class="voice-action-chip" onclick="sendVoiceAs('call')"    title="Format as call summary">📞 Call Summary</button>
+                    <button class="voice-dismiss" onclick="clearVoicePreview()" title="Dismiss">✕</button>
+                  </div>`,
+    error:        `<div class="voice-preview-inner" style="border-color:rgba(239,68,68,0.3);background:rgba(239,68,68,0.06)">
+                    <span class="voice-status" style="color:#f87171">⚠️ ${escHtml(payload || 'Transcription failed')}</span>
+                    <button class="voice-dismiss" onclick="clearVoicePreview()">✕</button>
+                  </div>`,
+  };
+
+  el.innerHTML = states[state] || '';
+}
+
+function clearVoicePreview() {
+  const el = document.getElementById('voicePreview');
+  el.style.display = 'none';
+  el.innerHTML = '';
+  voice.transcript = '';
+}
+
+/**
+ * Send the transcript with an optional transformation prefix.
+ * The agent will see the instruction + transcript and produce the report.
+ */
+function sendVoiceAs(mode) {
+  const transcript = voice.transcript || document.getElementById('guideInput').value;
+  if (!transcript) return;
+
+  const prefixes = {
+    raw:     '',
+    meeting: 'Please format the following transcript as structured meeting notes. ' +
+             'Include: attendees mentioned, topics discussed, key decisions made, ' +
+             'action items (with owners and deadlines if mentioned), and next steps.\n\n📝 Transcript:\n',
+    summary: 'Please summarise the following transcript in clear bullet points. ' +
+             'Include the main ideas, key takeaways, and any tasks or commitments mentioned.\n\n📝 Transcript:\n',
+    actions: 'Please extract all action items, tasks, and commitments from the following transcript. ' +
+             'For each item, note the owner and deadline if mentioned. Format as a checklist.\n\n📝 Transcript:\n',
+    call:    'Please format the following transcript as a call summary. ' +
+             'Include: participants, purpose of the call, topics covered, agreements reached, ' +
+             'and follow-up actions required.\n\n📝 Transcript:\n',
+  };
+
+  const msg = (prefixes[mode] || '') + transcript;
+
+  // Put in input, clear voice UI, then send
+  document.getElementById('guideInput').value = msg;
+  clearVoicePreview();
+  sendGuideMsg();
+}
 
 // ── Clear conversation ──────────────────────────────────────────────────────
 

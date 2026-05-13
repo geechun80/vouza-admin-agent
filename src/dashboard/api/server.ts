@@ -64,7 +64,7 @@ const DEFAULT_CONFIG: SetupConfig = {
 
 export async function startDashboard(port = 3456): Promise<void> {
   const app = express();
-  app.use(express.json({ limit: "5mb" }));
+  app.use(express.json({ limit: "30mb" })); // 30 MB to accommodate base64 audio uploads
   app.use(express.static(PUBLIC_DIR));
 
   // --- Model Catalog API ---
@@ -281,6 +281,70 @@ export async function startDashboard(port = 3456): Promise<void> {
   app.delete("/api/chat/session/:sessionId", (req, res) => {
     clearSession(req.params.sessionId);
     res.json({ success: true });
+  });
+
+  // --- Voice Transcription (OpenAI Whisper) ---
+  // Accepts base64-encoded audio from the browser microphone or uploaded audio file.
+  app.post("/api/transcribe", async (req, res) => {
+    const { audioBase64, mimeType, filename, language } = req.body as {
+      audioBase64: string;
+      mimeType:    string;
+      filename?:   string;
+      language?:   string;
+    };
+
+    if (!audioBase64 || !mimeType) {
+      return res.status(400).json({ success: false, error: "audioBase64 and mimeType are required" });
+    }
+
+    try {
+      // Find the OpenAI API key from saved config
+      const config = await loadSetupConfig();
+      const openaiKey =
+        config.credentials?.openaiApiKey ||
+        (config.agent?.provider === "openai"
+          ? Object.values(config.credentials || {}).find((v) => String(v).startsWith("sk-"))
+          : "") ||
+        "";
+
+      if (!openaiKey) {
+        return res.json({
+          success: false,
+          error:
+            "Voice transcription requires an OpenAI API key. " +
+            'Please add it in the setup wizard: AI Provider → select OpenAI → enter your key.',
+        });
+      }
+
+      // Decode base64 → Buffer (strip data-URI prefix if present)
+      const rawBase64  = audioBase64.replace(/^data:[^;]+;base64,/, "");
+      const audioBuffer = Buffer.from(rawBase64, "base64");
+      const fname       = filename || `recording.${mimeType.split("/")[1]?.split(";")[0] || "webm"}`;
+
+      // Build FormData and call Whisper
+      const formData = new FormData();
+      const blob     = new Blob([audioBuffer], { type: mimeType });
+      formData.append("file",            blob, fname);
+      formData.append("model",           "whisper-1");
+      formData.append("response_format", "json");
+      if (language) formData.append("language", language);
+
+      const whisperRes = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+        method:  "POST",
+        headers: { Authorization: `Bearer ${openaiKey}` },
+        body:    formData,
+      });
+
+      if (!whisperRes.ok) {
+        const err = await whisperRes.text();
+        return res.json({ success: false, error: `Whisper API error: ${err.slice(0, 300)}` });
+      }
+
+      const data = await whisperRes.json();
+      res.json({ success: true, transcript: (data.text ?? "").trim() });
+    } catch (err) {
+      res.json({ success: false, error: `Transcription failed: ${err}` });
+    }
   });
 
   // --- Memory API ---

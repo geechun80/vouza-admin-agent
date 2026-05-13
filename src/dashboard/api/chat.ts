@@ -33,6 +33,7 @@ import {
 } from "../../tools/telegram.js";
 import { sendWhatsAppMessageTool, readWhatsAppMessagesTool } from "../../tools/whatsapp.js";
 import { saveMemoryTool, searchMemoryTool, forgetMemoryTool } from "../../tools/memory.js";
+import { transcribeAudioTool, transcribeAndSummarizeTool } from "../../tools/voice.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Chat system prompt — full office agent capabilities
@@ -326,6 +327,7 @@ function buildRegistry(): ToolRegistry {
     sendTelegramMessageTool, readTelegramUpdatesTool, getTelegramBotInfoTool, forwardTelegramMessageTool,
     sendWhatsAppMessageTool, readWhatsAppMessagesTool,
     saveMemoryTool, searchMemoryTool, forgetMemoryTool,
+    transcribeAudioTool, transcribeAndSummarizeTool,
   ];
   for (const tool of allTools) registry.register(tool as any);
   return registry;

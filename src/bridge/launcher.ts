@@ -24,6 +24,7 @@ import { listFilesTool, readFileTool, readExcelFileTool, writeFileTool, organize
 import { sendTelegramMessageTool, readTelegramUpdatesTool, getTelegramBotInfoTool, forwardTelegramMessageTool } from "../tools/telegram.js";
 import { sendWhatsAppMessageTool, readWhatsAppMessagesTool } from "../tools/whatsapp.js";
 import { saveMemoryTool, searchMemoryTool, forgetMemoryTool } from "../tools/memory.js";
+import { transcribeAudioTool, transcribeAndSummarizeTool } from "../tools/voice.js";
 
 export interface AgentInstance {
   context: AgentContext;
@@ -91,6 +92,10 @@ export async function launchAgent(): Promise<AgentInstance> {
   registry.register(saveMemoryTool as any);
   registry.register(searchMemoryTool as any);
   registry.register(forgetMemoryTool as any);
+
+  // Voice tools
+  registry.register(transcribeAudioTool as any);
+  registry.register(transcribeAndSummarizeTool as any);
 
   console.log(chalk.green(`  ${registry.getAll().length} tools registered`));
 
