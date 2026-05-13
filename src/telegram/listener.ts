@@ -20,7 +20,22 @@ const RETRY_DELAY_MS = 5_000;   // wait 5s on network errors before re-polling
 const MAX_MSG_LEN = 4000;       // Telegram hard limit is 4096; stay under it
 
 // Per-chat conversation contexts (keyed by chat_id)
-const chatContexts = new Map<number, AgentContext>();
+interface ChatSession {
+  context: AgentContext;
+  lastActive: number;
+}
+const chatContexts = new Map<number, ChatSession>();
+
+// Prune inactive sessions (older than 2 hours) every 30 minutes
+const pruneInterval = setInterval(() => {
+  const cutoff = Date.now() - 2 * 60 * 60 * 1000;
+  for (const [id, session] of chatContexts) {
+    if (session.lastActive < cutoff) {
+      chatContexts.delete(id);
+    }
+  }
+}, 30 * 60 * 1000);
+if (pruneInterval.unref) pruneInterval.unref();
 
 // Per-chat lock — prevents overlapping responses if messages arrive fast
 const processingChats = new Set<number>();
@@ -36,14 +51,19 @@ let updateOffset = 0;
 function getOrCreateChatContext(chatId: number, baseCtx: AgentContext): AgentContext {
   if (!chatContexts.has(chatId)) {
     chatContexts.set(chatId, {
-      ...baseCtx,
-      sessionId: `tg-${chatId}-${randomUUID().slice(0, 6)}`,
-      turnCount: 0,
-      messages: [],    // fresh conversation history per chat
-      taskQueue: [],
+      context: {
+        ...baseCtx,
+        sessionId: `tg-${chatId}-${randomUUID().slice(0, 6)}`,
+        turnCount: 0,
+        messages: [],    // fresh conversation history per chat
+        taskQueue: [],
+      },
+      lastActive: Date.now()
     });
   }
-  return chatContexts.get(chatId)!;
+  const session = chatContexts.get(chatId)!;
+  session.lastActive = Date.now();
+  return session.context;
 }
 
 /** Send "typing…" indicator so users know the agent is working. */

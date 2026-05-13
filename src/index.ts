@@ -237,6 +237,14 @@ async function main() {
   prompt();
 }
 
+// --- Global Error Handlers ---
+process.on("uncaughtException", (err) => {
+  console.error(chalk.red("\n[Uncaught Exception]"), err);
+});
+process.on("unhandledRejection", (reason, promise) => {
+  console.error(chalk.red("\n[Unhandled Rejection] at:"), promise, chalk.red("reason:"), reason);
+});
+
 // --- Run ---
 main().catch((err) => {
   console.error("Fatal error:", err);

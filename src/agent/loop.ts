@@ -365,8 +365,20 @@ export async function* agentLoop(
 
   yield { type: "turn_complete", turnCount: state.turnCount };
 
-  // Update context
-  context.messages = state.messages;
+  // Update context with sliding window to prevent unbounded growth
+  let newMessages = state.messages;
+  if (newMessages.length > 40) {
+    let sliceIdx = newMessages.length - 40;
+    // Ensure we don't start with a tool_result (which requires the preceding tool_use)
+    while (sliceIdx < newMessages.length) {
+      const msg = newMessages[sliceIdx];
+      const isToolResult = msg.role === "user" && Array.isArray(msg.content) && msg.content.some((b: any) => b.type === "tool_result");
+      if (!isToolResult) break;
+      sliceIdx++;
+    }
+    newMessages = newMessages.slice(sliceIdx);
+  }
+  context.messages = newMessages;
   context.turnCount = state.turnCount;
 
   // Log performance for self-improvement

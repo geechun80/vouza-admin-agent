@@ -83,12 +83,17 @@ interface ChatSession {
 const sessions = new Map<string, ChatSession>();
 
 // Prune sessions older than 2 hours every 30 minutes
-setInterval(() => {
+const sessionPruneInterval = setInterval(() => {
   const cutoff = Date.now() - 2 * 60 * 60 * 1000;
   for (const [id, s] of sessions) {
     if (s.lastActive < cutoff) sessions.delete(id);
   }
 }, 30 * 60 * 1000);
+if (sessionPruneInterval.unref) sessionPruneInterval.unref();
+
+// Shared memory store for all dashboard sessions
+const globalMemory = createMemoryStore("./data/memory");
+let globalMemoryLoaded = false;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public API
@@ -130,14 +135,16 @@ export function getOrCreateSession(
   const registry = buildRegistry();
 
   // Memory store (shared with main agent if it exists)
-  const memory = createMemoryStore("./data/memory");
-  memory.load().catch(() => { /* silent — no memory yet is fine */ });
+  if (!globalMemoryLoaded) {
+    globalMemory.load().catch(() => { /* silent — no memory yet is fine */ });
+    globalMemoryLoaded = true;
+  }
 
   const context: AgentContext = {
     sessionId,
     turnCount: 0,
     messages: [],
-    memory,
+    memory: globalMemory,
     config: agentConfig,
     tools: registry.getAll().reduce((m, t) => m.set(t.name, t), new Map()),
     taskQueue: [],
