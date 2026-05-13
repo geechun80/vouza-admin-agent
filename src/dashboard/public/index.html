@@ -2362,7 +2362,11 @@ async function startAgentNow() {
         <div style="font-size:13px;color:var(--text-dim);margin-top:6px">Model: ${d.model} · ${d.toolCount} tools · ${d.skillCount} skills</div>`;
       document.getElementById('goLiveSub').textContent = `${d.name} is running and ready to work.`;
       toast('Your AI is live! 🚀','success');
-      guideMsg('bot','✅ Your AI is now running! You can close this setup window. Your AI will handle tasks automatically.');
+      // Auto-trigger guided onboarding — show the user exactly what's working
+      // and walk them through connecting anything that's missing
+      const onboardMsg = "My AI assistant is now live. Please check my setup status and guide me step by step through connecting any integrations that are not yet configured — start with the most important one (email or calendar).";
+      appendUserMsg(onboardMsg, null);
+      callLiveAgent(onboardMsg, null);
     } else {
       box.innerHTML = `<div style="color:var(--error)">Failed to start: ${d.error}</div>`;
       toast('Failed: '+d.error,'error');
@@ -2719,6 +2723,8 @@ const TOOL_LABELS = {
   read_telegram_updates:'✈️ Reading Telegram',
   send_whatsapp_message:'📱 Sending WhatsApp',
   read_whatsapp_messages:'📱 Reading WhatsApp',
+  get_setup_status:'🔍 Checking setup status',
+  save_integration_credentials:'💾 Saving credentials',
 };
 
 function buildToolCard(toolName, status, input) {

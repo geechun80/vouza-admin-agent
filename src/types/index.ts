@@ -50,7 +50,8 @@ export type ToolCategory =
   | "file"
   | "search"
   | "self-improve"
-  | "memory";
+  | "memory"
+  | "system";
 
 export interface APIToolSchema {
   name: string;

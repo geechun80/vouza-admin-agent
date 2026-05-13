@@ -277,10 +277,23 @@ export async function startTelegramListener(
           const chatId: number   = msg.chat.id;
           const fromName: string = [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(" ") || "User";
 
-          // ── /reset command — clear conversation history ──────────────────
-          if (msg.text === "/reset" || msg.text === "/start") {
+          // ── /reset — clear history only ──────────────────────────────────
+          if (msg.text === "/reset") {
             clearChatContext(chatId);
-            await sendReply(token, chatId, "✅ Conversation reset! Starting fresh. How can I help you?");
+            await sendReply(token, chatId, "✅ Conversation cleared! Send me any task or ask me to /start setup again.");
+            continue;
+          }
+
+          // ── /start — clear history AND trigger guided onboarding ─────────
+          if (msg.text === "/start") {
+            clearChatContext(chatId);
+            handleMessage(
+              token, chatId, fromName,
+              "Hello! I just started. Please check my setup status and guide me through connecting any integrations that aren't configured yet. Start with the most important one.",
+              baseContext, registry
+            ).catch((err) => {
+              console.error(chalk.red(`  [Telegram] Onboarding error for chat ${chatId}:`, err));
+            });
             continue;
           }
 

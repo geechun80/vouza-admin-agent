@@ -25,6 +25,7 @@ import { sendTelegramMessageTool, readTelegramUpdatesTool, getTelegramBotInfoToo
 import { sendWhatsAppMessageTool, readWhatsAppMessagesTool } from "../tools/whatsapp.js";
 import { saveMemoryTool, searchMemoryTool, forgetMemoryTool } from "../tools/memory.js";
 import { transcribeAudioTool, transcribeAndSummarizeTool } from "../tools/voice.js";
+import { getSetupStatusTool, saveIntegrationCredentialsTool } from "../tools/setup.js";
 
 export interface AgentInstance {
   context: AgentContext;
@@ -97,6 +98,10 @@ export async function launchAgent(): Promise<AgentInstance> {
   registry.register(transcribeAudioTool as any);
   registry.register(transcribeAndSummarizeTool as any);
 
+  // Setup & onboarding tools
+  registry.register(getSetupStatusTool as any);
+  registry.register(saveIntegrationCredentialsTool as any);
+
   console.log(chalk.green(`  ${registry.getAll().length} tools registered`));
 
   // --- Load Memory ---
@@ -132,6 +137,14 @@ export async function launchAgent(): Promise<AgentInstance> {
   // Runs in background — starts a long-polling loop so users can message the
   // bot and receive real AI responses back. Silently skips if not configured.
   await startTelegramListener(context, registry);
+
+  // --- Send launch notification to Telegram (if configured) ---
+  // Lets the user know the agent is live and kicks off guided onboarding.
+  const tgToken = config.tools?.telegram?.botToken;
+  if (tgToken) {
+    // We don't have a chat_id yet (user hasn't messaged), so just log guidance
+    console.log(chalk.cyan(`  [Telegram] Bot is live — message it to start guided setup`));
+  }
 
   return {
     context,
