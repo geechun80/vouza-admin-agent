@@ -4,7 +4,7 @@
 // =============================================================================
 
 import express from "express";
-import { readFile, writeFile, mkdir } from "fs/promises";
+import { readFile, writeFile, mkdir, readdir, unlink, access } from "fs/promises";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { getModelCatalogForUI } from "../../config/models.js";
@@ -424,6 +424,65 @@ export async function startDashboard(port = 3456): Promise<void> {
     } catch (err) {
       res.status(500).json({ success: false, error: String(err) });
     }
+  });
+
+  // --- Conversation History API ---
+  const CONV_DIR = join(process.cwd(), "data", "conversations");
+
+  interface ConvMessage { role: "user" | "assistant"; content: string; timestamp: string; }
+  interface Conversation {
+    id: string; title: string; preview: string;
+    createdAt: string; updatedAt: string;
+    messageCount: number; messages: ConvMessage[];
+  }
+
+  async function ensureConvDir() {
+    try { await access(CONV_DIR); } catch { await mkdir(CONV_DIR, { recursive: true }); }
+  }
+
+  // List all conversations (metadata only, sorted newest first)
+  app.get("/api/conversations", async (_req, res) => {
+    try {
+      await ensureConvDir();
+      const files = (await readdir(CONV_DIR)).filter(f => f.endsWith(".json"));
+      const convs = await Promise.all(files.map(async f => {
+        try {
+          const raw = await readFile(join(CONV_DIR, f), "utf8");
+          const c: Conversation = JSON.parse(raw);
+          return { id: c.id, title: c.title, preview: c.preview || "", updatedAt: c.updatedAt, messageCount: c.messageCount || 0 };
+        } catch { return null; }
+      }));
+      const sorted = (convs.filter(Boolean) as Conversation[])
+        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+      res.json(sorted);
+    } catch (err) { res.status(500).json({ error: String(err) }); }
+  });
+
+  // Get full conversation (with messages)
+  app.get("/api/conversations/:id", async (req, res) => {
+    try {
+      const file = join(CONV_DIR, `${req.params.id}.json`);
+      const raw = await readFile(file, "utf8");
+      res.json(JSON.parse(raw));
+    } catch { res.status(404).json({ error: "Not found" }); }
+  });
+
+  // Create or update conversation
+  app.post("/api/conversations/:id", async (req, res) => {
+    try {
+      await ensureConvDir();
+      const file = join(CONV_DIR, `${req.params.id}.json`);
+      await writeFile(file, JSON.stringify(req.body, null, 2), "utf8");
+      res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: String(err) }); }
+  });
+
+  // Delete conversation
+  app.delete("/api/conversations/:id", async (req, res) => {
+    try {
+      await unlink(join(CONV_DIR, `${req.params.id}.json`));
+      res.json({ success: true });
+    } catch { res.json({ success: true }); } // already gone is fine
   });
 
   // --- Serve SPA ---

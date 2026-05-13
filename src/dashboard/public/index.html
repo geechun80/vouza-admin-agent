@@ -1071,6 +1071,195 @@
     .agent-status-box.show { display:block; }
 
     /* ============================================================
+       LIVE MODE — post-wizard layout with conversation sidebar
+    ============================================================ */
+    #mainApp.live-mode .app-layout {
+      grid-template-columns: 268px 1fr;
+      max-width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+    }
+    #mainApp.live-mode .main-col {
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+      border-right: 1px solid var(--border);
+    }
+    /* hide wizard chrome in live mode */
+    #mainApp.live-mode .progress-rail,
+    #mainApp.live-mode #resumeWizardBanner,
+    #mainApp.live-mode .step-view,
+    #mainApp.live-mode .agent-identity-bar { display:none !important; }
+    /* show conversation sidebar */
+    #mainApp.live-mode .conv-sidebar { display:flex; }
+    /* chat column fills remaining width and stays full height */
+    #mainApp.live-mode .guide-col {
+      height: 100vh;
+      position: sticky;
+      top: 0;
+    }
+
+    /* ── Conversation Sidebar ── */
+    .conv-sidebar {
+      display: none;
+      flex-direction: column;
+      height: 100vh;
+      background: var(--bg);
+      overflow: hidden;
+    }
+    .conv-sidebar-top {
+      padding: 14px 12px 12px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .conv-sidebar-logo {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      flex: 1;
+      min-width: 0;
+    }
+    .conv-sidebar-logo img { height:18px; width:auto; }
+    .conv-sidebar-logo span {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .conv-new-btn {
+      background: var(--brand);
+      color: #fff;
+      border: none;
+      border-radius: 7px;
+      padding: 6px 11px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+      transition: opacity 0.15s;
+    }
+    .conv-new-btn:hover { opacity:0.82; }
+
+    .conv-search-wrap {
+      padding: 9px 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .conv-search-wrap input {
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 6px 10px;
+      font-size: 12px;
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .conv-search-wrap input:focus { border-color: var(--brand); }
+
+    .conv-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 6px 0 6px;
+    }
+    .conv-list::-webkit-scrollbar { width:4px; }
+    .conv-list::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+
+    .conv-group-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--text-dim);
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      padding: 10px 12px 3px;
+    }
+    .conv-item {
+      position: relative;
+      padding: 8px 34px 8px 12px;
+      cursor: pointer;
+      border-radius: 8px;
+      margin: 1px 5px;
+      transition: background 0.12s;
+    }
+    .conv-item:hover { background: var(--surface); }
+    .conv-item.active { background: rgba(124,58,237,0.13); }
+    .conv-item.active .conv-item-title { color: var(--brand-light); }
+    .conv-item-title {
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 2px;
+    }
+    .conv-item-meta {
+      font-size: 11px;
+      color: var(--text-dim);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .conv-item-del {
+      position: absolute;
+      right: 6px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      font-size: 15px;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.15s;
+      padding: 2px 5px;
+      border-radius: 4px;
+      line-height: 1;
+    }
+    .conv-item:hover .conv-item-del { opacity:1; }
+    .conv-item-del:hover { background:rgba(239,68,68,0.15); color:var(--error); }
+
+    .conv-empty {
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 12px;
+      padding: 32px 16px;
+      line-height: 1.7;
+    }
+    .conv-empty-icon { font-size: 28px; margin-bottom: 10px; }
+
+    .conv-sidebar-footer {
+      padding: 10px 12px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .conv-footer-info { font-size:11px; color:var(--text-dim); line-height:1.5; }
+    .conv-memory-btn {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      border-radius: 6px;
+      padding: 5px 9px;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .conv-memory-btn:hover { border-color:var(--brand); color:var(--brand-light); }
+
+    /* history messages look slightly dimmer to distinguish from live */
+    .guide-msg.history .msg-bubble { opacity: 0.85; }
+
+    /* ============================================================
        RESPONSIVE
     ============================================================ */
     @media (max-width: 900px) {
@@ -1237,6 +1426,41 @@
 
     <!-- Main Content -->
     <div class="main-col">
+
+      <!-- ════ CONVERSATION SIDEBAR (shown in live mode) ════ -->
+      <div class="conv-sidebar" id="convSidebar">
+
+        <!-- Header -->
+        <div class="conv-sidebar-top">
+          <div class="conv-sidebar-logo">
+            <img src="/images/vouza-logo.png" alt="Vouza">
+            <span id="convSidebarAgentName">Admin Agent</span>
+          </div>
+          <button class="conv-new-btn" onclick="newConversation()">✏️ New</button>
+        </div>
+
+        <!-- Search -->
+        <div class="conv-search-wrap">
+          <input type="text" id="convSearch" placeholder="🔍  Search conversations…" oninput="filterConvs(this.value)">
+        </div>
+
+        <!-- Conversation list -->
+        <div class="conv-list" id="convList">
+          <div class="conv-empty">
+            <div class="conv-empty-icon">💬</div>
+            No conversations yet.<br>Start chatting!
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="conv-sidebar-footer">
+          <div class="conv-footer-info">
+            <div>💾 Saved automatically</div>
+          </div>
+          <button class="conv-memory-btn" onclick="toggleMemoryPanel()">🧠 Memories</button>
+        </div>
+
+      </div><!-- /conv-sidebar -->
 
       <!-- Agent Identity Bar -->
       <div class="agent-identity-bar">
@@ -2412,6 +2636,8 @@ async function startAgentNow() {
         <div style="font-size:13px;color:var(--text-dim);margin-top:6px">Model: ${d.model} · ${d.toolCount} tools · ${d.skillCount} skills</div>`;
       document.getElementById('goLiveSub').textContent = `${d.name} is running and ready to work.`;
       toast('Your AI is live! 🚀','success');
+      // Activate conversation sidebar (live mode layout)
+      activateLiveMode();
       // Show the "how to keep running" guide
       const guide = document.getElementById('keepRunningGuide');
       if (guide) guide.style.display = 'block';
@@ -2419,6 +2645,7 @@ async function startAgentNow() {
       // and walk them through connecting anything that's missing
       const onboardMsg = "My AI assistant is now live. Please check my setup status and guide me step by step through connecting any integrations that are not yet configured — start with the most important one (email or calendar).";
       appendUserMsg(onboardMsg, null);
+      convTrackUser(onboardMsg);   // track for history
       callLiveAgent(onboardMsg, null);
     } else {
       box.innerHTML = `<div style="color:var(--error)">Failed to start: ${d.error}</div>`;
@@ -2593,6 +2820,208 @@ function guideBotScripted(text) {
   }, Math.min(text.length * 10, 1000));
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// CONVERSATION HISTORY — persistent chat threads (ChatGPT-style sidebar)
+// ══════════════════════════════════════════════════════════════════════════════
+
+const convState = {
+  currentId:   null,   // active conversation ID
+  messages:    [],     // [{role, content, timestamp}]
+  allConvs:    [],     // metadata list from server
+  searchQuery: '',
+};
+
+function generateConvId() {
+  return 'conv_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
+}
+
+// Switch dashboard to "live" mode — shows conversation sidebar, hides wizard
+function activateLiveMode() {
+  document.getElementById('mainApp').classList.add('live-mode');
+  // Sync agent name into sidebar header
+  const name = document.getElementById('agentName')?.value || state?.agentName || 'Admin Agent';
+  const nameEl = document.getElementById('convSidebarAgentName');
+  if (nameEl) nameEl.textContent = name;
+  // Start fresh conversation
+  newConversation();
+  // Load existing conversations
+  loadConversations();
+}
+
+// Create a brand-new conversation thread
+function newConversation() {
+  convState.currentId = generateConvId();
+  convState.messages  = [];
+  // Clear chat panel but keep the typing indicator
+  const box = document.getElementById('guideMessages');
+  if (box) {
+    const typing = box.querySelector('#guideTyping');
+    Array.from(box.children).forEach(el => { if (el.id !== 'guideTyping') el.remove(); });
+    if (!typing) {
+      box.insertAdjacentHTML('afterbegin',
+        '<div class="guide-typing" id="guideTyping"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>');
+    }
+  }
+  // De-select all sidebar items
+  document.querySelectorAll('.conv-item').forEach(el => el.classList.remove('active'));
+}
+
+// Load conversation list from server and render sidebar
+async function loadConversations() {
+  try {
+    const convs = await fetch('/api/conversations').then(r => r.json());
+    convState.allConvs = Array.isArray(convs) ? convs : [];
+    renderConvList(convState.searchQuery
+      ? convState.allConvs.filter(c => c.title.toLowerCase().includes(convState.searchQuery))
+      : convState.allConvs);
+  } catch(e) { console.warn('Conv list fetch failed:', e); }
+}
+
+// Filter sidebar list by search query
+function filterConvs(query) {
+  convState.searchQuery = (query || '').toLowerCase();
+  const filtered = convState.searchQuery
+    ? convState.allConvs.filter(c => c.title.toLowerCase().includes(convState.searchQuery))
+    : convState.allConvs;
+  renderConvList(filtered);
+}
+
+// Render the grouped conversation list
+function renderConvList(convs) {
+  const list = document.getElementById('convList');
+  if (!list) return;
+  if (!convs || !convs.length) {
+    list.innerHTML = '<div class="conv-empty"><div class="conv-empty-icon">💬</div>No conversations yet.<br>Start chatting!</div>';
+    return;
+  }
+  const now       = Date.now();
+  const todayMs   = new Date().setHours(0,0,0,0);
+  const yesterMs  = todayMs - 86400000;
+  const weekMs    = todayMs - 6 * 86400000;
+  const groups    = [
+    { label:'Today',       items:[] },
+    { label:'Yesterday',   items:[] },
+    { label:'Last 7 days', items:[] },
+    { label:'Older',       items:[] },
+  ];
+  convs.forEach(c => {
+    const t = new Date(c.updatedAt).getTime();
+    if      (t >= todayMs)  groups[0].items.push(c);
+    else if (t >= yesterMs) groups[1].items.push(c);
+    else if (t >= weekMs)   groups[2].items.push(c);
+    else                    groups[3].items.push(c);
+  });
+  let html = '';
+  groups.forEach(g => {
+    if (!g.items.length) return;
+    html += `<div class="conv-group-label">${g.label}</div>`;
+    g.items.forEach(c => {
+      const active  = c.id === convState.currentId ? 'active' : '';
+      const preview = c.preview ? escHtml(c.preview.slice(0,60)) : '';
+      html += `
+        <div class="conv-item ${active}" onclick="openConversation('${c.id}')" data-id="${c.id}">
+          <div class="conv-item-title">${escHtml(c.title)}</div>
+          <div class="conv-item-meta">${preview}</div>
+          <button class="conv-item-del" onclick="deleteConv(event,'${c.id}')" title="Delete">×</button>
+        </div>`;
+    });
+  });
+  list.innerHTML = html;
+}
+
+// Open and display a past conversation
+async function openConversation(id) {
+  if (convState.currentId === id) return;
+  try {
+    const data = await fetch(`/api/conversations/${id}`).then(r => r.json());
+    convState.currentId = id;
+    convState.messages  = data.messages || [];
+    // Re-render chat panel
+    const box    = document.getElementById('guideMessages');
+    const typing = box?.querySelector('#guideTyping');
+    if (box) Array.from(box.children).forEach(el => { if (el.id !== 'guideTyping') el.remove(); });
+    convState.messages.forEach(m => {
+      if (m.role === 'user')      appendHistoryMsg(m.content, 'user');
+      else                        appendHistoryMsg(m.content, 'bot');
+    });
+    if (box) box.scrollTop = box.scrollHeight;
+    // Highlight active item
+    document.querySelectorAll('.conv-item').forEach(el =>
+      el.classList.toggle('active', el.dataset.id === id));
+  } catch(e) {
+    toast('Could not load conversation', 'error');
+  }
+}
+
+// Render a historical message (no timestamp, slightly dimmed)
+function appendHistoryMsg(content, role) {
+  const box    = document.getElementById('guideMessages');
+  const typing = document.getElementById('guideTyping');
+  const el     = document.createElement('div');
+  el.className = `guide-msg ${role} history`;
+  if (role === 'user') {
+    el.innerHTML = `<div class="msg-bubble"><span>${escHtml(content)}</span></div>`;
+  } else {
+    el.innerHTML = `<div class="msg-bubble">${renderMd(content)}</div>`;
+  }
+  if (typing) box.insertBefore(el, typing);
+  else box?.appendChild(el);
+}
+
+// Called after user sends a message — records it
+function convTrackUser(text) {
+  if (!text) return;
+  if (!convState.currentId) convState.currentId = generateConvId();
+  convState.messages.push({ role:'user', content:text, timestamp: new Date().toISOString() });
+  // Don't save yet — wait for the bot reply so both land together
+}
+
+// Called after bot finishes streaming — records reply and persists
+function convTrackBot(text) {
+  if (!text) return;
+  if (!convState.currentId) convState.currentId = generateConvId();
+  convState.messages.push({ role:'assistant', content:text, timestamp: new Date().toISOString() });
+  saveConversation();
+}
+
+// Persist the current conversation to the server
+async function saveConversation() {
+  if (!convState.currentId || !convState.messages.length) return;
+  const firstUser = convState.messages.find(m => m.role === 'user');
+  const title     = (firstUser?.content || 'New conversation').slice(0,70).replace(/\s+/g,' ').trim();
+  const last      = convState.messages[convState.messages.length - 1];
+  const preview   = (last?.content || '').slice(0,100).replace(/\s+/g,' ').trim();
+  const conv      = {
+    id: convState.currentId,
+    title,
+    preview,
+    createdAt:    convState.messages[0].timestamp,
+    updatedAt:    new Date().toISOString(),
+    messageCount: convState.messages.length,
+    messages:     convState.messages,
+  };
+  try {
+    await fetch(`/api/conversations/${convState.currentId}`, {
+      method:  'POST',
+      headers: { 'Content-Type':'application/json' },
+      body:    JSON.stringify(conv),
+    });
+    loadConversations(); // refresh sidebar list
+  } catch(e) { console.warn('Conv save failed:', e); }
+}
+
+// Delete a conversation
+async function deleteConv(e, id) {
+  e.stopPropagation();
+  if (!confirm('Delete this conversation?\nThis cannot be undone.')) return;
+  try {
+    await fetch(`/api/conversations/${id}`, { method:'DELETE' });
+    if (convState.currentId === id) newConversation();
+    await loadConversations();
+    toast('Conversation deleted', 'success');
+  } catch(e) { toast('Failed to delete', 'error'); }
+}
+
 // ── User sends a message ────────────────────────────────────────────────────
 
 function sendGuideMsg() {
@@ -2605,6 +3034,9 @@ function sendGuideMsg() {
 
   // Show user message in chat
   appendUserMsg(text, chat.pendingImage);
+
+  // Track for conversation history (text only — images tracked separately if needed)
+  if (text) convTrackUser(text);
 
   // Call the live agent
   callLiveAgent(text, chat.pendingImage);
@@ -2725,6 +3157,8 @@ async function callLiveAgent(text, image) {
             // Remove blinking cursor
             bubble.innerHTML = toolCards + (fullText ? renderMd(fullText) : '(Done)');
             box.scrollTop = box.scrollHeight;
+            // Persist bot reply to conversation history
+            if (fullText) convTrackBot(fullText);
             break;
 
           case 'error':
@@ -3088,10 +3522,9 @@ function sendVoiceAs(mode) {
 
 async function clearConversation() {
   await fetch(`/api/chat/session/${CHAT_SESSION_ID}`, { method: 'DELETE' });
-  const box = document.getElementById('guideMessages');
-  // Keep only the typing indicator
-  while (box.firstChild && box.firstChild.id !== 'guideTyping') box.firstChild.remove();
-  guideBotScripted('Conversation cleared. How can I help you?');
+  // Start a fresh history thread and clear the chat panel
+  newConversation();
+  guideBotScripted('New conversation started. How can I help you?');
 }
 
 // ── Input enable/disable ────────────────────────────────────────────────────
