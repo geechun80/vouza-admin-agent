@@ -224,6 +224,32 @@ export async function loadConfigFromJson(): Promise<AgentConfig> {
       baseConfig.selfImproveIntervalHours = saved.selfImproveIntervalHours;
     }
 
+    // ── Whisper voice transcription config ─────────────────────────────────
+    // Priority: explicit voice tool card > Groq key in credentials > OpenAI key
+    if (saved.tools?.voice?.enabled) {
+      const vProv = (saved.tools.voice.provider || "groq") as "openai" | "groq";
+      const vCfg  = saved.tools.voice.config || {};
+      const vKey  = vProv === "groq"
+        ? (vCfg.groqApiKey    || saved.credentials?.groqApiKey   || "")
+        : (vCfg.openaiVoiceKey || vCfg.openaiApiKey || saved.credentials?.openaiApiKey || "");
+      if (vKey) {
+        baseConfig.whisperApiKey   = vKey;
+        baseConfig.whisperProvider = vProv;
+      }
+    }
+    // Auto-detect from flat credentials if no explicit voice tool card
+    if (!baseConfig.whisperApiKey) {
+      const groqKey   = saved.credentials?.groqApiKey   || "";
+      const openaiKey = saved.credentials?.openaiApiKey || "";
+      if (groqKey) {
+        baseConfig.whisperApiKey   = groqKey;
+        baseConfig.whisperProvider = "groq";
+      } else if (openaiKey) {
+        baseConfig.whisperApiKey   = openaiKey;
+        baseConfig.whisperProvider = "openai";
+      }
+    }
+
     return baseConfig;
   } catch {
     // No saved config, fall back to env

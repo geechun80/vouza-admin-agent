@@ -1400,6 +1400,9 @@
         <div class="section-label"><span>What Your AI Can Access</span></div>
         <div class="selectable-grid" id="toolGrid"></div>
 
+        <!-- Credential sections for tools that need API keys (e.g. Voice) -->
+        <div id="toolCredentials"></div>
+
         <div class="btn-nav-group">
           <button class="btn btn-secondary" onclick="goPrev()">← Back</button>
           <div class="btn-nav-right">
@@ -1563,6 +1566,8 @@ const ICONS = {
   alibaba:  `<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4" fill="none" stroke="#6236FF" stroke-width="1.5"/><text x="12" y="16" text-anchor="middle" font-size="10" font-weight="bold" fill="#6236FF">Q</text></svg>`,
   moonshot: `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke="#555" stroke-width="1.5" fill="none"/><path d="M9 8a6 6 0 000 8 4 4 0 010-8z" fill="#888"/></svg>`,
   openrouter:`<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="#7c3aed" stroke-width="1.5"/><path d="M7 12h10M14 9l3 3-3 3" stroke="#a855f7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="7" cy="12" r="1.5" fill="#7c3aed"/></svg>`,
+  mic:      `<svg viewBox="0 0 24 24" fill="none"><rect x="9" y="2" width="6" height="11" rx="3" stroke="#10b981" stroke-width="1.5"/><path d="M5 10a7 7 0 0014 0" stroke="#10b981" stroke-width="1.5" stroke-linecap="round"/><path d="M12 17v5M8 22h8" stroke="#10b981" stroke-width="1.5" stroke-linecap="round"/></svg>`,
+  groq:     `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="#f97316" stroke-width="1.5"/><path d="M9 9c0-1.7 1.3-3 3-3s3 1.3 3 3v3a3 3 0 01-6 0V9z" fill="#f97316" opacity="0.8"/><path d="M12 15v4" stroke="#f97316" stroke-width="1.5" stroke-linecap="round"/></svg>`,
 };
 
 const PROVIDER_COLORS = {
@@ -1607,6 +1612,8 @@ const TOOLS = [
     providers:[{v:'local',l:'Local Files (Free)'},{v:'gdrive',l:'Google Drive'},{v:'onedrive',l:'OneDrive'}] },
   { id:'crm',         name:'CRM',          desc:'Manage contacts and customer records.',    icon:'crm',
     providers:[{v:'hubspot',l:'HubSpot'},{v:'notion',l:'Notion'}] },
+  { id:'voice', name:'Voice Transcription', desc:'Convert voice notes & audio files to text for reports, summaries, and meeting notes.', icon:'mic', badge:'free',
+    providers:[{v:'groq',l:'Groq Whisper (Free & Fast)'},{v:'openai',l:'OpenAI Whisper'}] },
 ];
 
 const SKILLS = [
@@ -1630,6 +1637,10 @@ const CRED_CONFIGS = {
   email: {
     gmail:   { title:'Gmail', icon:'gmail', testType:'gmail', fields:[{id:'gmailUser',label:'Gmail Address',type:'email',placeholder:'you@gmail.com'},{id:'gmailPass',label:'App Password',type:'password',placeholder:'xxxx-xxxx-xxxx-xxxx',hint:'Generate at <a href="https://myaccount.google.com/apppasswords" target="_blank">Google App Passwords →</a>'}] },
     outlook: { title:'Outlook / Microsoft 365', icon:'gmail', testType:'outlook', fields:[{id:'outlookClientId',label:'Azure App Client ID',type:'text',placeholder:'xxxxxxxx-xxxx'},{id:'outlookSecret',label:'Client Secret',type:'password',placeholder:'secret'},{id:'outlookTenant',label:'Tenant ID',type:'text',placeholder:'xxxxxxxx-xxxx'}] },
+  },
+  voice: {
+    groq:   { title:'Groq Voice (Free & Fast)', icon:'groq', testType:'groq-whisper', fields:[{id:'groqApiKey',label:'Groq API Key',type:'password',placeholder:'gsk_...',hint:'Free at <a href="https://console.groq.com/keys" target="_blank">console.groq.com/keys →</a> · Works for Anthropic &amp; OpenRouter users too'}] },
+    openai: { title:'OpenAI Whisper', icon:'openai', testType:'openai-whisper', fields:[{id:'openaiVoiceKey',label:'OpenAI API Key (for Voice)',type:'password',placeholder:'sk-...',hint:'Get at <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com/api-keys →</a>'}] },
   },
 };
 
@@ -2059,7 +2070,7 @@ function renderToolGrid() {
       <div class="sel-card-desc">${t.desc}</div>
       ${t.providers ? `<div class="sel-card-extra" onclick="event.stopPropagation()">
         <label>Provider</label>
-        <select id="${t.id}Provider" onchange="checkGoogleUnified()">
+        <select id="${t.id}Provider" onchange="renderToolCredentials();checkGoogleUnified()">
           ${t.providers.map(p=>`<option value="${p.v}">${p.l}</option>`).join('')}
         </select>
       </div>` : ''}
@@ -2078,7 +2089,25 @@ function toggleTool(card, id) {
   card.classList.toggle('selected');
   if (card.classList.contains('selected')) state.selectedTools.add(id);
   else state.selectedTools.delete(id);
+  renderToolCredentials();
   checkGoogleUnified();
+}
+
+// ============================================================
+// Tool Credentials (tools that need their own API keys)
+// ============================================================
+function renderToolCredentials() {
+  const box = document.getElementById('toolCredentials');
+  if (!box) return;
+  let html = '';
+  for (const t of state.selectedTools) {
+    if (!CRED_CONFIGS[t]) continue;  // no credentials needed for this tool
+    const provEl = document.getElementById(`${t}Provider`);
+    const prov = provEl ? provEl.value : 'default';
+    const conf = CRED_CONFIGS[t]?.[prov];
+    if (conf) html += buildCredCard(t, conf);
+  }
+  box.innerHTML = html;
 }
 
 // ============================================================
@@ -2383,11 +2412,26 @@ function collectConfig() {
       }
       return [t, {enabled:true, provider:prov, config}];
     })),
-    credentials: {
-      [`${state.selectedProvider}ApiKey`]: document.getElementById('aiProviderKey')?.value || '',
-      openrouterApiKey: state.selectedProvider === 'openrouter' ? (document.getElementById('aiProviderKey')?.value || '') : undefined,
-      googleSaKey: document.getElementById('googleSaKey')?.value || '',
-    },
+    credentials: (() => {
+      const creds = {
+        [`${state.selectedProvider}ApiKey`]: document.getElementById('aiProviderKey')?.value || '',
+        openrouterApiKey: state.selectedProvider === 'openrouter' ? (document.getElementById('aiProviderKey')?.value || '') : undefined,
+        googleSaKey: document.getElementById('googleSaKey')?.value || '',
+      };
+      // Merge voice tool API keys into flat credentials so loader auto-detect works
+      if (state.selectedTools.has('voice')) {
+        const vProvEl = document.getElementById('voiceProvider');
+        const vProv = vProvEl ? vProvEl.value : 'groq';
+        if (vProv === 'groq') {
+          const k = document.getElementById('groqApiKey')?.value;
+          if (k) creds.groqApiKey = k;
+        } else {
+          const k = document.getElementById('openaiVoiceKey')?.value;
+          if (k) creds.openaiApiKey = k;
+        }
+      }
+      return creds;
+    })(),
     skills: {
       enabled: [...state.enabledSkills],
       schedules: Object.fromEntries([...state.enabledSkills].map(s => {

@@ -299,40 +299,58 @@ export async function startDashboard(port = 3456): Promise<void> {
     }
 
     try {
-      // Find the OpenAI API key from saved config
-      const config = await loadSetupConfig();
-      const openaiKey =
-        config.credentials?.openaiApiKey ||
-        (config.agent?.provider === "openai"
-          ? Object.values(config.credentials || {}).find((v) => String(v).startsWith("sk-"))
-          : "") ||
-        "";
+      // Resolve Whisper provider from saved config
+      // Priority: explicit voice tool card > Groq key > OpenAI key
+      const config  = await loadSetupConfig();
+      const creds   = config.credentials || {};
+      const voiceCfg = config.tools?.voice;
 
-      if (!openaiKey) {
+      let whisperKey     = "";
+      let whisperBaseUrl = "https://api.openai.com/v1";
+      let whisperModel   = "whisper-1";
+
+      if (voiceCfg?.enabled) {
+        const prov = voiceCfg.provider || "groq";
+        const vKey = prov === "groq"
+          ? (voiceCfg.config?.groqApiKey   || creds.groqApiKey   || "")
+          : (voiceCfg.config?.openaiApiKey || creds.openaiApiKey || "");
+        if (vKey) {
+          whisperKey = vKey;
+          if (prov === "groq") { whisperBaseUrl = "https://api.groq.com/openai/v1"; whisperModel = "whisper-large-v3-turbo"; }
+        }
+      }
+      if (!whisperKey) {
+        if (creds.groqApiKey)   { whisperKey = creds.groqApiKey;   whisperBaseUrl = "https://api.groq.com/openai/v1"; whisperModel = "whisper-large-v3-turbo"; }
+        else if (creds.openaiApiKey) { whisperKey = creds.openaiApiKey; }
+      }
+
+      if (!whisperKey) {
         return res.json({
           success: false,
           error:
-            "Voice transcription requires an OpenAI API key. " +
-            'Please add it in the setup wizard: AI Provider → select OpenAI → enter your key.',
+            "Voice transcription needs a free Groq key or an OpenAI key.\n" +
+            "• Groq (free & fast): console.groq.com/keys\n" +
+            "• OpenAI: platform.openai.com/api-keys\n" +
+            "Add it in the setup wizard → Step 2 → Voice Transcription card.",
         });
       }
 
       // Decode base64 → Buffer (strip data-URI prefix if present)
-      const rawBase64  = audioBase64.replace(/^data:[^;]+;base64,/, "");
+      const rawBase64   = audioBase64.replace(/^data:[^;]+;base64,/, "");
       const audioBuffer = Buffer.from(rawBase64, "base64");
       const fname       = filename || `recording.${mimeType.split("/")[1]?.split(";")[0] || "webm"}`;
 
       // Build FormData and call Whisper
       const formData = new FormData();
-      const blob     = new Blob([audioBuffer], { type: mimeType });
+      const blob     = new Blob([new Uint8Array(audioBuffer)], { type: mimeType });
       formData.append("file",            blob, fname);
-      formData.append("model",           "whisper-1");
+      formData.append("model",           whisperModel);
       formData.append("response_format", "json");
       if (language) formData.append("language", language);
 
-      const whisperRes = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+      const whisperRes = await fetch(`${whisperBaseUrl}/audio/transcriptions`, {
         method:  "POST",
-        headers: { Authorization: `Bearer ${openaiKey}` },
+        headers: { Authorization: `Bearer ${whisperKey}` },
         body:    formData,
       });
 
@@ -585,6 +603,30 @@ async function testConnection(type: string, config: Record<string, string>): Pro
         const res = await fetch(`${config.wahaUrl}/api/sessions`, { headers });
         if (res.ok) return { success: true, message: "WAHA server connected!" };
         return { success: false, message: "WAHA server not reachable" };
+      } catch (e) {
+        return { success: false, message: `Connection failed: ${e}` };
+      }
+
+    case "groq-whisper":
+      try {
+        const res = await fetch("https://api.groq.com/openai/v1/models", {
+          headers: { Authorization: `Bearer ${config.groqApiKey}` },
+        });
+        if (res.ok) return { success: true, message: "Groq API connected — voice transcription ready (free)!" };
+        const err = await res.text();
+        return { success: false, message: `Groq error: ${err.slice(0, 200)}` };
+      } catch (e) {
+        return { success: false, message: `Connection failed: ${e}` };
+      }
+
+    case "openai-whisper":
+      try {
+        const res = await fetch("https://api.openai.com/v1/models", {
+          headers: { Authorization: `Bearer ${config.openaiVoiceKey || config.openaiApiKey}` },
+        });
+        if (res.ok) return { success: true, message: "OpenAI Whisper API connected — voice transcription ready!" };
+        const err = await res.text();
+        return { success: false, message: `OpenAI error: ${err.slice(0, 200)}` };
       } catch (e) {
         return { success: false, message: `Connection failed: ${e}` };
       }

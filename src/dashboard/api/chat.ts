@@ -216,6 +216,25 @@ function buildAgentConfig(saved: any, apiKeyOverride?: string): AgentConfig {
     ? (openrouterTiers?.balanced ?? DEFAULT_OPENROUTER_TIERS.balanced)
     : (saved?.agent?.model || "claude-sonnet-4-6");
 
+  // ── Whisper voice transcription (separate from main AI provider) ───────────
+  // Priority: explicit voice tool card > Groq key > OpenAI key in apiKeys
+  let whisperApiKey:   string | undefined;
+  let whisperProvider: "openai" | "groq" | undefined;
+
+  const voiceTool = saved?.tools?.voice;
+  if (voiceTool?.enabled) {
+    const vProv = (voiceTool.provider || "groq") as "openai" | "groq";
+    const vCfg  = voiceTool.config || {};
+    const vKey  = vProv === "groq"
+      ? (vCfg.groqApiKey    || creds.groqApiKey   || "")
+      : (vCfg.openaiVoiceKey || vCfg.openaiApiKey || creds.openaiApiKey || "");
+    if (vKey) { whisperApiKey = vKey; whisperProvider = vProv; }
+  }
+  if (!whisperApiKey) {
+    if (creds.groqApiKey)   { whisperApiKey = creds.groqApiKey;   whisperProvider = "groq";   }
+    else if (apiKeys.openai) { whisperApiKey = apiKeys.openai;    whisperProvider = "openai"; }
+  }
+
   return {
     name:     saved?.agent?.name || "AI Assistant",
     model,
@@ -227,6 +246,8 @@ function buildAgentConfig(saved: any, apiKeyOverride?: string): AgentConfig {
     selfImproveIntervalHours: 24,
     maxTurnsPerSession: 20,
     openrouterTiers,
+    whisperApiKey,
+    whisperProvider,
     tools: buildToolsConfig(saved),
   };
 }

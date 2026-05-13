@@ -21,7 +21,7 @@ import chalk from "chalk";
 import type { AgentContext } from "../types/index.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { agentLoop } from "../agent/loop.js";
-import { transcribeAudioBuffer, mimeFromFilename } from "../voice/transcriber.js";
+import { transcribeAudioBuffer, mimeFromFilename, resolveWhisperConfig, WHISPER_NO_KEY_MSG } from "../voice/transcriber.js";
 
 const MAX_MSG_LEN = 3800; // WhatsApp practical limit
 
@@ -153,15 +153,10 @@ async function handleVoiceMessage(
   payload: any,
   baseCtx: AgentContext
 ): Promise<string> {
-  const openaiKey = baseCtx.config.apiKeys?.openai ?? "";
+  const whisperCfg = resolveWhisperConfig(baseCtx.config);
 
-  if (!openaiKey) {
-    await sendWAHAText(
-      chatId,
-      "🎙️ I received your voice message, but transcription requires an OpenAI API key.\n" +
-      "Please ask your admin to add an OpenAI key in the agent setup.",
-      baseCtx
-    );
+  if (!whisperCfg) {
+    await sendWAHAText(chatId, WHISPER_NO_KEY_MSG, baseCtx);
     return "";
   }
 
@@ -180,7 +175,7 @@ async function handleVoiceMessage(
     const filename = url.split("/").pop()?.split("?")[0] || "voice.oga";
     const mimeType = mimeFromFilename(filename);
 
-    const transcript = await transcribeAudioBuffer(audioBuffer, mimeType, filename, openaiKey);
+    const transcript = await transcribeAudioBuffer(audioBuffer, mimeType, filename, whisperCfg!);
 
     if (!transcript) {
       await sendWAHAText(chatId, "⚠️ No speech detected in the recording. Please try again.", baseCtx);

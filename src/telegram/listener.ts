@@ -13,7 +13,7 @@ import chalk from "chalk";
 import type { AgentContext } from "../types/index.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { agentLoop } from "../agent/loop.js";
-import { transcribeAudioBuffer, mimeFromFilename } from "../voice/transcriber.js";
+import { transcribeAudioBuffer, mimeFromFilename, resolveWhisperConfig, WHISPER_NO_KEY_MSG } from "../voice/transcriber.js";
 
 const TELEGRAM_API = "https://api.telegram.org/bot";
 const LONG_POLL_TIMEOUT = 30;   // seconds — Telegram's recommended value
@@ -293,19 +293,15 @@ export async function startTelegramListener(
           // ── Voice note or audio file ─────────────────────────────────────
           const audioObj = msg.voice ?? msg.audio;
           if (audioObj?.file_id) {
-            const openaiKey = baseContext.config.apiKeys?.openai ?? "";
+            const whisperCfg = resolveWhisperConfig(baseContext.config);
             console.log(chalk.gray(`  [Telegram] ${fromName} (${chatId}): [voice/audio message]`));
 
             // Transcribe asynchronously — show typing, do download+transcribe, then reply
             (async () => {
               await sendTyping(token, chatId);
               try {
-                if (!openaiKey) {
-                  await sendReply(
-                    token,
-                    chatId,
-                    "🎙️ I received your voice message but can't transcribe it yet — an OpenAI API key is required for Whisper. Please add one in the setup wizard."
-                  );
+                if (!whisperCfg) {
+                  await sendReply(token, chatId, WHISPER_NO_KEY_MSG);
                   return;
                 }
 
@@ -314,7 +310,7 @@ export async function startTelegramListener(
 
                 const { buffer, filename } = await downloadTelegramFile(token, audioObj.file_id);
                 const mimeType = mimeFromFilename(filename);
-                const transcript = await transcribeAudioBuffer(buffer, mimeType, filename, openaiKey);
+                const transcript = await transcribeAudioBuffer(buffer, mimeType, filename, whisperCfg);
 
                 if (!transcript) {
                   await sendReply(token, chatId, "⚠️ No speech detected in the recording. Please try again.");

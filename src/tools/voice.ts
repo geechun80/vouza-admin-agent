@@ -12,6 +12,7 @@ import { z } from "zod";
 import { buildTool } from "./registry.js";
 import { readFile } from "fs/promises";
 import { extname, basename } from "path";
+import { resolveWhisperConfig, mimeFromFilename, WHISPER_NO_KEY_MSG } from "../voice/transcriber.js";
 
 const AUDIO_EXTS = new Set([".mp3", ".mp4", ".mpeg", ".mpga", ".m4a", ".wav", ".webm", ".ogg", ".flac"]);
 
@@ -30,27 +31,29 @@ const MIME_TYPES: Record<string, string> = {
 // ─── Whisper API call ─────────────────────────────────────────────────────────
 
 async function callWhisper(
-  apiKey: string,
+  context: any,
   audioBuffer: Buffer,
   filename: string,
   language?: string,
   prompt?: string
 ): Promise<{ text: string; language: string; duration?: number }> {
-  const ext      = extname(filename).toLowerCase();
-  const mimeType = MIME_TYPES[ext] ?? "audio/mpeg";
+  const cfg = resolveWhisperConfig(context?.config ?? {});
+  if (!cfg) throw new Error(WHISPER_NO_KEY_MSG);
 
-  // Node 18+ has native FormData and Blob
+  const ext      = extname(filename).toLowerCase();
+  const mimeType = MIME_TYPES[ext] ?? mimeFromFilename(filename);
+
   const formData = new FormData();
   const blob     = new Blob([new Uint8Array(audioBuffer)], { type: mimeType });
   formData.append("file",            blob, filename);
-  formData.append("model",           "whisper-1");
+  formData.append("model",           cfg.model);
   formData.append("response_format", "verbose_json");
   if (language) formData.append("language", language);
   if (prompt)   formData.append("prompt",   prompt);
 
-  const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+  const res = await fetch(`${cfg.baseUrl}/audio/transcriptions`, {
     method:  "POST",
-    headers: { Authorization: `Bearer ${apiKey}` },
+    headers: { Authorization: `Bearer ${cfg.apiKey}` },
     body:    formData,
   });
 
@@ -65,15 +68,6 @@ async function callWhisper(
     language: data.language ?? language ?? "unknown",
     duration: data.duration,
   };
-}
-
-/** Resolve the OpenAI API key from the agent context. */
-function getOpenAIKey(context: any): string {
-  return (
-    context?.config?.apiKeys?.openai ||
-    (context?.config?.provider === "openai" ? context?.config?.apiKeys?.[context.config.provider] : "") ||
-    ""
-  );
 }
 
 // ─── transcribe_audio ─────────────────────────────────────────────────────────
@@ -100,15 +94,8 @@ export const transcribeAudioTool = buildTool({
   }),
   async call(input, ctx): Promise<any> {
     try {
-      const apiKey = getOpenAIKey(ctx);
-      if (!apiKey) {
-        return {
-          success: false,
-          error:
-            "Voice transcription requires an OpenAI API key (Whisper). " +
-            "Please add your OpenAI key in the setup wizard under AI Provider settings.",
-        };
-      }
+      const cfg = resolveWhisperConfig(ctx?.config ?? {});
+      if (!cfg) return { success: false, error: WHISPER_NO_KEY_MSG };
 
       const ext = extname(input.filePath).toLowerCase();
       if (!AUDIO_EXTS.has(ext)) {
@@ -120,16 +107,17 @@ export const transcribeAudioTool = buildTool({
 
       const buffer   = await readFile(input.filePath);
       const filename = basename(input.filePath);
-      const result   = await callWhisper(apiKey, buffer, filename, input.language, input.context);
+      const result   = await callWhisper(ctx, buffer, filename, input.language, input.context);
 
       return {
         success: true,
         data: {
-          transcript: result.text,
-          language:   result.language,
-          duration:   result.duration != null ? `${Math.round(result.duration)}s` : undefined,
-          wordCount:  result.text.split(/\s+/).filter(Boolean).length,
-          filePath:   input.filePath,
+          transcript:    result.text,
+          language:      result.language,
+          duration:      result.duration != null ? `${Math.round(result.duration)}s` : undefined,
+          wordCount:     result.text.split(/\s+/).filter(Boolean).length,
+          filePath:      input.filePath,
+          whisperEngine: cfg.provider,
         },
       };
     } catch (err) {
@@ -216,15 +204,8 @@ export const transcribeAndSummarizeTool = buildTool({
   }),
   async call(input, ctx): Promise<any> {
     try {
-      const apiKey = getOpenAIKey(ctx);
-      if (!apiKey) {
-        return {
-          success: false,
-          error:
-            "Voice transcription requires an OpenAI API key (Whisper). " +
-            "Please add your OpenAI key in the setup wizard.",
-        };
-      }
+      const cfg = resolveWhisperConfig(ctx?.config ?? {});
+      if (!cfg) return { success: false, error: WHISPER_NO_KEY_MSG };
 
       const ext = extname(input.filePath).toLowerCase();
       if (!AUDIO_EXTS.has(ext)) {
@@ -236,7 +217,7 @@ export const transcribeAndSummarizeTool = buildTool({
 
       const buffer   = await readFile(input.filePath);
       const filename = basename(input.filePath);
-      const result   = await callWhisper(apiKey, buffer, filename, input.language);
+      const result   = await callWhisper(ctx, buffer, filename, input.language);
 
       const reportType = input.reportType || "meeting";
       const rp         = REPORT_PROMPTS[reportType];
@@ -247,10 +228,11 @@ export const transcribeAndSummarizeTool = buildTool({
         data: {
           title,
           reportType,
-          transcript: result.text,
-          wordCount:  result.text.split(/\s+/).filter(Boolean).length,
-          language:   result.language,
-          duration:   result.duration != null ? `${Math.round(result.duration)}s` : undefined,
+          transcript:    result.text,
+          wordCount:     result.text.split(/\s+/).filter(Boolean).length,
+          language:      result.language,
+          duration:      result.duration != null ? `${Math.round(result.duration)}s` : undefined,
+          whisperEngine: cfg.provider,
           reportInstructions: rp.instructions,
           note:
             "The transcript above has been returned along with report instructions. " +

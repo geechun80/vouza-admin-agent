@@ -202,6 +202,13 @@ export interface AgentConfig {
   logDir: string;
   selfImproveIntervalHours: number;
   maxTurnsPerSession: number;
+  /**
+   * Voice transcription via Whisper.
+   * Separate from the main AI provider — Anthropic/OpenRouter users need
+   * either an OpenAI key or a free Groq key to enable voice features.
+   */
+  whisperApiKey?:   string;            // API key for Whisper transcription
+  whisperProvider?: "openai" | "groq"; // which endpoint to call
   /** OpenRouter tiered model routing — only used when provider === "openrouter" */
   openrouterTiers?: {
     fast:     string;   // model for simple tasks
