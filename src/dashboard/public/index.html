@@ -1112,6 +1112,44 @@
       text-align:center; padding:40px 20px;
       color:var(--text-dim); font-size:14px;
     }
+
+    /* ── Resume Setup Banner ── */
+    .resume-notice {
+      display:flex; align-items:flex-start; gap:12px;
+      background: rgba(245,158,11,0.08);
+      border: 1px solid rgba(245,158,11,0.3);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      margin-bottom: 20px;
+      position: relative;
+    }
+    .resume-notice-icon { font-size:20px; flex-shrink:0; margin-top:1px; }
+    .resume-notice-text { flex:1; font-size:13.5px; line-height:1.55; color:var(--text); }
+    .resume-notice-text strong { color: #fbbf24; }
+    .resume-notice-text .resume-steps { margin-top:8px; display:flex; flex-wrap:wrap; gap:6px; }
+    .resume-step-chip {
+      display:inline-flex; align-items:center; gap:5px;
+      background: rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.25);
+      border-radius:20px; padding:3px 10px; font-size:12px; color:#fbbf24;
+    }
+    .resume-step-chip.done { background:rgba(16,185,129,0.1); border-color:rgba(16,185,129,0.3); color:var(--success); }
+    .resume-notice-close {
+      background:none; border:none; color:var(--text-dim); cursor:pointer;
+      font-size:18px; line-height:1; padding:0; flex-shrink:0; margin-top:1px;
+      transition:color 0.15s;
+    }
+    .resume-notice-close:hover { color:var(--text); }
+
+    /* Welcome screen resume badge */
+    .welcome-resume-badge {
+      display:flex; align-items:center; gap:8px;
+      background: rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.3);
+      border-radius:10px; padding:10px 16px; margin-top:16px;
+      font-size:13px; color:#fbbf24; text-align:left;
+    }
+    .welcome-resume-badge .resume-badge-icon { font-size:18px; flex-shrink:0; }
+    .welcome-resume-badge .resume-badge-text { flex:1; line-height:1.4; }
+    .welcome-resume-badge .resume-badge-text strong { display:block; margin-bottom:2px; }
   </style>
 </head>
 <body>
@@ -1138,6 +1176,15 @@
     <button class="btn-welcome" onclick="startSetup()">
       Get Started &nbsp;→
     </button>
+
+    <!-- Shown only when a previous partial setup is detected -->
+    <div id="welcomeResumeBadge" class="welcome-resume-badge" style="display:none">
+      <div class="resume-badge-icon">⚡</div>
+      <div class="resume-badge-text">
+        <strong>Previous setup found</strong>
+        Your API key and settings are pre-filled — just re-test the step that failed.
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1164,6 +1211,17 @@
 
       <!-- Progress Rail -->
       <div class="progress-rail" id="progressRail"></div>
+
+      <!-- Resume banner — shown when a previous partial setup is detected -->
+      <div id="resumeWizardBanner" class="resume-notice" style="display:none">
+        <div class="resume-notice-icon">⚡</div>
+        <div class="resume-notice-text">
+          <strong>Previous setup restored</strong> — your settings are pre-filled below.
+          Jump straight to the step that failed and click <strong>Test Connection</strong> again.
+          <div class="resume-steps" id="resumeStepChips"></div>
+        </div>
+        <button class="resume-notice-close" onclick="this.parentElement.style.display='none'" title="Dismiss">×</button>
+      </div>
 
       <!-- ════ STEP 1: Create Your AI ════ -->
       <div class="step-view" id="step-1">
@@ -1559,6 +1617,35 @@ const STEPS = [
 ];
 
 // ============================================================
+// Resume Detection — runs on page load before user does anything
+// ============================================================
+let _savedConfig = null;
+let _isResume    = false;
+
+document.addEventListener('DOMContentLoaded', async () => {
+  try {
+    const res = await fetch('/api/config');
+    if (!res.ok) return;
+    const cfg = await res.json();
+    _savedConfig = cfg;
+
+    // Detect partial setup: credentials exist but setup not marked complete
+    const hasApiKey  = Object.values(cfg.credentials || {}).some(v => v && String(v).length > 4);
+    const hasChan    = Object.values(cfg.channels  || {}).some(ch => ch.enabled);
+    const isPartial  = !cfg.setupCompleted && (hasApiKey || hasChan);
+    const isReconfig = !!cfg.setupCompleted;
+
+    if (isPartial || isReconfig) {
+      _isResume = true;
+      document.getElementById('welcomeResumeBadge').style.display = 'flex';
+      // Swap button label for clarity
+      const btn = document.querySelector('.btn-welcome');
+      if (btn) btn.textContent = isReconfig ? 'Update Settings →' : 'Resume Setup →';
+    }
+  } catch { /* no config yet — fresh install, ignore */ }
+});
+
+// ============================================================
 // Welcome → Main App
 // ============================================================
 function startSetup() {
@@ -1583,8 +1670,129 @@ async function init() {
   } catch { state.modelCatalog = []; }
 
   renderModelSelector();
+
+  // Pre-fill all fields when resuming a previous setup
+  if (_isResume && _savedConfig) {
+    prefillFromConfig(_savedConfig);
+    document.getElementById('resumeWizardBanner').style.display = 'flex';
+  }
+
   showStep(1);
   updateMemoryCount();
+}
+
+// ============================================================
+// Pre-fill wizard fields from saved config.json
+// ============================================================
+function prefillFromConfig(cfg) {
+  const agent    = cfg.agent    || {};
+  const creds    = cfg.credentials || {};
+  const channels = cfg.channels || {};
+  const tools    = cfg.tools    || {};
+
+  // ── Step 1: Identity ──────────────────────────────────────
+  _setVal('agentName',    agent.name);
+  _setVal('userName',     agent.userName);
+  _setVal('userEmail',    agent.email);
+  _setVal('userPhone',    agent.phone);
+  _setSelectVal('agentTimezone', agent.timezone);
+  _setSelectVal('agentLanguage', agent.language);
+
+  // ── Step 2: AI Provider ───────────────────────────────────
+  if (agent.provider) {
+    state.selectedProvider = agent.provider;
+    if (agent.model) state.selectedModel = agent.model;
+    if (agent.openrouterTiers) Object.assign(state.orTiers, agent.openrouterTiers);
+    renderModelSelector();
+
+    // API key is masked in GET response — show a hint instead of the masked value
+    const savedKey = creds[`${agent.provider}ApiKey`] || creds.openrouterApiKey || '';
+    if (savedKey && savedKey.length > 4) {
+      // Wait for the dynamic key section to render, then set placeholder
+      setTimeout(() => {
+        const keyEl = document.getElementById('aiProviderKey');
+        if (keyEl) keyEl.placeholder = '✓ API key already saved — enter new key only to update it';
+      }, 50);
+    }
+  }
+
+  // ── Step 3: Channels — auto-select previously enabled ─────
+  const enabledChannels = Object.entries(channels)
+    .filter(([, ch]) => ch.enabled)
+    .map(([id]) => id);
+
+  if (enabledChannels.length > 0) {
+    // Programmatically toggle the channel cards
+    document.querySelectorAll('#channelGrid .sel-card').forEach(card => {
+      const oc = card.getAttribute('onclick') || '';
+      const m  = oc.match(/'([^']+)'\s*\)\s*$/);
+      if (!m) return;
+      const chId = m[1];
+      if (enabledChannels.includes(chId) && !state.selectedChannels.has(chId)) {
+        card.classList.add('selected');
+        state.selectedChannels.add(chId);
+      }
+    });
+    renderChannelCredentials();
+
+    // Fill token fields with saved values (skip masked ones — set placeholder instead)
+    for (const [chId, chData] of Object.entries(channels)) {
+      if (!chData.enabled) continue;
+      for (const [fieldId, fieldVal] of Object.entries(chData.config || {})) {
+        const el = document.getElementById(fieldId);
+        if (!el) continue;
+        if (fieldVal && !String(fieldVal).includes('•')) {
+          el.value = fieldVal;                          // plain text field (e.g. gmailUser)
+        } else if (fieldVal && String(fieldVal).includes('•')) {
+          el.placeholder = '✓ Previously saved — enter new value only to update'; // masked
+        }
+      }
+    }
+  }
+
+  // ── Step 3: Tools — auto-select previously enabled ────────
+  const enabledTools = Object.entries(tools)
+    .filter(([, t]) => t.enabled)
+    .map(([id]) => id);
+
+  if (enabledTools.length > 0) {
+    document.querySelectorAll('#toolGrid .sel-card').forEach(card => {
+      const oc = card.getAttribute('onclick') || '';
+      const m  = oc.match(/'([^']+)'\s*\)\s*$/);
+      if (!m) return;
+      const tId = m[1];
+      if (enabledTools.includes(tId) && !state.selectedTools.has(tId)) {
+        card.classList.add('selected');
+        state.selectedTools.add(tId);
+      }
+    });
+    renderToolCredentials?.();
+    checkGoogleUnified();
+  }
+
+  // ── Build resume step chips ────────────────────────────────
+  const chips  = [];
+  const allCfg = cfg.credentials || {};
+  const hasKey = Object.values(allCfg).some(v => v && String(v).length > 4);
+  chips.push(`<span class="resume-step-chip done">✓ Step 1 — Identity</span>`);
+  chips.push(`<span class="resume-step-chip ${hasKey ? 'done' : ''}">
+    ${hasKey ? '✓' : '!'} Step 2 — AI Provider
+  </span>`);
+  chips.push(`<span class="resume-step-chip ${enabledChannels.length ? 'done' : ''}">
+    ${enabledChannels.length ? '✓' : '!'} Step 3 — Channels
+    ${enabledChannels.length ? `(${enabledChannels.join(', ')})` : ''}
+  </span>`);
+  document.getElementById('resumeStepChips').innerHTML = chips.join('');
+}
+
+// Small helpers used by prefillFromConfig
+function _setVal(id, val) {
+  const el = document.getElementById(id);
+  if (el && val) el.value = val;
+}
+function _setSelectVal(id, val) {
+  const el = document.getElementById(id);
+  if (el && val) el.value = val;
 }
 
 // ============================================================
