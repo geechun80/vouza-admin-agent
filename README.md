@@ -122,6 +122,7 @@ The agent will now auto-start on boot and stay running in the background.
 ## Updating to the latest version
 
 ```bash
+cd vouza-admin-agent
 git pull
 npm install
 npm run build
@@ -136,6 +137,7 @@ Then restart the agent (or PM2 will auto-restart it).
 If you installed the agent **before 12 May 2026**, run these 3 commands to patch a high-severity vulnerability in the email library (nodemailer):
 
 ```bash
+cd vouza-admin-agent
 git pull
 npm install
 npm audit
