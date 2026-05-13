@@ -11,6 +11,7 @@ import { getModelCatalogForUI } from "../../config/models.js";
 import { launchAgent, getAgentStatus, type AgentInstance } from "../../bridge/launcher.js";
 import { streamChat, clearSession } from "./chat.js";
 import { createMemoryStore } from "../../memory/store.js";
+import { handleWAHAEvent } from "../../whatsapp/wahaListener.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = join(process.cwd(), "data", "config.json");
@@ -345,6 +346,24 @@ export async function startDashboard(port = 3456): Promise<void> {
     } catch (err) {
       res.json({ success: false, error: `Transcription failed: ${err}` });
     }
+  });
+
+  // --- WhatsApp WAHA Webhook ---
+  // WAHA POSTs events here when messages arrive.
+  // Setup: in the WAHA dashboard (http://localhost:3000) → Webhooks → add:
+  //   URL: http://localhost:3456/api/whatsapp/webhook   (or your server's URL)
+  //   Events: message  (or "message.any" to also catch group messages)
+  app.post("/api/whatsapp/webhook", (req, res) => {
+    // ACK immediately — WAHA expects a fast response
+    res.json({ success: true });
+
+    // Process asynchronously after the ACK
+    if (!agentInstance) return; // agent must be running to handle messages
+
+    const wa = agentInstance.context.config.tools?.whatsapp;
+    if (!wa || wa.provider !== "waha") return; // only WAHA supports webhooks
+
+    handleWAHAEvent(req.body, agentInstance.context, agentInstance.registry);
   });
 
   // --- Memory API ---

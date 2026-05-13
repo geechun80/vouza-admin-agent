@@ -13,6 +13,7 @@ import chalk from "chalk";
 import type { AgentContext } from "../types/index.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { agentLoop } from "../agent/loop.js";
+import { transcribeAudioBuffer, mimeFromFilename } from "../voice/transcriber.js";
 
 const TELEGRAM_API = "https://api.telegram.org/bot";
 const LONG_POLL_TIMEOUT = 30;   // seconds — Telegram's recommended value
@@ -114,6 +115,30 @@ async function sendReply(token: string, chatId: number, text: string): Promise<v
   }
 }
 
+/**
+ * Download a voice/audio file from Telegram's file servers.
+ * Returns the raw buffer and the filename (with extension).
+ */
+async function downloadTelegramFile(
+  token: string,
+  fileId: string
+): Promise<{ buffer: Buffer; filename: string }> {
+  // Step 1: resolve file_id → file_path
+  const meta = await fetch(`${TELEGRAM_API}${token}/getFile?file_id=${fileId}`);
+  const metaData = await meta.json() as any;
+  if (!metaData.ok) throw new Error(`getFile failed: ${metaData.description}`);
+
+  const filePath: string = metaData.result.file_path; // e.g. "voice/file_xxx.oga"
+
+  // Step 2: download raw bytes
+  const fileRes = await fetch(`https://api.telegram.org/file/bot${token}/${filePath}`);
+  if (!fileRes.ok) throw new Error(`File download failed (HTTP ${fileRes.status})`);
+
+  const arrayBuf = await fileRes.arrayBuffer();
+  const filename  = filePath.split("/").pop() ?? "voice.oga";
+  return { buffer: Buffer.from(arrayBuf), filename };
+}
+
 /** Send a user-visible error message back to the chat. */
 async function sendError(token: string, chatId: number): Promise<void> {
   await sendReply(
@@ -133,7 +158,8 @@ async function handleMessage(
   fromName: string,
   text: string,
   baseCtx: AgentContext,
-  registry: ToolRegistry
+  registry: ToolRegistry,
+  isVoice = false
 ): Promise<void> {
   // Skip if this chat is already mid-response (avoids racing context writes)
   if (processingChats.has(chatId)) {
@@ -149,14 +175,17 @@ async function handleMessage(
 
     const chatCtx = getOrCreateChatContext(chatId, baseCtx);
 
+    // For voice messages, prefix the transcript so the agent knows the source
+    const agentInput = isVoice ? `🎙️ [Voice message from ${fromName}]: "${text}"` : text;
+
     // Collect the full streamed response
     let response = "";
-    for await (const event of agentLoop(text, chatCtx, registry)) {
-      if (event.type === "text_delta") {
-        response += event.text;
+    for await (const ev of agentLoop(agentInput, chatCtx, registry)) {
+      if (ev.type === "text_delta") {
+        response += ev.text;
       }
       // Re-send typing action every ~4s so indicator stays visible on long tasks
-      if (event.type === "tool_start") {
+      if (ev.type === "tool_start") {
         await sendTyping(token, chatId);
       }
     }
@@ -217,7 +246,7 @@ export async function startTelegramListener(
       try {
         const params = new URLSearchParams({
           timeout: String(LONG_POLL_TIMEOUT),
-          offset: String(updateOffset),
+          offset:  String(updateOffset),
           allowed_updates: JSON.stringify(["message"]),
         });
 
@@ -239,18 +268,74 @@ export async function startTelegramListener(
           updateOffset = update.update_id + 1;
 
           const msg = update.message;
-          if (!msg?.text) continue;  // ignore photos, stickers, etc.
+          if (!msg) continue;
 
-          const chatId: number = msg.chat.id;
+          const chatId: number   = msg.chat.id;
           const fromName: string = [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(" ") || "User";
-          const text: string = msg.text;
 
-          console.log(chalk.gray(`  [Telegram] ${fromName} (${chatId}): ${text.slice(0, 100)}${text.length > 100 ? "…" : ""}`));
+          // ── /reset command — clear conversation history ──────────────────
+          if (msg.text === "/reset" || msg.text === "/start") {
+            clearChatContext(chatId);
+            await sendReply(token, chatId, "✅ Conversation reset! Starting fresh. How can I help you?");
+            continue;
+          }
 
-          // Fire-and-forget — don't await so the poll loop stays fast
-          handleMessage(token, chatId, fromName, text, baseContext, registry).catch((err) => {
-            console.error(chalk.red(`  [Telegram] Unhandled error for chat ${chatId}:`, err));
-          });
+          // ── Text message ────────────────────────────────────────────────
+          if (msg.text) {
+            const text = msg.text as string;
+            console.log(chalk.gray(`  [Telegram] ${fromName} (${chatId}): ${text.slice(0, 100)}${text.length > 100 ? "…" : ""}`));
+            handleMessage(token, chatId, fromName, text, baseContext, registry).catch((err) => {
+              console.error(chalk.red(`  [Telegram] Unhandled error for chat ${chatId}:`, err));
+            });
+            continue;
+          }
+
+          // ── Voice note or audio file ─────────────────────────────────────
+          const audioObj = msg.voice ?? msg.audio;
+          if (audioObj?.file_id) {
+            const openaiKey = baseContext.config.apiKeys?.openai ?? "";
+            console.log(chalk.gray(`  [Telegram] ${fromName} (${chatId}): [voice/audio message]`));
+
+            // Transcribe asynchronously — show typing, do download+transcribe, then reply
+            (async () => {
+              await sendTyping(token, chatId);
+              try {
+                if (!openaiKey) {
+                  await sendReply(
+                    token,
+                    chatId,
+                    "🎙️ I received your voice message but can't transcribe it yet — an OpenAI API key is required for Whisper. Please add one in the setup wizard."
+                  );
+                  return;
+                }
+
+                // Let user know transcription is in progress
+                await sendReply(token, chatId, "🎙️ Transcribing your voice message…");
+
+                const { buffer, filename } = await downloadTelegramFile(token, audioObj.file_id);
+                const mimeType = mimeFromFilename(filename);
+                const transcript = await transcribeAudioBuffer(buffer, mimeType, filename, openaiKey);
+
+                if (!transcript) {
+                  await sendReply(token, chatId, "⚠️ No speech detected in the recording. Please try again.");
+                  return;
+                }
+
+                console.log(chalk.gray(`  [Telegram] ${fromName} (${chatId}) transcript: ${transcript.slice(0, 100)}${transcript.length > 100 ? "…" : ""}`));
+
+                // Run agent with the transcript (isVoice = true adds the prefix)
+                await handleMessage(token, chatId, fromName, transcript, baseContext, registry, true);
+
+              } catch (err) {
+                console.error(chalk.red(`  [Telegram] Voice transcription failed for chat ${chatId}:`, err));
+                await sendReply(token, chatId, "⚠️ Sorry, I couldn't transcribe that voice message. Please try again or send a text message.");
+              }
+            })();
+            continue;
+          }
+
+          // ── Unsupported message type (photo, sticker, etc.) ─────────────
+          // Silently ignore — don't confuse users with "I don't support this" on every sticker
         }
       } catch (err: any) {
         if (!running) break;  // normal shutdown
