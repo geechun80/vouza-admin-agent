@@ -1463,14 +1463,14 @@
           <div class="go-live-sub" id="goLiveSub">Configuration saved. Your AI assistant is standing by.</div>
 
           <div class="terminal-block">
-            <div><span class="t-cmd">$</span> npm run dev</div>
+            <div><span class="t-cmd">$</span> start.bat</div>
             <div>&nbsp;</div>
             <div class="t-out">✅ <span id="termToolCount">24</span> tools registered</div>
             <div class="t-out">✅ <span id="termSkillCount">4</span> skills loaded</div>
             <div class="t-out">✅ Self-learning engine initialized</div>
             <div>&nbsp;</div>
-            <div class="t-hi">Ready. Type any task or ask me anything.</div>
-            <div><span class="t-cmd">You &gt;</span> <span class="t-hi t-blink">_</span></div>
+            <div class="t-hi">Ready. Dashboard open at localhost:3456</div>
+            <div><span class="t-cmd">Agent &gt;</span> <span class="t-hi t-blink">_</span></div>
           </div>
 
           <div class="go-live-actions">
@@ -1479,6 +1479,56 @@
           </div>
 
           <div class="agent-status-box" id="agentStatusBox"></div>
+
+          <!-- How to keep running & auto-start -->
+          <div id="keepRunningGuide" style="display:none;margin-top:28px">
+            <div style="font-size:13px;font-weight:700;color:var(--brand-light);margin-bottom:14px;letter-spacing:0.5px">⚙️ HOW TO KEEP YOUR AI RUNNING</div>
+
+            <div style="display:grid;gap:12px">
+
+              <!-- Option 1: Right now -->
+              <div style="background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.15);border-radius:12px;padding:16px">
+                <div style="font-weight:700;color:var(--success);margin-bottom:6px">✅ Right Now — Already Running</div>
+                <div style="font-size:13px;color:var(--text-dim);line-height:1.6">
+                  Your AI is live in <strong>this terminal window</strong>. Keep it open (minimise is fine — don't close it).
+                  The browser dashboard at <strong>localhost:3456</strong> and your Telegram/WhatsApp bot are active.
+                </div>
+              </div>
+
+              <!-- Option 2: Auto-start -->
+              <div style="background:rgba(124,58,237,0.06);border:1px solid rgba(124,58,237,0.15);border-radius:12px;padding:16px">
+                <div style="font-weight:700;color:var(--brand-light);margin-bottom:6px">🚀 Auto-Start on Windows Login (Recommended)</div>
+                <div style="font-size:13px;color:var(--text-dim);line-height:1.6;margin-bottom:10px">
+                  Run this once and your AI starts automatically every time you turn on your laptop — no terminal needed, fully silent.
+                </div>
+                <div style="background:var(--bg);border-radius:8px;padding:10px 14px;font-family:monospace;font-size:12px;color:#a78bfa">
+                  Double-click → <strong>install-autostart.bat</strong>
+                </div>
+                <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Found in your agent folder. Adds a Windows startup task — no admin rights needed.</div>
+              </div>
+
+              <!-- Option 3: Next time manual -->
+              <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:12px;padding:16px">
+                <div style="font-weight:700;color:var(--text-dim);margin-bottom:6px">📂 Start Manually Next Time</div>
+                <div style="font-size:13px;color:var(--text-dim);line-height:1.6;margin-bottom:10px">
+                  Just double-click <strong>start.bat</strong> in your agent folder. It builds, starts, and opens the browser automatically.
+                </div>
+                <div style="background:var(--bg);border-radius:8px;padding:10px 14px;font-family:monospace;font-size:12px;color:#94a3b8">
+                  Double-click → <strong>start.bat</strong> → browser opens → AI is live
+                </div>
+              </div>
+
+              <!-- Telegram tip -->
+              <div style="background:rgba(6,182,212,0.05);border:1px solid rgba(6,182,212,0.12);border-radius:12px;padding:16px">
+                <div style="font-weight:700;color:var(--brand-cyan);margin-bottom:6px">📱 Access from Anywhere via Telegram</div>
+                <div style="font-size:13px;color:var(--text-dim);line-height:1.6">
+                  If you connected a Telegram bot, message it from your phone anytime — as long as this PC is on and the agent is running, it responds instantly.
+                  Send <strong>/start</strong> to your bot to begin guided setup or ask any task.
+                </div>
+              </div>
+
+            </div>
+          </div>
         </div>
 
         <div id="reviewActions" class="btn-nav-group">
@@ -2362,6 +2412,9 @@ async function startAgentNow() {
         <div style="font-size:13px;color:var(--text-dim);margin-top:6px">Model: ${d.model} · ${d.toolCount} tools · ${d.skillCount} skills</div>`;
       document.getElementById('goLiveSub').textContent = `${d.name} is running and ready to work.`;
       toast('Your AI is live! 🚀','success');
+      // Show the "how to keep running" guide
+      const guide = document.getElementById('keepRunningGuide');
+      if (guide) guide.style.display = 'block';
       // Auto-trigger guided onboarding — show the user exactly what's working
       // and walk them through connecting anything that's missing
       const onboardMsg = "My AI assistant is now live. Please check my setup status and guide me step by step through connecting any integrations that are not yet configured — start with the most important one (email or calendar).";
