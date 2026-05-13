@@ -30,6 +30,19 @@ if not exist node_modules\ (
         pause
         exit /b 1
     )
+    echo.
+    echo  Running security audit...
+    npm audit --audit-level=high 2>&1
+    if errorlevel 1 (
+        echo.
+        echo  WARNING: Security vulnerabilities found in dependencies.
+        echo  Run "npm audit fix" to attempt automatic fixes.
+        echo  Press any key to continue anyway, or close this window to cancel.
+        pause
+    ) else (
+        echo  ✓ No high-severity vulnerabilities found.
+    )
+    echo.
 )
 
 :: Build if dist/ is missing or outdated
