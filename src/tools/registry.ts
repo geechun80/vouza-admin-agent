@@ -71,7 +71,7 @@ export class ToolRegistry {
   async executeTools(
     toolCalls: Array<{ id: string; name: string; input: unknown }>,
     context: AgentContext
-  ): Promise<Array<{ tool_use_id: string; content: string; is_error: boolean }>> {
+  ): Promise<Array<{ tool_use_id: string; content: string | any[]; is_error: boolean }>> {
     // Partition into parallel-safe and serial
     const parallel: typeof toolCalls = [];
     const serial: typeof toolCalls = [];
@@ -89,7 +89,7 @@ export class ToolRegistry {
       }
     }
 
-    const results: Array<{ tool_use_id: string; content: string; is_error: boolean }> = [];
+    const results: Array<{ tool_use_id: string; content: string | any[]; is_error: boolean }> = [];
 
     // Run parallel batch
     if (parallel.length > 0) {
@@ -111,7 +111,7 @@ export class ToolRegistry {
   private async executeSingle(
     call: { id: string; name: string; input: unknown },
     context: AgentContext
-  ): Promise<{ tool_use_id: string; content: string; is_error: boolean }> {
+  ): Promise<{ tool_use_id: string; content: string | any[]; is_error: boolean }> {
     const tool = this.tools.get(call.name);
     if (!tool) {
       return { tool_use_id: call.id, content: `Unknown tool: ${call.name}`, is_error: true };
@@ -120,6 +120,20 @@ export class ToolRegistry {
     try {
       const parsed = tool.inputSchema.parse(call.input);
       const result = await tool.call(parsed, context);
+
+      // If the tool returned a vision block (image file), send it as a content
+      // array so vision-capable models (Claude, GPT-4V) can actually see it.
+      if (result.success && result._visionBlock) {
+        return {
+          tool_use_id: call.id,
+          content: [
+            { type: "text", text: JSON.stringify(result.data ?? {}) },
+            result._visionBlock,
+          ],
+          is_error: false,
+        };
+      }
+
       return {
         tool_use_id: call.id,
         content: JSON.stringify(result.data ?? result.error ?? "OK"),

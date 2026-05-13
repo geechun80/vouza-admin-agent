@@ -13,15 +13,23 @@ import { buildTool } from "./registry.js";
 import { readdir, readFile, writeFile, rename, mkdir, stat } from "fs/promises";
 import { join, extname, basename, dirname } from "path";
 import { createRequire } from "module";
+import type { VisionContentBlock } from "../types/index.js";
 
-// CommonJS interop for pdf-parse (no ESM export)
+// CommonJS interop for pdf-parse and adm-zip (no ESM export)
 const require = createRequire(import.meta.url);
 
 // ─── Binary format parsers ────────────────────────────────────────────────────
 
-const PDF_EXTS  = new Set([".pdf"]);
-const WORD_EXTS = new Set([".docx"]);
-const XL_EXTS   = new Set([".xlsx", ".xls", ".ods"]);
+const PDF_EXTS   = new Set([".pdf"]);
+const WORD_EXTS  = new Set([".docx"]);
+const XL_EXTS    = new Set([".xlsx", ".xls", ".ods"]);
+const PPTX_EXTS  = new Set([".pptx", ".ppt"]);
+// Images that vision-capable models (Claude, GPT-4V, Gemini) can natively understand
+const VISION_EXTS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp"]);
+// Images we can describe metadata for but can't send as vision (too exotic)
+const IMAGE_EXTS  = new Set([...VISION_EXTS, ".bmp", ".tiff", ".tif", ".svg", ".ico"]);
+
+const MAX_IMAGE_BYTES = 3_500_000; // ~3.5 MB raw → ~4.7 MB base64 (Anthropic limit is 5 MB)
 const TEXT_EXTS = new Set([
   ".txt", ".csv", ".json", ".md", ".markdown", ".log",
   ".xml", ".yaml", ".yml", ".html", ".htm", ".js", ".ts",
@@ -102,20 +110,104 @@ async function parseExcel(
   return { sheets: sheetNames, activeSheet: sheet.name, headers, rows };
 }
 
+async function parsePPTX(filePath: string): Promise<{ slideCount: number; text: string }> {
+  const AdmZip = require("adm-zip");
+  const zip = new AdmZip(filePath);
+  const entries: any[] = zip.getEntries();
+
+  // Collect slide XML files sorted by slide number
+  const slideEntries = entries
+    .filter((e: any) => /^ppt\/slides\/slide\d+\.xml$/i.test(e.entryName))
+    .sort((a: any, b: any) => {
+      const numA = parseInt(a.entryName.match(/\d+/)?.[0] ?? "0");
+      const numB = parseInt(b.entryName.match(/\d+/)?.[0] ?? "0");
+      return numA - numB;
+    });
+
+  const allText: string[] = [];
+
+  for (let i = 0; i < slideEntries.length; i++) {
+    const xml: string = slideEntries[i].getData().toString("utf-8");
+    // Extract text from DrawingML <a:t> tags (where slide text lives)
+    const matches = xml.match(/<a:t[^>]*>([^<]+)<\/a:t>/g) ?? [];
+    const slideText = matches
+      .map((m) => m.replace(/<[^>]*>/g, "").trim())
+      .filter(Boolean)
+      .join(" ");
+    if (slideText) allText.push(`[Slide ${i + 1}] ${slideText}`);
+  }
+
+  return {
+    slideCount: slideEntries.length,
+    text: allText.join("\n\n") || "(no text content found in slides)",
+  };
+}
+
+async function readImageFile(filePath: string, fileSize: number, ext: string): Promise<{
+  data: Record<string, unknown>;
+  visionBlock?: VisionContentBlock;
+}> {
+  const isVisionSupported = VISION_EXTS.has(ext);
+  const mediaTypeMap: Record<string, VisionContentBlock["source"]["media_type"]> = {
+    ".jpg":  "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png":  "image/png",
+    ".gif":  "image/gif",
+    ".webp": "image/webp",
+  };
+
+  const meta: Record<string, unknown> = {
+    format: ext.slice(1).toUpperCase(),
+    filePath,
+    sizeBytes: fileSize,
+    sizeMB: (fileSize / 1_048_576).toFixed(2),
+    visionSupported: isVisionSupported,
+  };
+
+  if (!isVisionSupported) {
+    meta.note = `${ext} images cannot be rendered for AI vision. Convert to PNG/JPEG for AI analysis.`;
+    return { data: meta };
+  }
+
+  if (fileSize > MAX_IMAGE_BYTES) {
+    meta.note = `Image is too large (${meta.sizeMB} MB) to send as vision input (limit: ~3.5 MB). ` +
+      `Use the chat image upload button instead, or resize the image first.`;
+    return { data: meta };
+  }
+
+  const buffer = await readFile(filePath);
+  const base64  = buffer.toString("base64");
+  const mediaType = mediaTypeMap[ext] ?? "image/jpeg";
+
+  meta.note = "Image has been provided to the AI for visual analysis.";
+
+  return {
+    data: meta,
+    visionBlock: {
+      type: "image",
+      source: { type: "base64", media_type: mediaType, data: base64 },
+    },
+  };
+}
+
 // ─── read_file ────────────────────────────────────────────────────────────────
 
 export const readFileTool = buildTool({
   name: "read_file",
   description:
-    "Read ANY local file — plain text (txt, csv, json, md, log, xml, yaml, html, code files), " +
-    "PDF documents, Word documents (.docx), and Excel spreadsheets (.xlsx/.xls/.ods). " +
-    "For Excel, returns all rows from the first sheet as structured JSON.",
+    "Read ANY local file and return its content. Supported formats: " +
+    "plain text (.txt .csv .json .md .log .xml .yaml .html and all code files), " +
+    "PDF (.pdf), Word (.docx), Excel (.xlsx .xls .ods), " +
+    "PowerPoint (.pptx — extracts all slide text), " +
+    "and images (.jpg .jpeg .png .gif .webp — sends to AI vision for analysis; " +
+    ".bmp .tiff .svg — returns metadata only). " +
+    "The format is auto-detected by file extension.",
   category: "file",
   isReadOnly: true,
   isConcurrencySafe: true,
   inputSchema: z.object({
     filePath: z.string().describe("Absolute or relative path to the file"),
-    encoding: z.string().optional().default("utf-8").describe("Text encoding (text files only)"),
+    encoding: z.string().optional().default("utf-8").describe("Text encoding (plain text files only)"),
   }),
   async call(input): Promise<any> {
     try {
@@ -127,14 +219,8 @@ export const readFileTool = buildTool({
         const text = await parsePDF(input.filePath);
         return {
           success: true,
-          data: {
-            format: "pdf",
-            filePath: input.filePath,
-            size: stats.size,
-            modified: stats.mtime.toISOString(),
-            content: text,
-            charCount: text.length,
-          },
+          data: { format: "pdf", filePath: input.filePath, size: stats.size,
+            modified: stats.mtime.toISOString(), content: text, charCount: text.length },
         };
       }
 
@@ -143,14 +229,8 @@ export const readFileTool = buildTool({
         const text = await parseWord(input.filePath);
         return {
           success: true,
-          data: {
-            format: "docx",
-            filePath: input.filePath,
-            size: stats.size,
-            modified: stats.mtime.toISOString(),
-            content: text,
-            charCount: text.length,
-          },
+          data: { format: "docx", filePath: input.filePath, size: stats.size,
+            modified: stats.mtime.toISOString(), content: text, charCount: text.length },
         };
       }
 
@@ -159,17 +239,31 @@ export const readFileTool = buildTool({
         const result = await parseExcel(input.filePath);
         return {
           success: true,
-          data: {
-            format: ext.slice(1),
-            filePath: input.filePath,
-            size: stats.size,
-            modified: stats.mtime.toISOString(),
-            sheets: result.sheets,
-            activeSheet: result.activeSheet,
-            headers: result.headers,
-            rowCount: result.rows.length,
-            rows: result.rows,
-          },
+          data: { format: ext.slice(1), filePath: input.filePath, size: stats.size,
+            modified: stats.mtime.toISOString(), sheets: result.sheets,
+            activeSheet: result.activeSheet, headers: result.headers,
+            rowCount: result.rows.length, rows: result.rows },
+        };
+      }
+
+      // ── PowerPoint ─────────────────────────────────────────────────────────
+      if (PPTX_EXTS.has(ext)) {
+        const result = await parsePPTX(input.filePath);
+        return {
+          success: true,
+          data: { format: "pptx", filePath: input.filePath, size: stats.size,
+            modified: stats.mtime.toISOString(), slideCount: result.slideCount,
+            content: result.text, charCount: result.text.length },
+        };
+      }
+
+      // ── Images ─────────────────────────────────────────────────────────────
+      if (IMAGE_EXTS.has(ext)) {
+        const { data, visionBlock } = await readImageFile(input.filePath, stats.size, ext);
+        return {
+          success: true,
+          data: { ...data, modified: stats.mtime.toISOString() },
+          _visionBlock: visionBlock,
         };
       }
 
@@ -177,13 +271,8 @@ export const readFileTool = buildTool({
       const content = await readFile(input.filePath, input.encoding as BufferEncoding);
       return {
         success: true,
-        data: {
-          format: ext.slice(1) || "txt",
-          filePath: input.filePath,
-          size: stats.size,
-          modified: stats.mtime.toISOString(),
-          content,
-        },
+        data: { format: ext.slice(1) || "txt", filePath: input.filePath,
+          size: stats.size, modified: stats.mtime.toISOString(), content },
       };
     } catch (err) {
       return { success: false, error: `Failed to read file: ${err}` };

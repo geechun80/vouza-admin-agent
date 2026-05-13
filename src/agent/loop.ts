@@ -117,10 +117,18 @@ async function callOpenAICompatible(
       const toolResults = msg.content.filter((b: any) => b.type === "tool_result");
       if (toolResults.length > 0) {
         for (const tr of toolResults) {
+          // OpenAI-compatible providers only accept string content in tool results.
+          // Flatten content arrays (e.g. [text, imageBlock]) to text-only string.
+          const content = Array.isArray(tr.content)
+            ? tr.content
+                .filter((b: any) => b.type === "text")
+                .map((b: any) => b.text)
+                .join("\n") || "(binary result)"
+            : tr.content;
           openaiMessages.push({
             role: "tool",
             tool_call_id: tr.tool_use_id,
-            content: tr.content,
+            content,
           });
         }
       } else {

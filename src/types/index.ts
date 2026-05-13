@@ -8,11 +8,27 @@ import type { AIProvider } from "../config/models.js";
 
 // --- Tool System ---
 
+/** Image content block used by vision-capable models (Claude, GPT-4V, Gemini) */
+export interface VisionContentBlock {
+  type: "image";
+  source: {
+    type: "base64";
+    media_type: "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+    data: string;  // base64-encoded image bytes
+  };
+}
+
 export interface ToolResult<T = unknown> {
   success: boolean;
   data?: T;
   error?: string;
   metadata?: Record<string, unknown>;
+  /**
+   * Optional image for vision-capable models.
+   * When present the registry sends the tool result as a content array
+   * [text metadata, image block] so the AI can actually see the image.
+   */
+  _visionBlock?: VisionContentBlock;
 }
 
 export interface ToolDefinition<TInput = unknown, TOutput = unknown> {
@@ -64,7 +80,7 @@ export interface ConversationMessage {
 export type ContentBlock =
   | { type: "text"; text: string }
   | { type: "tool_use"; id: string; name: string; input: unknown }
-  | { type: "tool_result"; tool_use_id: string; content: string; is_error?: boolean };
+  | { type: "tool_result"; tool_use_id: string; content: string | any[]; is_error?: boolean };
 
 export type StreamEvent =
   | { type: "text_delta"; text: string }
