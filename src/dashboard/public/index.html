@@ -2178,6 +2178,35 @@ function showStep(n) {
 }
 
 function goNext() {
+  // ── Step 1 gate: AI API key is mandatory ──────────────────────────────────
+  if (state.step === 1) {
+    const keyEl = document.getElementById('aiProviderKey');
+    const key   = keyEl?.value?.trim();
+    if (!key) {
+      toast('🔑 An AI API key is required — without it the bot cannot respond', 'error');
+      if (keyEl) {
+        keyEl.style.transition = 'border-color 0.2s';
+        keyEl.style.borderColor = 'var(--error)';
+        keyEl.scrollIntoView({ behavior:'smooth', block:'center' });
+        keyEl.focus();
+        // Show inline helper text
+        let hint = keyEl.parentElement?.querySelector('.key-required-hint');
+        if (!hint) {
+          hint = document.createElement('div');
+          hint.className = 'key-required-hint';
+          hint.style.cssText = 'color:var(--error);font-size:12px;margin-top:6px;font-weight:600';
+          hint.textContent = '⚠️ This field is required to activate your AI. Enter your API key above, then click Test to verify it works.';
+          keyEl.parentElement?.appendChild(hint);
+        }
+        // Clear the error state once the user starts typing
+        keyEl.addEventListener('input', () => {
+          keyEl.style.borderColor = '';
+          hint?.remove();
+        }, { once:true });
+      }
+      return;
+    }
+  }
   if (state.step < state.totalSteps) showStep(state.step + 1);
 }
 
@@ -2441,7 +2470,7 @@ function renderAIKeySection() {
         </div>
       ` : ''}
       <div class="form-group" style="margin-bottom:0">
-        <label>${isOR ? 'OpenRouter' : provName} API Key</label>
+        <label>${isOR ? 'OpenRouter' : provName} API Key <span style="color:var(--error);font-size:11px;font-weight:700;background:rgba(239,68,68,0.12);padding:2px 7px;border-radius:10px;margin-left:6px">Required</span></label>
         <div class="input-group">
           <input type="password" id="aiProviderKey" placeholder="${placeholder}">
           <button class="btn btn-test" onclick="testAIProvider()">🔌 Test</button>

@@ -222,6 +222,13 @@ export interface AgentConfig {
       credentialsJson: string;   // path to service account JSON or OAuth JSON
       scopes: string[];          // which APIs to access
     };
+    outlook?: {                  // Microsoft Outlook / 365 via Azure OAuth
+      clientId: string;
+      clientSecret: string;
+      tenantId: string;
+      email?: string;
+    };
+    smtp?: { host: string; port: string; user: string; pass: string };
     slack?: { botToken: string };
     telegram?: { botToken: string; webhookUrl?: string };
     whatsapp?: {
@@ -229,6 +236,8 @@ export interface AgentConfig {
       config: Record<string, string>;
     };
   };
+  /** Raw credentials bag — stores provider creds not covered by tools above */
+  credentials?: Record<string, string>;
 }
 
 // --- Template System ---
