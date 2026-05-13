@@ -2426,6 +2426,14 @@ function guideForStep(n) {
   setTimeout(updateTips, t);
 }
 
+// guideMsg(role, text) — called from revealGoLive() and launchAgent()
+// 'bot' → scripted bot bubble with typing indicator
+// 'user' → plain user bubble (rare, kept for symmetry)
+function guideMsg(role, text) {
+  if (role === 'bot') guideBotScripted(text);
+  else appendUserMsg(text, null);
+}
+
 function guideBotScripted(text) {
   const box      = document.getElementById('guideMessages');
   const typingEl = document.getElementById('guideTyping');
