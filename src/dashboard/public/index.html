@@ -157,23 +157,28 @@
     .app-layout {
       display:grid;
       grid-template-columns:1fr 340px;
-      min-height:100vh;
+      height:100vh;           /* fill viewport — prevents page-level scroll */
       max-width:1300px;
       margin:0 auto;
+      overflow:hidden;        /* nothing escapes — inner cols scroll themselves */
     }
 
-    /* ── Main content column ── */
+    /* ── Main content column — scrolls INSIDE itself, never the page ── */
     .main-col {
       padding:40px 48px;
       border-right:1px solid var(--border);
+      overflow-y:auto;        /* wizard content scrolls here, not the whole page */
+      height:100vh;
     }
 
-    /* ── Guide panel column ── */
+    /* ── Guide panel column — fixed height, never participates in page scroll ── */
     .guide-col {
       display:flex; flex-direction:column;
       background:rgba(124,58,237,0.03);
       border-left:1px solid var(--border);
-      position:sticky; top:0; height:100vh; overflow:hidden;
+      height:100vh; overflow:hidden;
+      /* position:sticky removed — main-col now scrolls internally so sticky is
+         unnecessary and was causing the chat panel to shift on step navigation */
     }
 
     /* ============================================================
@@ -2233,15 +2238,25 @@ function showStep(n) {
   if (el) el.classList.add('active');
   state.step = n;
   renderProgressRail();
-  // Instant scroll reset — no smooth animation that fights the step transition
-  document.documentElement.scrollTop = 0;
-  document.body.scrollTop = 0;
+  // Scroll only the wizard content column — NEVER the full page.
+  // Scrolling document.documentElement was causing the guide panel to shift
+  // and lose its scroll-to-bottom position on every step navigation click.
+  const mainCol = document.querySelector('.main-col');
+  if (mainCol) mainCol.scrollTop = 0;
 
   if (n === 2) { renderAIKeySection(); renderChannelCredentials(); checkGoogleUnified(); }
   if (n === 4) { renderReview(); }
 
   guideForStep(n);
   updateTips();
+
+  // Re-pin chat messages to the bottom after the step transition settles.
+  // requestAnimationFrame waits for the layout to repaint before scrolling,
+  // ensuring any dynamic content added by guideForStep() is already rendered.
+  requestAnimationFrame(() => {
+    const box = document.getElementById('guideMessages');
+    if (box) box.scrollTop = box.scrollHeight;
+  });
 }
 
 function goNext() {
