@@ -7,6 +7,11 @@ import express from "express";
 import { readFile, writeFile, mkdir, readdir, unlink, access } from "fs/promises";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import { exec } from "child_process";
+import { promisify } from "util";
+import os from "os";
+
+const execAsync = promisify(exec);
 import { getModelCatalogForUI } from "../../config/models.js";
 import { launchAgent, getAgentStatus, type AgentInstance } from "../../bridge/launcher.js";
 import { streamChat, clearSession } from "./chat.js";
@@ -524,6 +529,44 @@ export async function startDashboard(port = 3456): Promise<void> {
       await unlink(join(CONV_DIR, `${req.params.id}.json`));
       res.json({ success: true });
     } catch { res.json({ success: true }); } // already gone is fine
+  });
+
+  // --- Create Desktop Shortcut ---
+  // Creates a .lnk on the user's Desktop pointing to start-background.vbs
+  // with the Vee bot ICO as the icon — Windows only, silently skips on other OS.
+  app.post("/api/create-shortcut", requireLocalOrigin, async (_req, res) => {
+    if (os.platform() !== "win32") {
+      return res.json({ success: false, error: "Desktop shortcuts are only supported on Windows." });
+    }
+    try {
+      const agentDir = process.cwd().replace(/\\/g, "\\\\");
+      const desktopDir = join(os.homedir(), "Desktop").replace(/\\/g, "\\\\");
+      const shortcutPath = join(os.homedir(), "Desktop", "Vouza Admin Agent.lnk").replace(/\\/g, "\\\\");
+      const targetVbs = join(process.cwd(), "start-background.vbs").replace(/\\/g, "\\\\");
+      const iconPath = join(process.cwd(), "assets", "icon.ico").replace(/\\/g, "\\\\");
+
+      const psScript = [
+        `$sh = New-Object -ComObject WScript.Shell`,
+        `$sc = $sh.CreateShortcut('${shortcutPath}')`,
+        `$sc.TargetPath = 'wscript.exe'`,
+        `$sc.Arguments = '"${targetVbs}"'`,
+        `$sc.WorkingDirectory = '${agentDir}'`,
+        `$sc.IconLocation = '${iconPath},0'`,
+        `$sc.Description = 'Vouza Admin Agent — click to launch in background'`,
+        `$sc.Save()`,
+        `Write-Output 'ok'`,
+      ].join("; ");
+
+      const { stdout } = await execAsync(`powershell -NoProfile -NonInteractive -Command "${psScript}"`, { timeout: 10000 });
+
+      if (stdout.trim() === "ok") {
+        res.json({ success: true, path: join(os.homedir(), "Desktop", "Vouza Admin Agent.lnk") });
+      } else {
+        res.json({ success: false, error: "Shortcut script produced no output." });
+      }
+    } catch (err) {
+      res.json({ success: false, error: String(err) });
+    }
   });
 
   // --- Serve SPA ---
