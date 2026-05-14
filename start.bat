@@ -70,6 +70,17 @@ echo.
 echo  ============================================
 echo.
 
+:: ── Operator API Key (optional) ──────────────────────────────────────────────
+:: Set VOUZA_API_KEY to power the bot immediately for customers who haven't
+:: configured their own key yet. The key is never exposed to end-users.
+:: Remove the REM below and fill in your key to enable this feature.
+::
+:: REM set VOUZA_API_KEY=sk-or-v1-yourKeyHere
+:: REM set VOUZA_API_PROVIDER=openrouter
+:: REM set VOUZA_API_MODEL=meta-llama/llama-3.1-8b-instruct:free
+:: REM set VOUZA_BRAND_NAME=Vouza
+:: ─────────────────────────────────────────────────────────────────────────────
+
 :: Open browser after 3 seconds (gives server time to start)
 start "" /b cmd /c "timeout /t 3 /nobreak >nul && start http://localhost:3456"
 

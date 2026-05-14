@@ -108,6 +108,21 @@ export async function startDashboard(port = 3456): Promise<void> {
     res.json(getModelCatalogForUI());
   });
 
+  // --- Operator Defaults API ---
+  // Tells the wizard whether a default (Vouza-supplied) API key is configured.
+  // The actual key is NEVER exposed — only hasDefaultKey: true/false.
+  // Set VOUZA_API_KEY (and optionally VOUZA_API_PROVIDER, VOUZA_API_MODEL, VOUZA_BRAND_NAME)
+  // as environment variables in start.bat or ecosystem.config.cjs.
+  app.get("/api/operator-defaults", (_req, res) => {
+    const hasDefaultKey = !!(process.env.VOUZA_API_KEY || "").trim();
+    res.json({
+      hasDefaultKey,
+      defaultProvider: process.env.VOUZA_API_PROVIDER || "openrouter",
+      defaultModel:    process.env.VOUZA_API_MODEL    || "meta-llama/llama-3.1-8b-instruct:free",
+      brandName:       process.env.VOUZA_BRAND_NAME   || "Vouza",
+    });
+  });
+
   // --- Config API ---
   app.get("/api/config", async (_req, res) => {
     const config = await loadSetupConfig();
@@ -189,23 +204,23 @@ export async function startDashboard(port = 3456): Promise<void> {
       if (launching) {
         return res.json({ success: false, error: "Agent is already starting — please wait a moment." });
       }
-      // Pre-flight: ensure the saved config has a valid AI provider key before launching.
-      // We check the specific provider key (not just any credential) to avoid passing on
-      // a Groq voice key as if it were an OpenRouter/Anthropic key.
-      const preFlight = await loadSetupConfig();
+      // Pre-flight: ensure a valid AI provider key is available before launching.
+      // Priority: user's saved key → operator default key (VOUZA_API_KEY env var).
+      // If neither exists, block launch with a clear error.
+      const preFlight  = await loadSetupConfig();
       const savedCreds = preFlight.credentials || {};
-      const provider = preFlight.agent?.provider || "anthropic";
-      // For OpenRouter, the key is stored under either openrouterApiKey or openrouterApiKey (double-write)
-      const savedKey =
+      const provider   = preFlight.agent?.provider || "anthropic";
+      const savedKey   =
         savedCreds[`${provider}ApiKey`] ||
         (provider === "openrouter" ? savedCreds["openrouterApiKey"] : undefined) ||
         (provider === "anthropic"  ? savedCreds["anthropicApiKey"]  : undefined);
-      if (!savedKey || savedKey.trim().length < 8) {
+      const operatorKey = (process.env.VOUZA_API_KEY || "").trim();
+      if ((!savedKey || savedKey.trim().length < 8) && !operatorKey) {
         return res.json({
           success: false,
           error:
-            `No ${provider} API key found in your saved configuration. ` +
-            "Please enter your AI API key in Step 2, click 🔌 Test, then go to Step 4 and click Go Live.",
+            `No AI API key found. ` +
+            "Enter your key in Step 2, click 🔌 Test, then return to Go Live.",
         });
       }
 

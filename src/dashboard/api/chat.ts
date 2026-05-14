@@ -269,10 +269,20 @@ export async function* streamChat(
 // ─────────────────────────────────────────────────────────────────────────────
 
 function buildAgentConfig(saved: any, apiKeyOverride?: string): AgentConfig {
-  const provider = (saved?.agent?.provider || "anthropic") as AIProvider;
-  const creds    = saved?.credentials    || {};
+  // ── Operator defaults — set via VOUZA_API_KEY env var ─────────────────────
+  // Vouza ships the agent with a default key so customers can use it immediately.
+  // The user's own key always takes priority when configured.
+  const operatorKey      = (process.env.VOUZA_API_KEY      || "").trim();
+  const operatorProvider = (process.env.VOUZA_API_PROVIDER || "openrouter") as AIProvider;
+  const operatorModel    = (process.env.VOUZA_API_MODEL    || DEFAULT_OPENROUTER_TIERS.fast);
 
-  // Build the full apiKeys record
+  const creds = saved?.credentials || {};
+
+  // Determine effective provider: user config → operator default
+  const userProvider = saved?.agent?.provider as AIProvider | undefined;
+  const provider: AIProvider = userProvider || (operatorKey ? operatorProvider : "anthropic");
+
+  // Build the full apiKeys record (user keys take priority over env vars)
   const apiKeys: Record<string, string> = {
     anthropic:  creds.anthropicApiKey  || process.env.ANTHROPIC_API_KEY   || "",
     openai:     creds.openaiApiKey     || process.env.OPENAI_API_KEY       || "",
@@ -288,20 +298,37 @@ function buildAgentConfig(saved: any, apiKeyOverride?: string): AgentConfig {
   const wizardKey = creds[`${provider}ApiKey`];
   if (wizardKey) apiKeys[provider] = wizardKey;
 
-  // Request-level override wins
+  // Operator key fills the gap when no user key is configured
+  if (!apiKeys[provider] || apiKeys[provider].length < 8) {
+    if (operatorKey && provider === operatorProvider) {
+      apiKeys[provider] = operatorKey;
+    } else if (operatorKey && !apiKeys[operatorProvider]) {
+      // Provider mismatch — still supply the operator key on its own provider slot
+      apiKeys[operatorProvider] = operatorKey;
+    }
+  }
+
+  // Request-level override wins everything
   if (apiKeyOverride) apiKeys[provider] = apiKeyOverride;
 
+  // ── Effective model ───────────────────────────────────────────────────────
+  // User has configured their own key → use their model choice.
+  // Operator key in use → use operator model (typically a free/fast model).
+  const hasUserKey = !!(wizardKey || creds.openrouterApiKey || creds.anthropicApiKey);
+
   // OpenRouter: build tiered model config
-  const openrouterTiers = provider === "openrouter" ? {
-    fast:     saved?.agent?.openrouterTiers?.fast     || DEFAULT_OPENROUTER_TIERS.fast,
-    balanced: saved?.agent?.openrouterTiers?.balanced  || DEFAULT_OPENROUTER_TIERS.balanced,
-    flagship: saved?.agent?.openrouterTiers?.flagship  || DEFAULT_OPENROUTER_TIERS.flagship,
+  const openrouterTiers = (provider === "openrouter" || operatorProvider === "openrouter") ? {
+    fast:     (hasUserKey ? saved?.agent?.openrouterTiers?.fast    : undefined) || DEFAULT_OPENROUTER_TIERS.fast,
+    balanced: (hasUserKey ? saved?.agent?.openrouterTiers?.balanced : undefined) || DEFAULT_OPENROUTER_TIERS.balanced,
+    flagship: (hasUserKey ? saved?.agent?.openrouterTiers?.flagship : undefined) || DEFAULT_OPENROUTER_TIERS.flagship,
   } : undefined;
 
-  // Display model: balanced tier for openrouter, otherwise the configured model
-  const model = provider === "openrouter"
-    ? (openrouterTiers?.balanced ?? DEFAULT_OPENROUTER_TIERS.balanced)
-    : (saved?.agent?.model || "claude-sonnet-4-6");
+  // Display model: operator model when no user key, otherwise user selection
+  const model = hasUserKey
+    ? (provider === "openrouter"
+        ? (openrouterTiers?.balanced ?? DEFAULT_OPENROUTER_TIERS.balanced)
+        : (saved?.agent?.model || "claude-sonnet-4-6"))
+    : operatorModel;
 
   // ── Whisper voice transcription (separate from main AI provider) ───────────
   // Priority: explicit voice tool card > Groq key > OpenAI key in apiKeys

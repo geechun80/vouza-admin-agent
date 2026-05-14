@@ -1979,6 +1979,9 @@ const state = {
     balanced: 'google/gemini-2.5-flash-lite',
     flagship: 'google/gemini-2.5-flash',
   },
+  // Operator-supplied default key (set by Vouza, invisible to end-users)
+  // null = loading, {} = no default key, {hasDefaultKey:true,...} = key available
+  operatorDefaults: null,
 };
 
 const STEPS = [
@@ -2042,10 +2045,19 @@ async function init() {
   renderSkillList();
   document.getElementById('googleIcon').innerHTML = ICONS.google;
 
-  try {
-    const res = await fetch('/api/models');
-    state.modelCatalog = await res.json();
-  } catch { state.modelCatalog = []; }
+  // Load model catalog and operator defaults in parallel
+  const [modelsRes, opRes] = await Promise.allSettled([
+    fetch('/api/models').then(r => r.json()),
+    fetch('/api/operator-defaults').then(r => r.json()),
+  ]);
+  state.modelCatalog    = modelsRes.status === 'fulfilled' ? modelsRes.value : [];
+  state.operatorDefaults = opRes.status   === 'fulfilled' ? opRes.value     : {};
+
+  // If operator default key is available and no model catalog, default to openrouter
+  if (state.operatorDefaults?.hasDefaultKey && !state.modelCatalog.length) {
+    state.selectedProvider = state.operatorDefaults.defaultProvider || 'openrouter';
+    state.selectedModel    = state.operatorDefaults.defaultModel    || state.orTiers.balanced;
+  }
 
   renderModelSelector();
 
@@ -2229,20 +2241,23 @@ function showStep(n) {
 }
 
 function goNext() {
-  // ── Step 2 gate: AI API key is mandatory before proceeding to Train ───────
-  // The API key input (#aiProviderKey) is rendered dynamically when Step 2 loads,
-  // so we gate here (Step 2 → Step 3) not on Step 1 where the field doesn't exist yet.
+  // ── Step 2 gate: AI API key is mandatory unless an operator default key is set ──
+  // Operator key (VOUZA_API_KEY env var) powers the bot immediately without user setup.
+  // If neither is configured, block and prompt the user.
   if (state.step === 2) {
-    const keyEl = document.getElementById('aiProviderKey');
-    const key   = keyEl?.value?.trim();
-    if (!key) {
+    const keyEl  = document.getElementById('aiProviderKey');
+    const key    = keyEl?.value?.trim();
+    const hasSaved     = (keyEl?.placeholder || '').includes('Already saved');
+    const hasConnected = !!state.connStatus['ai-provider'] || !!state.connStatus['openrouter'];
+    const hasOperator  = !!state.operatorDefaults?.hasDefaultKey;
+
+    if (!key && !hasSaved && !hasConnected && !hasOperator) {
       toast('🔑 An AI API key is required — without it the bot cannot respond', 'error');
       if (keyEl) {
         keyEl.style.transition = 'border-color 0.2s';
         keyEl.style.borderColor = 'var(--error)';
         keyEl.scrollIntoView({ behavior:'smooth', block:'center' });
         keyEl.focus();
-        // Show inline helper text
         let hint = keyEl.parentElement?.querySelector('.key-required-hint');
         if (!hint) {
           hint = document.createElement('div');
@@ -2251,7 +2266,6 @@ function goNext() {
           hint.textContent = '⚠️ This field is required to activate your AI. Enter your API key above, then click 🔌 Test.';
           keyEl.parentElement?.appendChild(hint);
         }
-        // Clear the error state once the user starts typing
         keyEl.addEventListener('input', () => {
           keyEl.style.borderColor = '';
           keyEl.parentElement?.querySelector('.key-required-hint')?.remove();
@@ -2508,22 +2522,58 @@ function renderAIKeySection() {
   const hint = p ? p.apiKeyHint : 'https://console.anthropic.com/keys';
   const statusKey = 'ai-provider';
   const connected = state.connStatus[statusKey];
+  const op = state.operatorDefaults || {};
+  const hasOperatorKey = !!op.hasDefaultKey;
+  // User has their own saved key if the placeholder says "Already saved"
+  const hasSavedKey = connected || (document.getElementById('aiProviderKey')?.placeholder || '').includes('Already saved');
+  const usingOperator = hasOperatorKey && !connected && !hasSavedKey;
+  const brandName = op.brandName || 'Vouza';
 
-  box.innerHTML = `
+  let html = '';
+
+  // ── Operator key banner — shown when no user key is set yet ───────────────
+  if (usingOperator) {
+    html += `
+      <div class="glass-card" style="border:1px solid rgba(34,197,94,0.35);background:rgba(34,197,94,0.06);margin-bottom:16px">
+        <div class="glass-card-header" style="margin-bottom:0">
+          <div class="glass-card-icon" style="font-size:22px;background:rgba(34,197,94,0.12);border-radius:10px;padding:6px">⚡</div>
+          <div style="flex:1">
+            <div class="glass-card-title" style="color:var(--success)">Powered by ${brandName}</div>
+            <div style="font-size:12px;color:var(--text-dim);margin-top:2px">Your AI is ready — no API key needed to get started</div>
+          </div>
+          <span class="glass-card-badge badge-connected">Ready</span>
+        </div>
+      </div>`;
+  }
+
+  // ── User's own API key (required when no operator key; optional otherwise) ─
+  const isRequired = !hasOperatorKey;
+  const requiredBadge = isRequired
+    ? `<span style="color:var(--error);font-size:11px;font-weight:700;background:rgba(239,68,68,0.12);padding:2px 7px;border-radius:10px;margin-left:6px">Required</span>`
+    : `<span style="color:var(--text-muted);font-size:11px;background:var(--bg-glass);border:1px solid var(--border);padding:2px 7px;border-radius:10px;margin-left:6px">Optional</span>`;
+  const cardTitle = hasOperatorKey
+    ? 'Use Your Own API Key'
+    : `${provName} API Key`;
+
+  html += `
     <div class="glass-card">
       <div class="glass-card-header">
         <div class="glass-card-icon">${icon}</div>
-        <div class="glass-card-title">${provName} API Key</div>
+        <div class="glass-card-title">${cardTitle}</div>
         <span class="glass-card-badge ${connected?'badge-success':'badge-pending'}" id="status-${statusKey}">${connected?'✓ Connected':'Not Connected'}</span>
       </div>
-      ${isOR ? `
+      ${hasOperatorKey ? `
+        <div style="font-size:12px;color:var(--text-dim);margin-bottom:12px;line-height:1.5">
+          Bring your own key to use a different model, bypass shared usage limits, or keep full control of your AI spending.
+        </div>
+      ` : isOR ? `
         <div style="font-size:12px;color:var(--text-dim);margin-bottom:12px;padding:8px 12px;background:rgba(124,58,237,0.06);border-radius:8px;line-height:1.5">
           🧠 <strong style="color:#a78bfa">Smart Routing active</strong> — one key unlocks 200+ models.
           Simple questions automatically use cheap models; complex tasks escalate to powerful ones.
         </div>
       ` : ''}
       <div class="form-group" style="margin-bottom:0">
-        <label>${isOR ? 'OpenRouter' : provName} API Key <span style="color:var(--error);font-size:11px;font-weight:700;background:rgba(239,68,68,0.12);padding:2px 7px;border-radius:10px;margin-left:6px">Required</span></label>
+        <label>${isOR ? 'OpenRouter' : provName} API Key ${requiredBadge}</label>
         <div class="input-group">
           <input type="password" id="aiProviderKey" placeholder="${placeholder}">
           <button class="btn btn-test" onclick="testAIProvider()">🔌 Test</button>
@@ -2531,6 +2581,8 @@ function renderAIKeySection() {
         <div class="hint">Get your key at <a href="${hint}" target="_blank">${hint} →</a></div>
       </div>
     </div>`;
+
+  box.innerHTML = html;
 }
 
 async function testAIProvider() {
