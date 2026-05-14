@@ -278,9 +278,20 @@ function buildAgentConfig(saved: any, apiKeyOverride?: string): AgentConfig {
 
   const creds = saved?.credentials || {};
 
-  // Determine effective provider: user config → operator default
+  // ── Determine effective provider ──────────────────────────────────────────
+  // A user's provider choice only takes effect if they've actually saved a key
+  // for that provider. DEFAULT_CONFIG ships with provider="anthropic" but no key,
+  // so we must not let that block the operator key's provider.
   const userProvider = saved?.agent?.provider as AIProvider | undefined;
-  const provider: AIProvider = userProvider || (operatorKey ? operatorProvider : "anthropic");
+  const userProviderKey =
+    (userProvider ? creds[`${userProvider}ApiKey`] : "") ||
+    (userProvider === "openrouter" ? creds["openrouterApiKey"] : "");
+  const hasUserKey = userProviderKey.length >= 8;
+
+  // Priority: user's provider (if they have a matching key) → operator provider → anthropic
+  const provider: AIProvider = hasUserKey
+    ? (userProvider as AIProvider)
+    : (operatorKey ? operatorProvider : userProvider || "anthropic");
 
   // Build the full apiKeys record (user keys take priority over env vars)
   const apiKeys: Record<string, string> = {
@@ -294,27 +305,21 @@ function buildAgentConfig(saved: any, apiKeyOverride?: string): AgentConfig {
     openrouter: creds.openrouterApiKey || process.env.OPENROUTER_API_KEY   || "",
   };
 
-  // The wizard stores the active key as `${provider}ApiKey`; pull it out
-  const wizardKey = creds[`${provider}ApiKey`];
-  if (wizardKey) apiKeys[provider] = wizardKey;
+  // Pull user's wizard-saved key into the active provider slot
+  if (userProviderKey) apiKeys[provider] = userProviderKey;
 
-  // Operator key fills the gap when no user key is configured
+  // Operator key: fills the gap when no user key is configured for this provider
   if (!apiKeys[provider] || apiKeys[provider].length < 8) {
-    if (operatorKey && provider === operatorProvider) {
-      apiKeys[provider] = operatorKey;
-    } else if (operatorKey && !apiKeys[operatorProvider]) {
-      // Provider mismatch — still supply the operator key on its own provider slot
-      apiKeys[operatorProvider] = operatorKey;
-    }
+    apiKeys[provider]          = operatorKey;  // inject for active provider slot
+    apiKeys[operatorProvider]  = operatorKey;  // also keep on its native provider slot
   }
 
   // Request-level override wins everything
   if (apiKeyOverride) apiKeys[provider] = apiKeyOverride;
 
   // ── Effective model ───────────────────────────────────────────────────────
-  // User has configured their own key → use their model choice.
-  // Operator key in use → use operator model (typically a free/fast model).
-  const hasUserKey = !!(wizardKey || creds.openrouterApiKey || creds.anthropicApiKey);
+  // hasUserKey already computed above — true when user has their own saved key.
+  // User key → their chosen model. Operator key → free operator model.
 
   // OpenRouter: build tiered model config
   const openrouterTiers = (provider === "openrouter" || operatorProvider === "openrouter") ? {

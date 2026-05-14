@@ -1489,7 +1489,11 @@
           Jump straight to the step that failed and click <strong>Test Connection</strong> again.
           <div class="resume-steps" id="resumeStepChips"></div>
         </div>
-        <button class="resume-notice-close" onclick="this.parentElement.style.display='none'" title="Dismiss">×</button>
+        <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
+          <button class="btn btn-ghost" style="font-size:12px;padding:4px 12px;border-radius:8px;color:var(--text-muted);border:1px solid var(--border)"
+            onclick="startFresh()" title="Wipe all settings and start over">🔄 Start Fresh</button>
+          <button class="resume-notice-close" onclick="this.closest('.resume-notice').style.display='none'" title="Dismiss">×</button>
+        </div>
       </div>
 
       <!-- ════ STEP 1: Create Your AI ════ -->
@@ -2784,6 +2788,30 @@ function testConnFor(id, testType) {
 function toggleVis(id) {
   const el = document.getElementById(id);
   el.type = el.type==='password' ? 'text' : 'password';
+}
+
+// ============================================================
+// Start Fresh — wipe config and reload for a clean new-user experience
+// ============================================================
+async function startFresh() {
+  const ok = confirm(
+    'This will clear all saved settings and restart the wizard from scratch.\n\n' +
+    'Use this when setting up a new user or testing the fresh-install experience.\n\n' +
+    'Continue?'
+  );
+  if (!ok) return;
+  try {
+    const res = await fetch('/api/reset-config', { method:'POST' });
+    const d = await res.json();
+    if (d.success) {
+      toast('Settings cleared — reloading…', 'success');
+      setTimeout(() => window.location.reload(), 800);
+    } else {
+      toast('Reset failed: ' + (d.error || 'unknown error'), 'error');
+    }
+  } catch(err) {
+    toast('Reset failed: ' + err, 'error');
+  }
 }
 
 // ============================================================

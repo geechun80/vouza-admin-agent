@@ -604,6 +604,25 @@ export async function startDashboard(port = 3456): Promise<void> {
     }
   });
 
+  // --- Reset Config API ---
+  // Wipes data/config.json so the next page load starts a fresh wizard.
+  // Useful for team distribution and testing the new-user experience.
+  app.post("/api/reset-config", requireLocalOrigin, async (_req, res) => {
+    try {
+      // Stop the running agent first (if any)
+      if (agentInstance) {
+        await agentInstance.stop().catch(() => {});
+        agentInstance = null;
+      }
+      // Delete config file — catch ENOENT (already gone is fine)
+      const { unlink: removeFile } = await import("fs/promises");
+      await removeFile(CONFIG_PATH).catch(() => {});
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ success: false, error: String(err) });
+    }
+  });
+
   // --- Serve SPA ---
   app.get("*", (_req, res) => {
     res.sendFile(join(PUBLIC_DIR, "index.html"));
@@ -611,9 +630,19 @@ export async function startDashboard(port = 3456): Promise<void> {
 
   app.listen(port, async () => {
     console.log(`\n  Setup Dashboard: http://localhost:${port}\n`);
+    const operatorKey = (process.env.VOUZA_API_KEY || "").trim();
     try {
       const config = await loadSetupConfig();
-      if (config.setupCompleted && !agentInstance && !launching) {
+      // Auto-launch conditions:
+      //  1. Setup fully completed, OR
+      //  2. Operator key is set AND at least one channel token is saved
+      //     (bot should be live as soon as Telegram/Slack is configured, no need to finish wizard)
+      const hasChannelToken = !!(
+        config.credentials?.telegramToken   || config.credentials?.telegramBotToken ||
+        config.credentials?.slackToken      || config.credentials?.slackBotToken
+      );
+      const shouldAutoLaunch = config.setupCompleted || (!!operatorKey && hasChannelToken);
+      if (shouldAutoLaunch && !agentInstance && !launching) {
         console.log(`  Auto-launching agent from saved configuration...`);
         launching = true;
         try {
