@@ -896,6 +896,38 @@
       display:flex; gap:6px; flex-wrap:wrap; margin-top:10px;
     }
 
+    /* ── Powered by Vouza footer badge ── */
+    .vouza-badge {
+      display:flex; align-items:center; justify-content:center; gap:5px;
+      padding:7px 12px;
+      background:rgba(0,0,0,0.25);
+      border-top:1px solid rgba(124,58,237,0.2);
+      flex-shrink:0;
+    }
+    .vouza-badge__avatar {
+      width:16px; height:16px; border-radius:50%;
+      object-fit:cover; flex-shrink:0; opacity:0.9;
+    }
+    .vouza-badge__text {
+      display:flex; align-items:baseline; gap:4px; line-height:1;
+    }
+    .vouza-badge__powered {
+      font-size:9px; font-weight:500;
+      letter-spacing:0.8px; text-transform:uppercase;
+      color:#475569;
+    }
+    .vouza-badge__brand {
+      font-size:13px; font-weight:700; letter-spacing:0.2px;
+      background:linear-gradient(135deg,#7c3aed 0%,#a855f7 60%,#06b6d4 100%);
+      -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+      background-clip:text;
+      animation:vouza-shimmer 4s ease-in-out infinite;
+    }
+    @keyframes vouza-shimmer {
+      0%,100% { filter:drop-shadow(0 0 0px rgba(168,85,247,0)); }
+      50%      { filter:drop-shadow(0 0 6px rgba(168,85,247,0.45)); }
+    }
+
     .tip-chip {
       padding:5px 11px; border-radius:14px; font-size:11px;
       background:var(--bg-glass); border:1px solid var(--border);
@@ -1857,6 +1889,15 @@
           <button class="btn-send" onclick="sendGuideMsg()">↑</button>
         </div>
         <div class="guide-tips" id="guideTips"></div>
+      </div>
+
+      <!-- Powered by Vouza badge -->
+      <div class="vouza-badge">
+        <img class="vouza-badge__avatar" src="/images/vee-bot.png" alt="Vouza">
+        <div class="vouza-badge__text">
+          <span class="vouza-badge__powered">Powered by</span>
+          <span class="vouza-badge__brand">Vouza</span>
+        </div>
       </div>
     </div>
 
