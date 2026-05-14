@@ -79,6 +79,52 @@ export const searchMemoryTool = buildTool({
   },
 });
 
+export const updateMemoryTool = buildTool({
+  name: "update_memory",
+  description: "Update an existing memory entry by ID — edit its content, title, or tags in place.",
+  category: "memory",
+  isReadOnly: false,
+  inputSchema: z.object({
+    id: z.string().describe("Memory ID to update"),
+    title: z.string().max(80).optional().describe("New title (leave blank to keep current)"),
+    content: z.string().max(2000).optional().describe("New content (leave blank to keep current)"),
+    tags: z.array(z.string().max(30)).max(8).optional().describe("Replacement tag list"),
+  }),
+  call: async (input, context) => {
+    const exists = context.memory.entries.get(input.id);
+    if (!exists) {
+      return { success: false, error: `Memory ${input.id} not found.` };
+    }
+    const updates: Record<string, unknown> = {};
+    if (input.title)   updates.title   = input.title;
+    if (input.content) updates.content = input.content;
+    if (input.tags)    updates.tags    = input.tags;
+    await context.memory.update(input.id, updates);
+    return { success: true, data: { id: input.id, updated: Object.keys(updates), message: `Updated: "${input.title || exists.title}"` } };
+  },
+});
+
+export const listAllMemoriesTool = buildTool({
+  name: "list_all_memories",
+  description: "List all saved memories with their IDs, titles, types, and tags. Use to audit what the agent knows.",
+  category: "memory",
+  isReadOnly: true,
+  inputSchema: z.object({
+    type: z.enum(["contact", "process", "preference", "feedback", "pattern"]).optional()
+      .describe("Filter by memory type (leave blank for all)"),
+  }),
+  call: async (input, context) => {
+    let entries = [...context.memory.entries.values()];
+    if (input.type) entries = entries.filter(e => e.type === input.type);
+    entries.sort((a, b) => b.updatedAt - a.updatedAt);
+    const list = entries.map(e => ({
+      id: e.id, type: e.type, title: e.title, tags: e.tags,
+      accessCount: e.accessCount, updatedAt: new Date(e.updatedAt).toISOString(),
+    }));
+    return { success: true, data: { count: list.length, memories: list } };
+  },
+});
+
 export const forgetMemoryTool = buildTool({
   name: "forget_memory",
   description:
@@ -92,7 +138,7 @@ export const forgetMemoryTool = buildTool({
   call: async (input, context) => {
     const exists = context.memory.entries.get(input.id);
     if (!exists) {
-      return { success: false, data: { message: `Memory ${input.id} not found.` } };
+      return { success: false, error: `Memory ${input.id} not found.` };
     }
     await context.memory.remove(input.id);
     return { success: true, data: { message: `Forgot: "${exists.title}"` } };

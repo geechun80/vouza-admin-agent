@@ -16,14 +16,14 @@ import { TaskScheduler } from "../tasks/scheduler.js";
 
 // Import all tools
 import { startTelegramListener, stopTelegramListener } from "../telegram/listener.js";
-import { readEmailsTool, sendEmailTool, draftEmailTool, triageEmailsTool } from "../tools/email.js";
-import { listEventsTool, createEventTool, updateEventTool, findFreeSlotsTool } from "../tools/calendar.js";
+import { readEmailsTool, sendEmailTool, draftEmailTool, triageEmailsTool, getEmailThreadTool, replyEmailTool, deleteEmailTool } from "../tools/email.js";
+import { listEventsTool, createEventTool, updateEventTool, findFreeSlotsTool, deleteEventTool } from "../tools/calendar.js";
 import { readSpreadsheetTool, writeSpreadsheetTool, searchSpreadsheetTool } from "../tools/spreadsheet.js";
 import { sendSlackMessageTool, readSlackMessagesTool, listSlackChannelsTool } from "../tools/messenger.js";
-import { listFilesTool, readFileTool, readExcelFileTool, writeFileTool, organizeFilesTool } from "../tools/fileManager.js";
+import { listFilesTool, readFileTool, readExcelFileTool, writeFileTool, organizeFilesTool, deleteFileTool, copyFileTool, renameFileTool } from "../tools/fileManager.js";
 import { sendTelegramMessageTool, readTelegramUpdatesTool, getTelegramBotInfoTool, forwardTelegramMessageTool } from "../tools/telegram.js";
 import { sendWhatsAppMessageTool, readWhatsAppMessagesTool } from "../tools/whatsapp.js";
-import { saveMemoryTool, searchMemoryTool, forgetMemoryTool } from "../tools/memory.js";
+import { saveMemoryTool, searchMemoryTool, forgetMemoryTool, updateMemoryTool, listAllMemoriesTool } from "../tools/memory.js";
 import { transcribeAudioTool, transcribeAndSummarizeTool } from "../tools/voice.js";
 import { getSetupStatusTool, saveIntegrationCredentialsTool } from "../tools/setup.js";
 
@@ -55,12 +55,16 @@ export async function launchAgent(): Promise<AgentInstance> {
   registry.register(sendEmailTool as any);
   registry.register(draftEmailTool as any);
   registry.register(triageEmailsTool as any);
+  registry.register(getEmailThreadTool as any);
+  registry.register(replyEmailTool as any);
+  registry.register(deleteEmailTool as any);
 
   // Calendar tools
   registry.register(listEventsTool as any);
   registry.register(createEventTool as any);
   registry.register(updateEventTool as any);
   registry.register(findFreeSlotsTool as any);
+  registry.register(deleteEventTool as any);
 
   // Spreadsheet tools
   registry.register(readSpreadsheetTool as any);
@@ -88,11 +92,16 @@ export async function launchAgent(): Promise<AgentInstance> {
   registry.register(readExcelFileTool as any);
   registry.register(writeFileTool as any);
   registry.register(organizeFilesTool as any);
+  registry.register(deleteFileTool as any);
+  registry.register(copyFileTool as any);
+  registry.register(renameFileTool as any);
 
   // Memory tools
   registry.register(saveMemoryTool as any);
   registry.register(searchMemoryTool as any);
   registry.register(forgetMemoryTool as any);
+  registry.register(updateMemoryTool as any);
+  registry.register(listAllMemoriesTool as any);
 
   // Voice tools
   registry.register(transcribeAudioTool as any);

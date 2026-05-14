@@ -215,6 +215,133 @@ export const triageEmailsTool = buildTool({
   },
 });
 
+// --- Get Email Thread ---
+
+export const getEmailThreadTool = buildTool({
+  name: "get_email_thread",
+  description: "Fetch all messages in a Gmail conversation thread by thread ID or message ID.",
+  category: "email",
+  isReadOnly: true,
+  isConcurrencySafe: true,
+  inputSchema: z.object({
+    threadId: z.string().describe("Gmail thread ID (from read_emails result)"),
+  }),
+  async call(input, context) {
+    try {
+      const auth = await getGmailAuth(context);
+      const gmail = google.gmail({ version: "v1", auth });
+
+      const thread = await gmail.users.threads.get({
+        userId: "me",
+        id: input.threadId,
+        format: "full",
+      });
+
+      const messages = (thread.data.messages || []).map((msg) => {
+        const headers = msg.payload?.headers || [];
+        const getHeader = (n: string) => headers.find((h) => h.name === n)?.value || "";
+        return {
+          id: msg.id,
+          from: getHeader("From"),
+          to: getHeader("To"),
+          subject: getHeader("Subject"),
+          date: getHeader("Date"),
+          snippet: msg.snippet,
+          body: extractBody(msg.payload),
+        };
+      });
+
+      return { success: true, data: { threadId: input.threadId, messageCount: messages.length, messages } };
+    } catch (err) {
+      return { success: false, error: `Failed to get thread: ${err}` };
+    }
+  },
+});
+
+// --- Reply to Email ---
+
+export const replyEmailTool = buildTool({
+  name: "reply_email",
+  description: "Reply to an existing Gmail email, keeping the conversation thread intact.",
+  category: "email",
+  isReadOnly: false,
+  isConcurrencySafe: false,
+  inputSchema: z.object({
+    messageId: z.string().describe("Gmail message ID to reply to"),
+    threadId: z.string().describe("Gmail thread ID of the original message"),
+    to: z.string().describe("Recipient email address"),
+    body: z.string().describe("Reply body text"),
+    subject: z.string().optional().describe("Subject (auto-prefixed with Re: if omitted)"),
+  }),
+  async call(input, context) {
+    try {
+      const cfg = context.config.tools.gmail;
+      if (!cfg) return { success: false, error: "Gmail not configured" };
+
+      const subject = input.subject || "Re: (your message)";
+      const raw = Buffer.from(
+        `To: ${input.to}\n` +
+        `Subject: ${subject}\n` +
+        `In-Reply-To: ${input.messageId}\n` +
+        `References: ${input.messageId}\n` +
+        `Content-Type: text/plain; charset=utf-8\n\n` +
+        input.body
+      ).toString("base64url");
+
+      // Try OAuth first, fall back to nodemailer app-password
+      try {
+        const auth = await getGmailAuth(context);
+        const gmail = google.gmail({ version: "v1", auth });
+        const res = await gmail.users.messages.send({
+          userId: "me",
+          requestBody: { raw, threadId: input.threadId },
+        });
+        return { success: true, data: { messageId: res.data.id, threadId: input.threadId } };
+      } catch {
+        // Fallback: nodemailer + app password
+        const transporter = nodemailer.createTransport({
+          service: "gmail",
+          auth: { user: cfg.user, pass: cfg.appPassword },
+        });
+        const result = await transporter.sendMail({
+          from: cfg.user,
+          to: input.to,
+          subject,
+          text: input.body,
+          inReplyTo: input.messageId,
+          references: input.messageId,
+        });
+        return { success: true, data: { messageId: result.messageId, threadId: input.threadId } };
+      }
+    } catch (err) {
+      return { success: false, error: `Failed to reply: ${err}` };
+    }
+  },
+});
+
+// --- Delete Email ---
+
+export const deleteEmailTool = buildTool({
+  name: "delete_email",
+  description: "Permanently delete a Gmail message by ID. Use trash action in triage_emails to move to trash first.",
+  category: "email",
+  isReadOnly: false,
+  isConcurrencySafe: false,
+  inputSchema: z.object({
+    messageId: z.string().describe("Gmail message ID to permanently delete"),
+  }),
+  async call(input, context) {
+    try {
+      const auth = await getGmailAuth(context);
+      const gmail = google.gmail({ version: "v1", auth });
+      await gmail.users.messages.delete({ userId: "me", id: input.messageId });
+      return { success: true, data: { deleted: input.messageId } };
+    } catch (err) {
+      return { success: false, error: `Failed to delete email: ${err}` };
+    }
+  },
+});
+
 // --- Helpers ---
 
 async function getGmailAuth(context: any) {

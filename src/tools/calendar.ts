@@ -234,6 +234,35 @@ export const findFreeSlotsTool = buildTool({
   },
 });
 
+// --- Delete Event ---
+
+export const deleteEventTool = buildTool({
+  name: "delete_calendar_event",
+  description: "Delete a calendar event by event ID. This is permanent and cannot be undone.",
+  category: "calendar",
+  isReadOnly: false,
+  isConcurrencySafe: false,
+  inputSchema: z.object({
+    eventId: z.string().describe("Google Calendar event ID"),
+    calendarId: z.string().optional().default("primary"),
+    sendNotifications: z.boolean().optional().default(true).describe("Send cancellation email to attendees"),
+  }),
+  async call(input, context) {
+    try {
+      const auth = await getCalendarAuth(context);
+      const calendar = google.calendar({ version: "v3", auth });
+      await calendar.events.delete({
+        calendarId: input.calendarId,
+        eventId: input.eventId,
+        sendNotifications: input.sendNotifications,
+      });
+      return { success: true, data: { deleted: input.eventId, notified: input.sendNotifications } };
+    } catch (err) {
+      return { success: false, error: `Failed to delete event: ${err}` };
+    }
+  },
+});
+
 async function getCalendarAuth(context: any) {
   const keyPath = context.config.tools.googleServiceAccount;
   if (keyPath) {

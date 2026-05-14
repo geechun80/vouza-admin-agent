@@ -10,10 +10,11 @@
 
 import { z } from "zod";
 import { buildTool } from "./registry.js";
-import { readdir, readFile, writeFile, rename, mkdir, stat } from "fs/promises";
+import { readdir, readFile, writeFile, rename, mkdir, stat, unlink, copyFile as fsCopyFile } from "fs/promises";
 import { join, extname, basename, dirname } from "path";
 import { createRequire } from "module";
 import type { VisionContentBlock } from "../types/index.js";
+import { scanFile } from "./security.js";
 
 // CommonJS interop for pdf-parse and adm-zip (no ESM export)
 const require = createRequire(import.meta.url);
@@ -211,6 +212,15 @@ export const readFileTool = buildTool({
   }),
   async call(input): Promise<any> {
     try {
+      // ── Security scan before any parsing ──────────────────────────────────
+      const scan = await scanFile(input.filePath);
+      if (scan.blocked) {
+        return { success: false, error: `File blocked: ${scan.blockReason}` };
+      }
+      if (scan.warnings.length > 0) {
+        console.warn("[readFileTool] Security warnings:", scan.warnings);
+      }
+
       const stats = await stat(input.filePath);
       const ext = extname(input.filePath).toLowerCase();
 
@@ -425,6 +435,81 @@ export const organizeFilesTool = buildTool({
       };
     } catch (err) {
       return { success: false, error: `Failed to organize files: ${err}` };
+    }
+  },
+});
+
+// ─── delete_file ──────────────────────────────────────────────────────────────
+
+export const deleteFileTool = buildTool({
+  name: "delete_file",
+  description: "Permanently delete a file from the local filesystem. Cannot be undone.",
+  category: "file",
+  isReadOnly: false,
+  isConcurrencySafe: false,
+  inputSchema: z.object({
+    filePath: z.string().describe("Absolute path to the file to delete"),
+  }),
+  async call(input) {
+    try {
+      await unlink(input.filePath);
+      return { success: true, data: { deleted: input.filePath } };
+    } catch (err) {
+      return { success: false, error: `Failed to delete file: ${err}` };
+    }
+  },
+});
+
+// ─── copy_file ────────────────────────────────────────────────────────────────
+
+export const copyFileTool = buildTool({
+  name: "copy_file",
+  description: "Copy a file from one path to another. Creates destination directories if needed.",
+  category: "file",
+  isReadOnly: false,
+  isConcurrencySafe: true,
+  inputSchema: z.object({
+    sourcePath: z.string().describe("Absolute path to the source file"),
+    destPath: z.string().describe("Absolute path for the copy destination"),
+    overwrite: z.boolean().optional().default(false).describe("Overwrite destination if it exists"),
+  }),
+  async call(input) {
+    try {
+      // Check destination exists
+      if (!input.overwrite) {
+        try {
+          await stat(input.destPath);
+          return { success: false, error: `Destination already exists: ${input.destPath}. Set overwrite=true to replace it.` };
+        } catch { /* doesn't exist — safe to proceed */ }
+      }
+      await mkdir(dirname(input.destPath), { recursive: true });
+      await fsCopyFile(input.sourcePath, input.destPath);
+      return { success: true, data: { from: input.sourcePath, to: input.destPath } };
+    } catch (err) {
+      return { success: false, error: `Failed to copy file: ${err}` };
+    }
+  },
+});
+
+// ─── rename_file ──────────────────────────────────────────────────────────────
+
+export const renameFileTool = buildTool({
+  name: "rename_file",
+  description: "Rename or move a file to a new path. Can also be used to move files between directories.",
+  category: "file",
+  isReadOnly: false,
+  isConcurrencySafe: false,
+  inputSchema: z.object({
+    oldPath: z.string().describe("Current absolute file path"),
+    newPath: z.string().describe("New absolute file path"),
+  }),
+  async call(input) {
+    try {
+      await mkdir(dirname(input.newPath), { recursive: true });
+      await rename(input.oldPath, input.newPath);
+      return { success: true, data: { from: input.oldPath, to: input.newPath } };
+    } catch (err) {
+      return { success: false, error: `Failed to rename file: ${err}` };
     }
   },
 });

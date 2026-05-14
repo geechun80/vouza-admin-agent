@@ -184,6 +184,10 @@ async function readViaWaha(chatId: string | undefined, limit: number, config: Re
   if (chatId) params.set("chatId", chatId);
 
   const res = await fetch(`${serverUrl}/api/messages?${params}`, { headers });
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    return { success: false, error: `WAHA HTTP ${res.status}: ${text}` };
+  }
   const data = await res.json();
 
   return { success: true, data: { messages: data } };
