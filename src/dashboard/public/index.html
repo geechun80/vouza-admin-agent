@@ -1977,11 +1977,11 @@ const state = {
   selectedModel: 'claude-sonnet-4-6',
   selectedProvider: 'anthropic',
   modelCatalog: [],
-  // OpenRouter tiered model selections
+  // OpenRouter tiered model selections (all free — no credits needed)
   orTiers: {
-    fast:     'meta-llama/llama-3.1-8b-instruct:free',
-    balanced: 'google/gemini-2.5-flash-lite',
-    flagship: 'google/gemini-2.5-flash',
+    fast:     'deepseek/deepseek-v4-flash:free',
+    balanced: 'deepseek/deepseek-chat-v3-0324:free',
+    flagship: 'deepseek/deepseek-r1:free',
   },
   // Operator-supplied default key (set by Vouza, invisible to end-users)
   // null = loading, {} = no default key, {hasDefaultKey:true,...} = key available

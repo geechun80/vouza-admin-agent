@@ -135,7 +135,7 @@ export async function startDashboard(port = 3456): Promise<void> {
     res.json({
       hasDefaultKey,
       defaultProvider: process.env.VOUZA_API_PROVIDER || "openrouter",
-      defaultModel:    process.env.VOUZA_API_MODEL    || "meta-llama/llama-3.1-8b-instruct:free",
+      defaultModel:    process.env.VOUZA_API_MODEL    || "deepseek/deepseek-v4-flash:free",
       brandName:       process.env.VOUZA_BRAND_NAME   || "Vouza",
     });
   });

@@ -6,9 +6,9 @@
 //
 // Tier | Best for                                    | Default model
 // ─────┼─────────────────────────────────────────────┼──────────────────────────────────────
-// fast │ Short queries, status checks, yes/no        │ meta-llama/llama-3.1-8b-instruct:free
-// balanced │ Email drafting, scheduling, file ops     │ google/gemini-2.5-flash-lite
-// flagship │ Analysis, reports, image processing,    │ google/gemini-2.5-flash
+// fast │ Short queries, status checks, yes/no        │ deepseek/deepseek-v4-flash:free
+// balanced │ Email drafting, scheduling, file ops     │ deepseek/deepseek-chat-v3-0324:free
+// flagship │ Analysis, reports, image processing,    │ deepseek/deepseek-r1:free
 //          │ multi-step agentic workflows             │
 // =============================================================================
 
@@ -21,9 +21,9 @@ export interface OpenRouterTiers {
 }
 
 export const DEFAULT_OPENROUTER_TIERS: OpenRouterTiers = {
-  fast:     "meta-llama/llama-3.1-8b-instruct:free",  // Free tier on OpenRouter — no credits needed
-  balanced: "google/gemini-2.5-flash-lite",            // Ultra-low cost (~$0.10/1M tokens)
-  flagship: "google/gemini-2.5-flash",                  // Capable multimodal model
+  fast:     "deepseek/deepseek-v4-flash:free",         // Free — fast responses, simple tasks
+  balanced: "deepseek/deepseek-chat-v3-0324:free",     // Free — solid for email, scheduling, files
+  flagship: "deepseek/deepseek-r1:free",               // Free — best reasoning, complex workflows
 };
 
 export const TIER_LABELS: Record<TaskComplexity, string> = {
