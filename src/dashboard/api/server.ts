@@ -189,22 +189,23 @@ export async function startDashboard(port = 3456): Promise<void> {
       if (launching) {
         return res.json({ success: false, error: "Agent is already starting — please wait a moment." });
       }
-      // Pre-flight: ensure the saved config actually has an API key before trying to launch.
-      // Guards against a corrupted config reaching the AI call and producing a cryptic 401.
+      // Pre-flight: ensure the saved config has a valid AI provider key before launching.
+      // We check the specific provider key (not just any credential) to avoid passing on
+      // a Groq voice key as if it were an OpenRouter/Anthropic key.
       const preFlight = await loadSetupConfig();
       const savedCreds = preFlight.credentials || {};
       const provider = preFlight.agent?.provider || "anthropic";
+      // For OpenRouter, the key is stored under either openrouterApiKey or openrouterApiKey (double-write)
       const savedKey =
         savedCreds[`${provider}ApiKey`] ||
-        savedCreds["openrouterApiKey"]  ||
-        savedCreds["anthropicApiKey"]   ||
-        Object.values(savedCreds).find(v => typeof v === "string" && (v as string).length > 8);
-      if (!savedKey) {
+        (provider === "openrouter" ? savedCreds["openrouterApiKey"] : undefined) ||
+        (provider === "anthropic"  ? savedCreds["anthropicApiKey"]  : undefined);
+      if (!savedKey || savedKey.trim().length < 8) {
         return res.json({
           success: false,
           error:
-            "No API key found in your saved configuration. " +
-            "Please re-enter your AI API key in Step 2 (Connect Apps → AI Account Access) and save again.",
+            `No ${provider} API key found in your saved configuration. ` +
+            "Please enter your AI API key in Step 2, click 🔌 Test, then go to Step 4 and click Go Live.",
         });
       }
 

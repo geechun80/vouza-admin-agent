@@ -2534,12 +2534,29 @@ function renderAIKeySection() {
 }
 
 async function testAIProvider() {
-  const key = document.getElementById('aiProviderKey')?.value;
+  const key = document.getElementById('aiProviderKey')?.value?.trim();
   if (!key) { toast('Please enter an API key','error'); return; }
+  let ok;
   if (state.selectedProvider === 'openrouter') {
-    await testConn('openrouter', { apiKey: key });
+    ok = await testConn('openrouter', { apiKey: key }, 'ai-provider');
   } else {
-    await testConn('ai-provider',{ apiKey:key, provider:state.selectedProvider, model:state.selectedModel });
+    ok = await testConn('ai-provider',{ apiKey:key, provider:state.selectedProvider, model:state.selectedModel });
+  }
+  if (ok) {
+    // Auto-save the AI key immediately so it survives page reloads and isn't
+    // lost if the user tests but never reaches the Go Live step.
+    const credKey = state.selectedProvider === 'openrouter' ? 'openrouterApiKey' : `${state.selectedProvider}ApiKey`;
+    const credPayload = { [credKey]: key };
+    if (state.selectedProvider === 'openrouter') credPayload['openrouterApiKey'] = key; // double-write for compat
+    fetch('/api/config/step/credentials', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(credPayload),
+    }).catch(() => {});
+    // Also persist the selected provider / model
+    fetch('/api/config/step/agent', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ provider: state.selectedProvider, model: state.selectedModel }),
+    }).catch(() => {});
   }
 }
 
@@ -2655,8 +2672,14 @@ function revealGoLive() {
 // ============================================================
 // Test Connection
 // ============================================================
-async function testConn(type, config) {
-  const el = document.getElementById(`status-${type}`) || document.getElementById('status-ai-provider');
+// badgeId — the card's tool/channel id (e.g. 'voice', 'telegram').
+// When the testType differs from the card id (e.g. 'groq-whisper' vs 'voice'),
+// the badge element is id="status-{badgeId}" not id="status-{testType}".
+async function testConn(type, config, badgeId) {
+  const statusId = badgeId || type;
+  const el = document.getElementById(`status-${statusId}`)
+           || document.getElementById(`status-${type}`)
+           || document.getElementById('status-ai-provider');
   if (el) { el.className='glass-card-badge badge-pending'; el.textContent='Testing...'; }
 
   try {
@@ -2667,15 +2690,30 @@ async function testConn(type, config) {
     const d = await res.json();
     if (d.success) {
       if (el) { el.className='glass-card-badge badge-connected'; el.textContent='Connected'; }
-      state.connStatus[type] = true;
+      state.connStatus[statusId] = true;
+      state.connStatus[type]     = true;
       toast(d.message, 'success');
+      // Auto-save credentials immediately on success so they survive page reloads
+      // and aren't lost if the user never reaches the Go Live step.
+      const nonEmpty = Object.fromEntries(
+        Object.entries(config).filter(([, v]) => v && String(v).trim().length > 0)
+      );
+      if (Object.keys(nonEmpty).length) {
+        fetch('/api/config/step/credentials', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(nonEmpty),
+        }).catch(() => {});
+      }
+      return true;
     } else {
       if (el) { el.className='glass-card-badge badge-error'; el.textContent='Failed'; }
       toast(d.message || d.error, 'error');
+      return false;
     }
   } catch(err) {
     if (el) { el.className='glass-card-badge badge-error'; el.textContent='Error'; }
     toast('Connection test failed: ' + err, 'error');
+    return false;
   }
 }
 
@@ -2687,7 +2725,8 @@ function testConnFor(id, testType) {
   if (!conf) return;
   const vals = {};
   conf.fields.forEach(f => { const el = document.getElementById(f.id); if (el) vals[f.id]=el.value; });
-  testConn(testType, vals);
+  // Pass id so the card's own status badge is updated (not status-{testType} which may not exist)
+  testConn(testType, vals, id);
 }
 
 function toggleVis(id) {
