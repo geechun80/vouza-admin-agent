@@ -2809,21 +2809,28 @@ function collectConfig() {
       return [t, {enabled:true, provider:prov, config}];
     })),
     credentials: (() => {
-      const creds = {
-        [`${state.selectedProvider}ApiKey`]: document.getElementById('aiProviderKey')?.value || '',
-        openrouterApiKey: state.selectedProvider === 'openrouter' ? (document.getElementById('aiProviderKey')?.value || '') : undefined,
-        googleSaKey: document.getElementById('googleSaKey')?.value || '',
-      };
+      const creds = {};
+      // ── Critical: only include a credential if the user ACTUALLY typed a new value.
+      // If the field is blank (showing the "✓ Already saved" placeholder), we omit it
+      // entirely so deepMerge on the server preserves the existing saved key.
+      // This prevents the config from being silently corrupted on every Go Live click.
+      const newApiKey = document.getElementById('aiProviderKey')?.value?.trim();
+      if (newApiKey) {
+        creds[`${state.selectedProvider}ApiKey`] = newApiKey;
+        if (state.selectedProvider === 'openrouter') creds['openrouterApiKey'] = newApiKey;
+      }
+      const googleSaKey = document.getElementById('googleSaKey')?.value?.trim();
+      if (googleSaKey) creds['googleSaKey'] = googleSaKey;
       // Merge voice tool API keys into flat credentials so loader auto-detect works
       if (state.selectedTools.has('voice')) {
         const vProvEl = document.getElementById('voiceProvider');
         const vProv = vProvEl ? vProvEl.value : 'groq';
         if (vProv === 'groq') {
-          const k = document.getElementById('groqApiKey')?.value;
-          if (k) creds.groqApiKey = k;
+          const k = document.getElementById('groqApiKey')?.value?.trim();
+          if (k) creds['groqApiKey'] = k;
         } else {
-          const k = document.getElementById('openaiVoiceKey')?.value;
-          if (k) creds.openaiApiKey = k;
+          const k = document.getElementById('openaiVoiceKey')?.value?.trim();
+          if (k) creds['openaiApiKey'] = k;
         }
       }
       return creds;

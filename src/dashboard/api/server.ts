@@ -189,6 +189,25 @@ export async function startDashboard(port = 3456): Promise<void> {
       if (launching) {
         return res.json({ success: false, error: "Agent is already starting — please wait a moment." });
       }
+      // Pre-flight: ensure the saved config actually has an API key before trying to launch.
+      // Guards against a corrupted config reaching the AI call and producing a cryptic 401.
+      const preFlight = await loadSetupConfig();
+      const savedCreds = preFlight.credentials || {};
+      const provider = preFlight.agent?.provider || "anthropic";
+      const savedKey =
+        savedCreds[`${provider}ApiKey`] ||
+        savedCreds["openrouterApiKey"]  ||
+        savedCreds["anthropicApiKey"]   ||
+        Object.values(savedCreds).find(v => typeof v === "string" && (v as string).length > 8);
+      if (!savedKey) {
+        return res.json({
+          success: false,
+          error:
+            "No API key found in your saved configuration. " +
+            "Please re-enter your AI API key in Step 2 (Connect Apps → AI Account Access) and save again.",
+        });
+      }
+
       launching = true;
       try {
         agentInstance = await launchAgent();
@@ -634,6 +653,11 @@ function deepMerge(target: any, source: any): any {
   for (const key of Object.keys(source)) {
     if (source[key] && typeof source[key] === "object" && !Array.isArray(source[key])) {
       result[key] = deepMerge(target[key] || {}, source[key]);
+    } else if (source[key] === "" && typeof target[key] === "string" && target[key] !== "") {
+      // NEVER overwrite an existing non-empty credential with a blank string.
+      // This happens when the wizard re-saves with placeholder-only fields
+      // (e.g. "✓ Already saved") — the DOM value is empty but the real key is on disk.
+      // Silently preserve the existing value.
     } else {
       result[key] = source[key];
     }
