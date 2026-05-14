@@ -19,6 +19,8 @@ const PUBLIC_DIR = join(__dirname, "..", "public");
 
 // Running agent instance (if launched from dashboard)
 let agentInstance: AgentInstance | null = null;
+// Prevents double-launch race condition between auto-launch retry and manual /api/agent/launch
+let launching = false;
 
 interface SetupConfig {
   agent: {
@@ -63,6 +65,34 @@ const DEFAULT_CONFIG: SetupConfig = {
   setupCompleted: false,
 };
 
+/** Returns true when a field name looks like it holds a sensitive credential */
+function isSensitiveField(key: string): boolean {
+  const k = key.toLowerCase();
+  return ["key", "token", "secret", "pass", "password"].some(w => k.includes(w));
+}
+
+/**
+ * CSRF guard for all mutating endpoints.
+ * Allows requests that originate from the dashboard itself (localhost) and blocks
+ * cross-origin requests from other browser pages.
+ */
+function requireLocalOrigin(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+): void {
+  const origin  = req.headers["origin"]  as string | undefined;
+  const referer = req.headers["referer"] as string | undefined;
+  const source  = origin ?? referer ?? "";
+  // Allow: no origin (direct / curl / same-origin fetch), or localhost
+  if (source === "" ||
+      source.startsWith("http://localhost:") ||
+      source.startsWith("http://127.0.0.1:")) {
+    return next();
+  }
+  res.status(403).json({ error: "Forbidden: cross-origin request rejected" });
+}
+
 export async function startDashboard(port = 3456): Promise<void> {
   const app = express();
   app.use(express.json({ limit: "30mb" })); // 30 MB to accommodate base64 audio uploads
@@ -76,24 +106,27 @@ export async function startDashboard(port = 3456): Promise<void> {
   // --- Config API ---
   app.get("/api/config", async (_req, res) => {
     const config = await loadSetupConfig();
-    const masked = { ...config };
-    // Mask sensitive keys
+    const masked = { ...config, credentials: { ...config.credentials } };
+    // Mask all sensitive credential fields (key/token/secret/pass/password)
     for (const [k, v] of Object.entries(masked.credentials)) {
-      if (k.toLowerCase().includes("key") || k.toLowerCase().includes("token") || k.toLowerCase().includes("secret")) {
-        masked.credentials[k] = maskKey(v);
-      }
+      if (isSensitiveField(k)) masked.credentials[k] = maskKey(v);
     }
     for (const ch of Object.values(masked.channels)) {
+      ch.config = { ...ch.config };
       for (const [k, v] of Object.entries(ch.config)) {
-        if (k.toLowerCase().includes("key") || k.toLowerCase().includes("token") || k.toLowerCase().includes("secret")) {
-          ch.config[k] = maskKey(v);
-        }
+        if (isSensitiveField(k)) ch.config[k] = maskKey(v);
+      }
+    }
+    for (const t of Object.values(masked.tools)) {
+      t.config = { ...t.config };
+      for (const [k, v] of Object.entries(t.config)) {
+        if (isSensitiveField(k)) t.config[k] = maskKey(v);
       }
     }
     res.json(masked);
   });
 
-  app.post("/api/config", async (req, res) => {
+  app.post("/api/config", requireLocalOrigin, async (req, res) => {
     try {
       const updates: Partial<SetupConfig> = req.body;
       const current = await loadSetupConfig();
@@ -105,7 +138,7 @@ export async function startDashboard(port = 3456): Promise<void> {
     }
   });
 
-  app.post("/api/config/step/:step", async (req, res) => {
+  app.post("/api/config/step/:step", requireLocalOrigin, async (req, res) => {
     try {
       const current = await loadSetupConfig();
       const step = req.params.step;
@@ -140,15 +173,23 @@ export async function startDashboard(port = 3456): Promise<void> {
     }
   });
 
-  // --- Agent Launcher API (Improvement #5 & #7) ---
-  app.post("/api/agent/launch", async (_req, res) => {
+  // --- Agent Launcher API ---
+  app.post("/api/agent/launch", requireLocalOrigin, async (_req, res) => {
     try {
       if (agentInstance) {
         const status = await getAgentStatus(agentInstance);
         return res.json({ success: true, alreadyRunning: true, ...status });
       }
-
-      agentInstance = await launchAgent();
+      // Prevent race: if auto-launch retry is in flight, report it as launching
+      if (launching) {
+        return res.json({ success: false, error: "Agent is already starting — please wait a moment." });
+      }
+      launching = true;
+      try {
+        agentInstance = await launchAgent();
+      } finally {
+        launching = false;
+      }
       const status = await getAgentStatus(agentInstance);
       res.json({ success: true, ...status });
     } catch (err) {
@@ -156,7 +197,7 @@ export async function startDashboard(port = 3456): Promise<void> {
     }
   });
 
-  app.post("/api/agent/stop", async (_req, res) => {
+  app.post("/api/agent/stop", requireLocalOrigin, async (_req, res) => {
     try {
       if (agentInstance) {
         await agentInstance.stop();
@@ -177,7 +218,7 @@ export async function startDashboard(port = 3456): Promise<void> {
     }
   });
 
-  app.post("/api/agent/task", async (req, res) => {
+  app.post("/api/agent/task", requireLocalOrigin, async (req, res) => {
     if (!agentInstance) {
       return res.json({ success: false, error: "Agent not running. Launch it first." });
     }
@@ -222,7 +263,7 @@ export async function startDashboard(port = 3456): Promise<void> {
   });
 
   // --- Live Agent Chat (SSE streaming) ---
-  app.post("/api/chat", async (req, res) => {
+  app.post("/api/chat", requireLocalOrigin, async (req, res) => {
     const { message, sessionId, apiKey, imageBase64, imageMimeType } = req.body as {
       message: string;
       sessionId: string;
@@ -490,8 +531,37 @@ export async function startDashboard(port = 3456): Promise<void> {
     res.sendFile(join(PUBLIC_DIR, "index.html"));
   });
 
-  app.listen(port, () => {
+  app.listen(port, async () => {
     console.log(`\n  Setup Dashboard: http://localhost:${port}\n`);
+    try {
+      const config = await loadSetupConfig();
+      if (config.setupCompleted && !agentInstance && !launching) {
+        console.log(`  Auto-launching agent from saved configuration...`);
+        launching = true;
+        try {
+          agentInstance = await launchAgent();
+          console.log(`  ✓ Agent is live — ready to handle tasks.\n`);
+        } catch (launchErr) {
+          // One automatic retry after 3 seconds (covers race conditions on slow machines)
+          console.log(`  Auto-launch failed (${launchErr}), retrying in 3s...`);
+          setTimeout(async () => {
+            try {
+              agentInstance = await launchAgent();
+              console.log(`  ✓ Agent launched on retry — ready.\n`);
+            } catch (retryErr) {
+              console.error(`  ✗ Agent failed to launch after retry: ${retryErr}`);
+              console.error(`    Open http://localhost:${port} → click "Launch Now" to retry manually.\n`);
+            } finally {
+              launching = false;
+            }
+          }, 3000);
+          return; // launching stays true until retry settles
+        }
+        launching = false;
+      }
+    } catch (e) {
+      console.log(`  Could not read config for auto-launch: ${e}`);
+    }
   });
 }
 

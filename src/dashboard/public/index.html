@@ -1457,7 +1457,10 @@
           <div class="conv-footer-info">
             <div>💾 Saved automatically</div>
           </div>
-          <button class="conv-memory-btn" onclick="toggleMemoryPanel()">🧠 Memories</button>
+          <div>
+            <button class="conv-memory-btn" style="margin-right:5px;" onclick="openSettings()" title="Reconfigure Agent">⚙️ Settings</button>
+            <button class="conv-memory-btn" onclick="toggleMemoryPanel()">🧠 Memories</button>
+          </div>
         </div>
 
       </div><!-- /conv-sidebar -->
@@ -1964,12 +1967,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     const isPartial  = !cfg.setupCompleted && (hasApiKey || hasChan);
     const isReconfig = !!cfg.setupCompleted;
 
-    if (isPartial || isReconfig) {
+    if (isReconfig) {
+      // Production Auto-Launch: skip the wizard if setup is already complete
+      document.getElementById('welcomeScreen').style.display = 'none';
+      document.getElementById('mainApp').style.display = 'block';
+      init();
+      activateLiveMode();
+      return;
+    } else if (isPartial) {
       _isResume = true;
       document.getElementById('welcomeResumeBadge').style.display = 'flex';
-      // Swap button label for clarity
       const btn = document.querySelector('.btn-welcome');
-      if (btn) btn.textContent = isReconfig ? 'Update Settings →' : 'Resume Setup →';
+      if (btn) btn.textContent = 'Resume Setup →';
     }
   } catch { /* no config yet — fresh install, ignore */ }
 });
@@ -2864,17 +2873,80 @@ function generateConvId() {
   return 'conv_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
 }
 
+// Switch dashboard out of "live" mode to allow reconfiguring
+function openSettings() {
+  document.getElementById('mainApp').classList.remove('live-mode');
+  // Ensure wizard forms are pre-filled from saved config
+  _isResume = true;
+  if (_savedConfig) prefillFromConfig(_savedConfig);
+  showStep(1);
+  // Inject a "← Back to Chat" button into Step 1 nav so user can return without re-doing Go Live
+  const navGroup = document.querySelector('#step-1 .btn-nav-group');
+  if (navGroup && !document.getElementById('backToChatBtn')) {
+    const backBtn = document.createElement('button');
+    backBtn.id = 'backToChatBtn';
+    backBtn.className = 'btn btn-secondary';
+    backBtn.textContent = '← Back to Chat';
+    backBtn.onclick = () => {
+      backBtn.remove();
+      _isResume = false;
+      activateLiveMode();
+    };
+    navGroup.insertBefore(backBtn, navGroup.firstChild);
+  }
+}
+
 // Switch dashboard to "live" mode — shows conversation sidebar, hides wizard
 function activateLiveMode() {
   document.getElementById('mainApp').classList.add('live-mode');
-  // Sync agent name into sidebar header
-  const name = document.getElementById('agentName')?.value || state?.agentName || 'Admin Agent';
+  // Sync agent name — check input, then saved config, then fallback
+  const name = document.getElementById('agentName')?.value?.trim()
+    || _savedConfig?.agent?.name
+    || state?.agentName
+    || 'Admin Agent';
   const nameEl = document.getElementById('convSidebarAgentName');
   if (nameEl) nameEl.textContent = name;
-  // Start fresh conversation
-  newConversation();
+  // Only start a fresh conversation if none is active (prevents losing mid-session thread on Settings → Back)
+  if (!convState.currentId) newConversation();
   // Load existing conversations
   loadConversations();
+  // Check agent is actually running — warn if auto-launch failed
+  checkAgentHealth();
+}
+
+// Verify agent is up; show a gentle warning banner if not
+async function checkAgentHealth() {
+  try {
+    const status = await fetch('/api/agent/status').then(r => r.json());
+    if (!status.running) {
+      const box = document.getElementById('agentStatusBox');
+      if (box) {
+        box.classList.add('show');
+        box.innerHTML = `<div style="color:var(--error);font-size:13px">
+          ⚠️ Agent is not running yet.
+          <button onclick="retryLaunch()" style="margin-left:10px;background:var(--brand);color:#fff;border:none;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:12px">▶ Launch Now</button>
+        </div>`;
+      }
+    }
+  } catch { /* server might still be starting — ignore */ }
+}
+
+// Manual launch retry from the live-mode warning banner
+async function retryLaunch() {
+  const box = document.getElementById('agentStatusBox');
+  if (box) box.innerHTML = '<div style="color:var(--brand-light);font-size:13px">Starting agent…</div>';
+  try {
+    const res  = await fetch('/api/agent/launch', { method:'POST' });
+    const data = await res.json();
+    if (data.success) {
+      if (box) box.innerHTML = `<div style="color:var(--success);font-size:13px">✅ ${data.name ?? 'Agent'} is now live!</div>`;
+      setTimeout(() => { if (box) box.classList.remove('show'); }, 3000);
+    } else {
+      if (box) box.innerHTML = `<div style="color:var(--error);font-size:13px">⚠️ Launch failed: ${data.error}</div>`;
+    }
+  } catch(e) {
+    if (box) box.innerHTML = `<div style="color:var(--error);font-size:13px">⚠️ ${e}</div>`;
+  }
 }
 
 // Create a brand-new conversation thread
