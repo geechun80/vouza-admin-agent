@@ -99,6 +99,23 @@ function requireLocalOrigin(
 }
 
 export async function startDashboard(port = 3456): Promise<void> {
+  // ── Ensure data/ directory and a baseline config always exist ─────────────
+  // Prevents "No API key found" errors on fresh installs or after accidental
+  // deletion. If config.json is missing, we write DEFAULT_CONFIG immediately
+  // so the file is always present and the operator key is never lost.
+  try {
+    await mkdir(dirname(CONFIG_PATH), { recursive: true });
+    try {
+      await readFile(CONFIG_PATH, "utf-8"); // check if it already exists
+    } catch {
+      // File is missing — write baseline so data/ dir + file both exist
+      await writeFile(CONFIG_PATH, JSON.stringify(DEFAULT_CONFIG, null, 2), "utf-8");
+      console.log("  ✓ Initialized fresh data/config.json");
+    }
+  } catch (e) {
+    console.warn("  ⚠ Could not initialize data/config.json:", e);
+  }
+
   const app = express();
   app.use(express.json({ limit: "30mb" })); // 30 MB to accommodate base64 audio uploads
   app.use(express.static(PUBLIC_DIR));
