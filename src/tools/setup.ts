@@ -486,18 +486,50 @@ export const getSetupStatusTool = buildTool({
   async call(_input, ctx): Promise<any> {
     const tools   = ctx?.config?.tools     || {};
     const creds   = ctx?.config?.credentials || {} as any;
-    const aiKey   = ctx?.config?.apiKeys?.[ctx?.config?.provider || "anthropic"] || "";
+
+    // ── AI Provider — distinguish user's own key vs Vouza operator key ────────
+    // Read raw saved config to check if the USER has actually entered their own key.
+    // ctx.config.apiKeys already has the operator key merged in, so we can't use
+    // it to tell whether it's the user's key or Vouza's built-in key.
+    const rawCfg    = await readConfig();
+    const userCreds = rawCfg?.credentials || {};
+    const userProvider = rawCfg?.agent?.provider || "openrouter";
+
+    // Check every possible slot where a user-saved key could live
+    const userOwnKey =
+      userCreds.openrouterApiKey ||
+      userCreds.anthropicApiKey  ||
+      userCreds.openaiApiKey     ||
+      userCreds.googleApiKey     ||
+      userCreds.deepseekApiKey   ||
+      userCreds.groqApiKey       ||
+      (userProvider ? userCreds[`${userProvider}ApiKey`] : "");
+    const hasUserOwnKey  = !!(userOwnKey && String(userOwnKey).length >= 8);
+    const hasOperatorKey = !!(process.env.VOUZA_API_KEY || "").trim();
 
     // ── Integration status checks ──────────────────────────────────────────
     const status: Record<string, { configured: boolean; details: string }> = {};
 
-    // AI Provider (always first)
-    status.ai_provider = {
-      configured: !!aiKey,
-      details: aiKey
-        ? `✅ AI connected — provider: ${ctx?.config?.provider ?? "anthropic"}, model: ${ctx?.config?.model ?? "unknown"}`
-        : "❌ No AI API key configured — this must be entered in Step 1 of the setup wizard",
-    };
+    // AI Provider — three possible states
+    if (hasUserOwnKey) {
+      status.ai_provider = {
+        configured: true,
+        details: `✅ AI connected — using your own API key (${userProvider}, ${ctx?.config?.model ?? "unknown"})`,
+      };
+    } else if (hasOperatorKey) {
+      // Bot is running on Vouza's built-in key — user has NOT registered their own
+      status.ai_provider = {
+        configured: false,   // false = user hasn't set this up themselves yet
+        details:
+          "⚡ AI is running on Vouza's built-in key — no action needed to chat here. " +
+          "You can optionally add your own API key in Step 2 for higher usage limits.",
+      };
+    } else {
+      status.ai_provider = {
+        configured: false,
+        details: "❌ No AI API key found — enter your key in Step 2 of the setup wizard",
+      };
+    }
 
     // Email — Gmail
     const hasGmail = !!(tools.gmail?.user && tools.gmail?.appPassword)
