@@ -227,14 +227,14 @@
        STEP VIEWS
     ============================================================ */
     .step-view {
-      display:none; animation:fadeUp 0.35s ease;
+      display:none; animation:fadeIn 0.22s ease;
     }
 
     .step-view.active { display:block; }
 
-    @keyframes fadeUp {
-      from { opacity:0; transform:translateY(16px); }
-      to   { opacity:1; transform:translateY(0); }
+    @keyframes fadeIn {
+      from { opacity:0; }
+      to   { opacity:1; }
     }
 
     .step-eyebrow {
@@ -1606,19 +1606,39 @@
         <!-- Credential sections that appear when channels are selected -->
         <div id="channelCredentials"></div>
 
-        <!-- Google unified -->
+        <!-- Google unified — Calendar / Sheets / Drive only (Gmail uses App Password above) -->
         <div id="googleUnifiedSection" style="display:none">
           <div class="section-label"><span>Google Account Access</span></div>
           <div class="glass-card">
             <div class="glass-card-header">
               <div class="glass-card-icon" id="googleIcon"></div>
-              <div class="glass-card-title">Google (Gmail, Calendar, Sheets, Drive)</div>
+              <div class="glass-card-title">Google Calendar, Sheets &amp; Drive</div>
               <span class="glass-card-badge badge-pending" id="status-google">Not Connected</span>
             </div>
+
+            <!-- How to get credentials — collapsible guide -->
+            <details style="margin-bottom:14px;background:rgba(124,58,237,0.05);border:1px solid rgba(124,58,237,0.15);border-radius:10px;padding:12px 14px">
+              <summary style="cursor:pointer;font-weight:700;font-size:13px;color:var(--brand-light);list-style:none;display:flex;align-items:center;gap:6px">
+                <span>📋</span> How to get your Google credentials (3 steps)
+              </summary>
+              <ol style="margin:12px 0 4px;padding-left:20px;font-size:13px;color:var(--text-dim);line-height:2">
+                <li>Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color:var(--brand-light)">Google Cloud Console → APIs &amp; Services → Credentials →</a></li>
+                <li>Click <strong style="color:var(--text)">+ Create Credentials</strong> → choose <strong style="color:var(--text)">OAuth 2.0 Client ID</strong> → Application type: <strong style="color:var(--text)">Desktop app</strong></li>
+                <li>Click <strong style="color:var(--text)">Download JSON</strong> → open the file → paste its entire contents in the box below</li>
+              </ol>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:6px">
+                💡 Make sure you have enabled the <strong>Google Calendar API</strong>, <strong>Google Sheets API</strong>, and/or <strong>Google Drive API</strong> in your Cloud project before downloading.
+              </div>
+            </details>
+
             <div class="form-group">
-              <label>Service Account Key (JSON)</label>
-              <textarea id="googleSaKey" rows="3" placeholder='{"type":"service_account","project_id":"..."}' style="font-family:monospace;font-size:12px;"></textarea>
-              <div class="hint">One key covers all Google apps. Get from <a href="https://console.cloud.google.com/iam-admin/serviceaccounts" target="_blank">Google Cloud Console →</a></div>
+              <label>OAuth2 Client Credentials (JSON)
+                <span style="color:var(--error);font-size:11px;font-weight:700;background:rgba(239,68,68,0.12);padding:2px 7px;border-radius:10px;margin-left:6px">Required</span>
+              </label>
+              <textarea id="googleSaKey" rows="4"
+                placeholder='{"installed":{"client_id":"...apps.googleusercontent.com","client_secret":"...","redirect_uris":["urn:ietf:wg:oauth:2.0:oob"]}}'
+                style="font-family:monospace;font-size:12px;resize:vertical"></textarea>
+              <div class="hint">Paste the full JSON you downloaded — looks like <code style="background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:4px">{"installed": {...}}</code> or <code style="background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:4px">{"web": {...}}</code></div>
             </div>
             <button class="btn btn-test" onclick="testConn('google-unified',{key:document.getElementById('googleSaKey').value})">🔌 Test Connection</button>
           </div>
@@ -1928,7 +1948,11 @@ const CRED_CONFIGS = {
   telegram: { default:{ title:'Telegram Bot', icon:'telegram', testType:'telegram', fields:[{id:'telegramToken',label:'Bot Token',type:'password',placeholder:'123456789:ABCdef...',hint:'Get from <a href="https://t.me/BotFather" target="_blank">@BotFather on Telegram →</a>'}] } },
   slack:    { default:{ title:'Slack Bot', icon:'slack', testType:'slack', fields:[{id:'slackToken',label:'Bot Token',type:'password',placeholder:'xoxb-...',hint:'Create at <a href="https://api.slack.com/apps" target="_blank">api.slack.com →</a>'}] } },
   email: {
-    gmail:   { title:'Gmail', icon:'gmail', testType:'gmail', fields:[{id:'gmailUser',label:'Gmail Address',type:'email',placeholder:'you@gmail.com'},{id:'gmailPass',label:'App Password',type:'password',placeholder:'xxxx-xxxx-xxxx-xxxx',hint:'Generate at <a href="https://myaccount.google.com/apppasswords" target="_blank">Google App Passwords →</a>'}] },
+    gmail:   { title:'Gmail', icon:'gmail', testType:'gmail', fields:[
+      {id:'gmailUser',label:'Gmail Address',type:'email',placeholder:'you@gmail.com'},
+      {id:'gmailPass',label:'App Password',type:'password',placeholder:'xxxx xxxx xxxx xxxx',
+        hint:'<strong>How to get your App Password:</strong> <a href="https://myaccount.google.com/security" target="_blank">Google Account → Security</a> → enable 2-Step Verification → scroll down to <strong>App passwords</strong> → create one for "Mail". Paste the 16-character code here. No spaces needed. <a href="https://myaccount.google.com/apppasswords" target="_blank">Go directly →</a>'}
+    ] },
     outlook: { title:'Outlook / Microsoft 365', icon:'gmail', testType:'outlook', fields:[{id:'outlookClientId',label:'Azure App Client ID',type:'text',placeholder:'xxxxxxxx-xxxx'},{id:'outlookSecret',label:'Client Secret',type:'password',placeholder:'secret'},{id:'outlookTenant',label:'Tenant ID',type:'text',placeholder:'xxxxxxxx-xxxx'}] },
   },
   voice: {
@@ -2193,7 +2217,9 @@ function showStep(n) {
   if (el) el.classList.add('active');
   state.step = n;
   renderProgressRail();
-  window.scrollTo(0, 0);
+  // Instant scroll reset — no smooth animation that fights the step transition
+  document.documentElement.scrollTop = 0;
+  document.body.scrollTop = 0;
 
   if (n === 2) { renderAIKeySection(); renderChannelCredentials(); checkGoogleUnified(); }
   if (n === 4) { renderReview(); }
@@ -2203,8 +2229,10 @@ function showStep(n) {
 }
 
 function goNext() {
-  // ── Step 1 gate: AI API key is mandatory ──────────────────────────────────
-  if (state.step === 1) {
+  // ── Step 2 gate: AI API key is mandatory before proceeding to Train ───────
+  // The API key input (#aiProviderKey) is rendered dynamically when Step 2 loads,
+  // so we gate here (Step 2 → Step 3) not on Step 1 where the field doesn't exist yet.
+  if (state.step === 2) {
     const keyEl = document.getElementById('aiProviderKey');
     const key   = keyEl?.value?.trim();
     if (!key) {
@@ -2220,13 +2248,13 @@ function goNext() {
           hint = document.createElement('div');
           hint.className = 'key-required-hint';
           hint.style.cssText = 'color:var(--error);font-size:12px;margin-top:6px;font-weight:600';
-          hint.textContent = '⚠️ This field is required to activate your AI. Enter your API key above, then click Test to verify it works.';
+          hint.textContent = '⚠️ This field is required to activate your AI. Enter your API key above, then click 🔌 Test.';
           keyEl.parentElement?.appendChild(hint);
         }
         // Clear the error state once the user starts typing
         keyEl.addEventListener('input', () => {
           keyEl.style.borderColor = '';
-          hint?.remove();
+          keyEl.parentElement?.querySelector('.key-required-hint')?.remove();
         }, { once:true });
       }
       return;
@@ -2522,7 +2550,8 @@ function renderChannelCredentials() {
   const box = document.getElementById('channelCredentials');
   let html = '';
   for (const ch of state.selectedChannels) {
-    if (ch === 'email' && document.getElementById('emailProvider')?.value === 'gmail') continue;
+    // Gmail previously skipped here and redirected to the Google Service Account section.
+    // Now shown inline with App Password — simpler for regular Gmail users.
     const provEl = document.getElementById(`${ch}Provider`);
     const prov = provEl ? provEl.value : 'default';
     const conf = CRED_CONFIGS[ch]?.[prov];
@@ -2554,8 +2583,10 @@ function buildCredCard(id, conf) {
 }
 
 function checkGoogleUnified() {
+  // Gmail is now handled inline with App Password — no service account needed.
+  // The Google unified section only appears for Calendar / Sheets / Drive,
+  // which use the Google API and require OAuth2 credentials.
   const needs =
-    (state.selectedChannels.has('email')    && document.getElementById('emailProvider')?.value === 'gmail') ||
     (state.selectedTools.has('calendar')    && document.getElementById('calendarProvider')?.value === 'google') ||
     (state.selectedTools.has('spreadsheet') && document.getElementById('spreadsheetProvider')?.value === 'google') ||
     (state.selectedTools.has('fileStorage') && document.getElementById('fileStorageProvider')?.value === 'gdrive');

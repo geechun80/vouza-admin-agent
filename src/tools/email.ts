@@ -344,16 +344,50 @@ export const deleteEmailTool = buildTool({
 
 // --- Helpers ---
 
+/**
+ * Resolve Gmail authentication.
+ *
+ * Priority order:
+ *  1. Service account key file  (googleServiceAccount path in config)
+ *  2. OAuth2 client credentials JSON (stored inline from wizard as googleCredentialsJson)
+ *     — requires a stored refresh token in config.tools.google.refreshToken
+ *
+ * If neither is available, throws a clear message guiding the user to
+ * connect Google credentials in the setup wizard.
+ */
 async function getGmailAuth(context: any) {
+  const SCOPES = ["https://www.googleapis.com/auth/gmail.modify"];
+
+  // Option 1: Service account key file (Google Workspace / admin setups)
   const keyPath = context.config.tools.googleServiceAccount;
   if (keyPath) {
-    const auth = new google.auth.GoogleAuth({
-      keyFile: keyPath,
-      scopes: ["https://www.googleapis.com/auth/gmail.modify"],
-    });
-    return auth;
+    return new google.auth.GoogleAuth({ keyFile: keyPath, scopes: SCOPES });
   }
-  throw new Error("Google service account not configured");
+
+  // Option 2: OAuth2 client credentials JSON + stored refresh token (personal Gmail / wizard flow)
+  const googleCfg = context.config.tools.google;
+  const credsJson = googleCfg?.credentialsJson;
+  const refreshToken = googleCfg?.refreshToken || context.config.credentials?.googleRefreshToken;
+  if (credsJson && refreshToken) {
+    let parsed: any;
+    try { parsed = JSON.parse(credsJson); } catch { /* fall through */ }
+    const clientData = parsed?.installed || parsed?.web;
+    if (clientData?.client_id && clientData?.client_secret) {
+      const oauth2 = new google.auth.OAuth2(
+        clientData.client_id,
+        clientData.client_secret,
+        clientData.redirect_uris?.[0] || "urn:ietf:wg:oauth:2.0:oob"
+      );
+      oauth2.setCredentials({ refresh_token: refreshToken });
+      return oauth2;
+    }
+  }
+
+  throw new Error(
+    "Gmail reading requires Google credentials. " +
+    "In the setup wizard → Connect Apps → enable Calendar or Sheets to see the Google credentials section, " +
+    "download your OAuth2 Client credentials JSON from Google Cloud Console, and paste it there."
+  );
 }
 
 function extractBody(payload: any): string {
