@@ -2720,7 +2720,10 @@ function buildCredCard(id, conf) {
 // ---------------------------------------------------------------------------
 // WhatsApp Web — Baileys QR scan card
 // ---------------------------------------------------------------------------
-let _waQREventSource = null;
+let _waQREventSource  = null;
+let _waCountdownTimer = null;  // setInterval handle
+let _waSecsLeft       = 20;    // current countdown value
+const WA_QR_TTL       = 20;    // WhatsApp QR code lifetime in seconds
 
 function buildWhatsAppWebQRCard(isConnected) {
   return `
@@ -2739,8 +2742,17 @@ function buildWhatsAppWebQRCard(isConnected) {
              <div class="hint" style="margin-top:6px">Your phone is linked. Messages will be handled by the AI.</div>
              <button class="btn btn-ghost" style="margin-top:12px;font-size:12px" onclick="waQRLogout()">🔓 Unlink (scan new QR)</button>`
           : `<div class="hint" style="margin-bottom:14px">Click <strong>Connect</strong> to generate a QR code, then scan it with your phone.</div>
-             <div id="wa-qr-img" style="display:none;margin:0 auto 12px">
-               <img id="wa-qr-png" style="width:220px;height:220px;border-radius:12px;background:#fff;padding:8px" src="" alt="QR Code">
+             <div id="wa-qr-img" style="display:none;margin:0 auto 4px">
+               <img id="wa-qr-png" style="width:220px;height:220px;border-radius:12px;background:#fff;padding:8px;transition:opacity 0.25s" src="" alt="QR Code">
+             </div>
+             <div id="wa-qr-timer" style="display:none;margin:10px auto 8px;width:220px">
+               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
+                 <span style="font-size:12px;color:var(--text-dim)">📷 Scan with WhatsApp</span>
+                 <span id="wa-qr-secs" style="font-size:12px;font-weight:700;color:#25d366;min-width:28px;text-align:right">20s</span>
+               </div>
+               <div style="width:100%;height:4px;background:rgba(255,255,255,0.08);border-radius:4px;overflow:hidden">
+                 <div id="wa-qr-bar" style="height:100%;width:100%;border-radius:4px;background:linear-gradient(90deg,#25d366,#128c7e);transition:width 1s linear,background 0.5s"></div>
+               </div>
              </div>
              <div id="wa-qr-status" style="color:var(--text-dim);font-size:13px;margin-bottom:12px"></div>
              <button id="wa-connect-btn" class="btn btn-primary" onclick="waQRConnect()">📱 Connect WhatsApp</button>`
@@ -2750,78 +2762,125 @@ function buildWhatsAppWebQRCard(isConnected) {
     </div>`;
 }
 
+// ── Countdown helpers ────────────────────────────────────────────────────────
+
+function _waStartCountdown() {
+  _waStopCountdown();
+  _waSecsLeft = WA_QR_TTL;
+  _waTickCountdown();
+  _waCountdownTimer = setInterval(_waTickCountdown, 1000);
+}
+
+function _waStopCountdown() {
+  if (_waCountdownTimer) { clearInterval(_waCountdownTimer); _waCountdownTimer = null; }
+}
+
+function _waTickCountdown() {
+  const secsEl  = document.getElementById('wa-qr-secs');
+  const barEl   = document.getElementById('wa-qr-bar');
+  const timerEl = document.getElementById('wa-qr-timer');
+  const statusEl = document.getElementById('wa-qr-status');
+
+  if (!secsEl) return; // card was removed — stop ticking
+
+  if (timerEl) timerEl.style.display = 'block';
+
+  // Colour shifts green → amber → red as time runs out
+  const pct   = (_waSecsLeft / WA_QR_TTL) * 100;
+  const color = _waSecsLeft > 10 ? '#25d366'
+              : _waSecsLeft > 5  ? '#f59e0b'
+              :                    '#ef4444';
+
+  secsEl.textContent = _waSecsLeft > 0 ? `${_waSecsLeft}s` : '…';
+  secsEl.style.color = color;
+
+  if (barEl) {
+    barEl.style.width = `${pct}%`;
+    barEl.style.background = _waSecsLeft > 10
+      ? 'linear-gradient(90deg,#25d366,#128c7e)'
+      : _waSecsLeft > 5
+        ? 'linear-gradient(90deg,#f59e0b,#d97706)'
+        : 'linear-gradient(90deg,#ef4444,#dc2626)';
+  }
+
+  if (_waSecsLeft <= 0) {
+    // QR expired — show "refreshing" until Baileys emits the next QR
+    if (statusEl) statusEl.textContent = '🔄 Refreshing QR…';
+    _waStopCountdown();
+    return;
+  }
+  _waSecsLeft--;
+}
+
+// ── Main connect flow ────────────────────────────────────────────────────────
+
 async function waQRConnect() {
   const btn = document.getElementById('wa-connect-btn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Connecting…'; }
-  document.getElementById('wa-qr-status').textContent = 'Launching agent connection…';
+  const statusEl = document.getElementById('wa-qr-status');
+  if (statusEl) statusEl.textContent = 'Launching agent connection…';
 
-  // Close previous SSE if open
+  // Close any previous SSE + countdown
   if (_waQREventSource) { _waQREventSource.close(); _waQREventSource = null; }
+  _waStopCountdown();
 
   _waQREventSource = new EventSource('/api/whatsapp/qr-stream');
 
-  let _waQRCount = 0;
   _waQREventSource.addEventListener('qr', (e) => {
     const { dataUrl } = JSON.parse(e.data);
     const img = document.getElementById('wa-qr-png');
     const div = document.getElementById('wa-qr-img');
-    const statusEl = document.getElementById('wa-qr-status');
-
-    _waQRCount++;
-    const isRefresh = _waQRCount > 1;
 
     if (img && div) {
-      // Brief flash to signal a new QR arrived
-      if (isRefresh && img.style) {
-        img.style.opacity = '0.3';
-        setTimeout(() => { img.style.opacity = '1'; img.style.transition = 'opacity 0.3s'; }, 50);
-      }
-      img.src = dataUrl;
+      // Flash the old QR out, new one in
+      img.style.opacity = '0.2';
+      setTimeout(() => {
+        img.src = dataUrl;
+        img.style.opacity = '1';
+      }, 120);
       div.style.display = 'block';
     }
 
-    if (statusEl) {
-      statusEl.textContent = isRefresh
-        ? '🔄 QR refreshed — scan quickly before it expires again'
-        : '📷 Scan this QR code with your phone now';
-      // Reset back to plain instruction after 3s so it doesn't linger
-      if (isRefresh) {
-        setTimeout(() => {
-          if (statusEl) statusEl.textContent = '📷 Scan this QR code with your phone now';
-        }, 3000);
-      }
-    }
-    if (btn) { btn.textContent = '🔄 Waiting for scan…'; }
+    // Reset (or start) the 20-second countdown
+    _waStartCountdown();
+    if (statusEl) statusEl.textContent = '';
+    if (btn) btn.textContent = '🔄 Waiting for scan…';
   });
 
   _waQREventSource.addEventListener('status', (e) => {
     const { status } = JSON.parse(e.data);
-    const statusEl = document.getElementById('wa-qr-status');
     if (status === 'connecting')   { if (statusEl) statusEl.textContent = '🔌 Connecting to WhatsApp…'; }
-    if (status === 'qr_ready')     { if (statusEl) statusEl.textContent = '📷 QR ready — scan with your phone'; }
+    if (status === 'qr_ready')     { /* countdown will show when qr event fires */ }
     if (status === 'connected')    { waQROnConnected(); }
-    if (status === 'logged_out')   { if (statusEl) statusEl.textContent = '❌ Logged out — click Connect again'; if (btn) { btn.disabled = false; btn.textContent = '📱 Connect WhatsApp'; } }
+    if (status === 'logged_out')   {
+      _waStopCountdown();
+      if (statusEl) statusEl.textContent = '❌ Logged out — click Connect again';
+      if (btn) { btn.disabled = false; btn.textContent = '📱 Connect WhatsApp'; }
+    }
     if (status === 'disconnected') { if (statusEl) statusEl.textContent = '⚠️ Disconnected — reconnecting…'; }
   });
 
   _waQREventSource.addEventListener('connected', () => waQROnConnected());
 
   _waQREventSource.addEventListener('error', (e) => {
+    _waStopCountdown();
     try {
       const { message } = JSON.parse(e.data);
-      document.getElementById('wa-qr-status').textContent = '⚠️ ' + message;
+      if (statusEl) statusEl.textContent = '⚠️ ' + message;
     } catch {}
     if (btn) { btn.disabled = false; btn.textContent = '📱 Connect WhatsApp'; }
   });
 
   _waQREventSource.onerror = () => {
-    document.getElementById('wa-qr-status').textContent = '⚠️ Connection lost — try again';
+    _waStopCountdown();
+    if (statusEl) statusEl.textContent = '⚠️ Connection lost — try again';
     if (btn) { btn.disabled = false; btn.textContent = '📱 Connect WhatsApp'; }
   };
 }
 
 function waQROnConnected() {
   if (_waQREventSource) { _waQREventSource.close(); _waQREventSource = null; }
+  _waStopCountdown();
   state.connStatus['whatsapp'] = true;
   const badge = document.getElementById('status-whatsapp');
   if (badge) { badge.className = 'glass-card-badge badge-connected'; badge.textContent = '✅ Connected'; }
