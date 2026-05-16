@@ -1995,7 +1995,10 @@ const CRED_CONFIGS = {
     meta:   { title:'WhatsApp Cloud API', icon:'whatsapp', testType:'whatsapp-meta', fields:[{id:'metaToken',label:'Access Token',type:'password',placeholder:'EAAxx'},{id:'metaPhoneId',label:'Phone Number ID',type:'text',placeholder:'123456'}] },
     waha:   { title:'WAHA (Self-hosted)', icon:'whatsapp', testType:'waha', fields:[{id:'wahaUrl',label:'WAHA Server URL',type:'text',placeholder:'http://localhost:3000',hint:'URL where WAHA is running (default port 3000)'},{id:'wahaSession',label:'Session Name',type:'text',placeholder:'default',hint:'Session name from your WAHA dashboard (usually "default")'},{id:'wahaKey',label:'API Key',type:'password',placeholder:'optional',hint:'Only if your WAHA requires authentication'}] },
   },
-  telegram: { default:{ title:'Telegram Bot', icon:'telegram', testType:'telegram', fields:[{id:'telegramToken',label:'Bot Token',type:'password',placeholder:'123456789:ABCdef...',hint:'Get from <a href="https://t.me/BotFather" target="_blank">@BotFather on Telegram →</a>'}] } },
+  telegram: { default:{ title:'Telegram Bot', icon:'telegram', testType:'telegram', fields:[
+    {id:'telegramToken',label:'Bot Token',type:'password',placeholder:'123456789:ABCdef...',hint:'Get from <a href="https://t.me/BotFather" target="_blank">@BotFather on Telegram →</a>'},
+    {id:'telegramWebhookUrl',label:'Webhook URL (optional)',type:'text',placeholder:'https://your-server.com',hint:'<strong>Cloud deployments only.</strong> Leave blank for local installs — long-polling is used automatically. Set to your public HTTPS URL (e.g. Fly.io, Railway, Render) to let Telegram push updates instead of the agent polling. The agent appends <code>/api/telegram/webhook</code> to this URL.'},
+  ] } },
   slack:    { default:{ title:'Slack Bot', icon:'slack', testType:'slack', fields:[{id:'slackToken',label:'Bot Token',type:'password',placeholder:'xoxb-...',hint:'Create at <a href="https://api.slack.com/apps" target="_blank">api.slack.com →</a>'}] } },
   email: {
     gmail:   { title:'Gmail', icon:'gmail', testType:'gmail', fields:[

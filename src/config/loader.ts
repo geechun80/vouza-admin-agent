@@ -187,8 +187,9 @@ export async function loadConfigFromJson(): Promise<AgentConfig> {
     // Note: wizard saves fields using their DOM id as the key (telegramToken, slackToken, gmailPass etc.)
     if (saved.channels?.telegram?.enabled) {
       const cfg = saved.channels.telegram.config || {};
-      const botToken = cfg.botToken || cfg.telegramToken || cfg.telegramBotToken;
-      if (botToken) baseConfig.tools.telegram = { botToken, webhookUrl: cfg.webhookUrl };
+      const botToken    = cfg.botToken    || cfg.telegramToken    || cfg.telegramBotToken;
+      const webhookUrl  = cfg.webhookUrl  || cfg.telegramWebhookUrl || "";
+      if (botToken) baseConfig.tools.telegram = { botToken, webhookUrl: webhookUrl || undefined };
     }
     if (saved.channels?.slack?.enabled) {
       const cfg = saved.channels.slack.config || {};

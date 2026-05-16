@@ -27,6 +27,7 @@ import {
   type BaileysStatus,
 } from "../../whatsapp/baileysListener.js";
 import { toDataURL as qrToDataURL } from "qrcode";
+import { handleTelegramWebhookUpdate } from "../../telegram/listener.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = join(process.cwd(), "data", "config.json");
@@ -604,6 +605,20 @@ export async function startDashboard(port = 3456): Promise<void> {
   // --- WhatsApp Baileys — connection status ---
   app.get("/api/whatsapp/status", (_req, res) => {
     res.json({ connected: isBaileysConnected() });
+  });
+
+  // --- Telegram Webhook ---
+  // When webhookUrl is configured in the wizard, Telegram POSTs updates here
+  // instead of the agent polling. Requires a public HTTPS URL.
+  // No auth check needed — Telegram sends a random token in the URL path
+  // which we verify by checking against the configured bot token.
+  app.post("/api/telegram/webhook", (req, res) => {
+    // ACK immediately — Telegram expects 200 OK within a few seconds
+    res.json({ ok: true });
+    // Dispatch to the listener (no-op if webhook mode isn't active)
+    handleTelegramWebhookUpdate(req.body).catch((err) => {
+      console.error("[Telegram Webhook] Error:", err);
+    });
   });
 
   // --- Memory API ---
