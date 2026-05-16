@@ -35,6 +35,7 @@ import { sendWhatsAppMessageTool, readWhatsAppMessagesTool } from "../../tools/w
 import { saveMemoryTool, searchMemoryTool, forgetMemoryTool } from "../../tools/memory.js";
 import { transcribeAudioTool, transcribeAndSummarizeTool } from "../../tools/voice.js";
 import { getSetupStatusTool, saveIntegrationCredentialsTool } from "../../tools/setup.js";
+import { webSearchTool } from "../../tools/webSearch.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Chat system prompt — full office agent capabilities
@@ -72,6 +73,11 @@ You help with email, calendar, messaging, files, voice, and reporting tasks.
 - Transcribe voice notes from Telegram, WhatsApp, or uploaded audio
 - Summarise transcribed meetings
 - Convert audio attachments to readable text
+
+### Web Search (Tavily · Serper · Brave)
+- Search the internet for current news, prices, company info, research
+- Use when the user asks about anything recent or real-time
+- Call web_search with a specific query — show titles, URLs, and key snippets
 
 ### Reports & Analysis
 - Summarise email threads or data sets
@@ -533,6 +539,7 @@ function buildRegistry(): ToolRegistry {
     saveMemoryTool, searchMemoryTool, forgetMemoryTool,
     transcribeAudioTool, transcribeAndSummarizeTool,
     getSetupStatusTool, saveIntegrationCredentialsTool,
+    webSearchTool,
   ];
   for (const tool of allTools) registry.register(tool as any);
   return registry;

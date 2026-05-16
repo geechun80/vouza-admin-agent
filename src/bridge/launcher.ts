@@ -26,6 +26,7 @@ import { sendWhatsAppMessageTool, readWhatsAppMessagesTool } from "../tools/what
 import { saveMemoryTool, searchMemoryTool, forgetMemoryTool, updateMemoryTool, listAllMemoriesTool } from "../tools/memory.js";
 import { transcribeAudioTool, transcribeAndSummarizeTool } from "../tools/voice.js";
 import { getSetupStatusTool, saveIntegrationCredentialsTool } from "../tools/setup.js";
+import { webSearchTool } from "../tools/webSearch.js";
 
 export interface AgentInstance {
   context: AgentContext;
@@ -110,6 +111,9 @@ export async function launchAgent(): Promise<AgentInstance> {
   // Setup & onboarding tools
   registry.register(getSetupStatusTool as any);
   registry.register(saveIntegrationCredentialsTool as any);
+
+  // Web search
+  registry.register(webSearchTool as any);
 
   console.log(chalk.green(`  ${registry.getAll().length} tools registered`));
 

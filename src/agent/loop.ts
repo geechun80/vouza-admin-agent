@@ -24,6 +24,7 @@ import { compressContext, estimateConversationTokens } from "./contextCompressor
 import { scrubThinkBlocks, hasThinkBlock } from "./thinkScrubber.js";
 import { redact } from "./redactor.js";
 import { classifyError } from "./errorClassifier.js";
+import { buildProfileContext } from "./userProfile.js";
 
 const DEFAULT_SYSTEM_PROMPT = `You are an AI-powered office administrator and executive assistant named Vouza.
 
@@ -313,7 +314,13 @@ export async function* agentLoop(
   // If found, the agent follows the proven steps instead of re-figuring them.
   const learnedSkills = await findRelevantSkills(searchQuery).catch(() => "");
 
-  const fullSystemPrompt = systemPrompt + memoryContext + skillsSummary + learnedSkills;
+  // ── Phase 4: inject user profile ──────────────────────────────────────────
+  // Reads accumulated memory facts from past sessions and builds a compact
+  // profile block so the agent knows the user's name, role, and preferences
+  // without needing to re-ask every session.
+  const userProfile = await buildProfileContext(context.memory).catch(() => "");
+
+  const fullSystemPrompt = systemPrompt + userProfile + memoryContext + skillsSummary + learnedSkills;
   const toolsUsed: string[] = [];
   let errorStreak = 0;   // consecutive tool-level errors (resets on any success)
   let retryCount  = 0;   // transient API-level retries (503 / 429)
