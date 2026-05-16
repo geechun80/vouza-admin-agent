@@ -344,7 +344,7 @@ function buildAgentConfig(saved: any, apiKeyOverride?: string): AgentConfig {
   // The user's own key always takes priority when configured.
   const operatorKey      = (process.env.VOUZA_API_KEY      || "").trim();
   const operatorProvider = (process.env.VOUZA_API_PROVIDER || "openrouter") as AIProvider;
-  const operatorModel    = (process.env.VOUZA_API_MODEL    || DEFAULT_OPENROUTER_TIERS.fast);
+  const operatorModel    = (process.env.VOUZA_API_MODEL    || "google/gemma-4-31b-it:free");
 
   const creds = saved?.credentials || {};
 
