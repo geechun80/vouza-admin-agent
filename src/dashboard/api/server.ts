@@ -423,7 +423,7 @@ export async function startDashboard(port = 3456): Promise<void> {
 
   // Clear a chat session (resets conversation history)
   app.delete("/api/chat/session/:sessionId", requireLocalOrigin, (req, res) => {
-    clearSession(req.params.sessionId);
+    clearSession(req.params.sessionId as string);
     res.json({ success: true });
   });
 
