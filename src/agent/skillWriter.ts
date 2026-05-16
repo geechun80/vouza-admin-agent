@@ -15,6 +15,7 @@ import { readFile, writeFile, mkdir, readdir } from "fs/promises";
 import { existsSync }                           from "fs";
 import path                                     from "path";
 import type { AgentContext, ConversationMessage } from "../types/index.js";
+import { redact }                               from "./redactor.js";
 
 const SKILLS_DIR = path.resolve(process.cwd(), "data", "skills");
 
@@ -237,7 +238,10 @@ export async function autoWriteSkill(
     const filePath = path.join(SKILLS_DIR, `${skillName}.md`);
     if (existsSync(filePath)) return;
 
-    await writeFile(filePath, skillContent.trim(), "utf-8");
+    // Redact any secrets before writing to disk — the LLM may have echoed
+    // credential snippets into the skill's "Step-by-Step Procedure" section.
+    const safeContent = redact(skillContent.trim());
+    await writeFile(filePath, safeContent, "utf-8");
     console.log(`  ✓ Auto-wrote skill: data/skills/${skillName}.md`);
   } catch {
     // Best-effort — never crash the main loop

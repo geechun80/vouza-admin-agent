@@ -21,6 +21,9 @@ import { classifyTask, selectModelForComplexity, TIER_LABELS, DEFAULT_OPENROUTER
 import { autoReflect }                from "./reflect.js";
 import { findRelevantSkills, autoWriteSkill } from "./skillWriter.js";
 import { compressContext, estimateConversationTokens } from "./contextCompressor.js";
+import { scrubThinkBlocks, hasThinkBlock } from "./thinkScrubber.js";
+import { redact } from "./redactor.js";
+import { classifyError } from "./errorClassifier.js";
 
 const DEFAULT_SYSTEM_PROMPT = `You are an AI-powered office administrator and executive assistant named Vouza.
 
@@ -90,33 +93,7 @@ Always consider the full picture of what you've done and learned so far.
 If a tool fails, do NOT give up — analyze the error, adjust, and try a different approach.`;
 
 
-/**
- * Turn a raw API error string into a human-readable message the user can act on.
- */
-function formatApiError(message: string, isOpenRouter = false): string {
-  const msg = message.toLowerCase();
-  if (msg.includes("402") || msg.includes("insufficient") || msg.includes("credits") || msg.includes("no credits")) {
-    return isOpenRouter
-      ? "Your OpenRouter account has no credits. Add even $5 at **openrouter.ai/credits** — it lasts months at typical usage rates."
-      : "Payment required — your API account may be out of credits.";
-  }
-  if (msg.includes("401") || msg.includes("unauthorized") || msg.includes("invalid api key") || msg.includes("authentication")) {
-    return "Invalid API key — please re-enter it in the setup wizard (Step 2 → AI Account Access).";
-  }
-  if (msg.includes("429") || msg.includes("rate limit") || msg.includes("too many requests")) {
-    return "Rate limit reached. Please wait a moment and try again.";
-  }
-  if (msg.includes("503") || msg.includes("overload") || msg.includes("unavailable")) {
-    return "The AI model is temporarily overloaded. Please try again in a moment.";
-  }
-  if (msg.includes("404") || msg.includes("not found") || msg.includes("model")) {
-    return isOpenRouter
-      ? "Model not found on OpenRouter. Try a different model in the setup wizard."
-      : "Model not found. Please check your model selection.";
-  }
-  // Truncate very long raw errors
-  return message.length > 300 ? message.slice(0, 300) + "…" : message;
-}
+// formatApiError replaced by classifyError() from errorClassifier.ts
 
 /**
  * Build an OpenAI-compatible client for non-Anthropic providers.
@@ -398,8 +375,19 @@ export async function* agentLoop(
 
       for (const block of responseContent) {
         if (block.type === "text" && block.text) {
-          assistantText += block.text;
-          yield { type: "text_delta", text: block.text };
+          assistantText += block.text; // keep full text (incl. think blocks) in history
+
+          // ── Think Scrubber: strip <think>…</think> before showing user ───
+          // Models like DeepSeek-R1 and extended-thinking Claude emit raw chain-
+          // of-thought inside <think> tags. We show a subtle indicator if present,
+          // then yield only the clean visible portion.
+          if (hasThinkBlock(block.text)) {
+            yield { type: "text_delta", text: "💭 _reasoning…_\n\n" };
+          }
+          const visible = scrubThinkBlocks(block.text);
+          if (visible) {
+            yield { type: "text_delta", text: visible };
+          }
         } else if (block.type === "tool_use" && block.id && block.name) {
           toolCalls.push({ id: block.id, name: block.name, input: block.input });
           yield { type: "tool_start", toolName: block.name, input: block.input };
@@ -499,35 +487,47 @@ export async function* agentLoop(
       }
     } catch (err) {
       const raw = err instanceof Error ? err.message : String(err);
-      const rawLower = raw.toLowerCase();
 
-      // Hermes-style transient retry: 503 / 429 / overload errors are temporary.
-      // Retry up to 2 times with exponential back-off before giving up.
-      const isTransient =
-        rawLower.includes("503") ||
-        rawLower.includes("429") ||
-        rawLower.includes("overload") ||
-        rawLower.includes("rate limit") ||
-        rawLower.includes("too many requests") ||
-        rawLower.includes("service unavailable");
+      // ── Smart Error Classifier ────────────────────────────────────────────
+      // Categorise the error so we can apply the right recovery strategy:
+      //   transient  → short retry (model overloaded, network blip)
+      //   rate_limit → longer exponential retry (429)
+      //   quota      → no retry, tell user to top up
+      //   auth       → no retry, redirect to wizard
+      //   context_len→ no retry, trigger compression and re-run
+      //   not_found  → no retry, suggest different model
+      //   permanent  → no retry, show error
+      const errInfo = classifyError(raw, isOpenRouter);
 
-      if (isTransient && retryCount < 2) {
+      if (errInfo.shouldRetry && retryCount < errInfo.maxRetries) {
         retryCount++;
-        const waitSec = retryCount * 3; // 3s, then 6s
+        const waitMs = errInfo.waitMs(retryCount);
+        const waitSec = Math.round(waitMs / 1000);
         yield {
           type: "text_delta",
-          text: `\n_Model temporarily busy — retrying in ${waitSec}s (attempt ${retryCount}/2)…_\n`,
+          text: `\n_${errInfo.userMessage} (attempt ${retryCount}/${errInfo.maxRetries}, waiting ${waitSec}s…)_\n`,
         };
-        await new Promise((r) => setTimeout(r, waitSec * 1000));
-        state.turnCount--; // don't charge this against the turn budget
+        await new Promise((r) => setTimeout(r, waitMs));
+        state.turnCount--; // don't charge this attempt against the turn budget
         continue;
       }
 
-      // Non-transient or exhausted retries — surface a friendly message
-      const friendly = formatApiError(raw, isOpenRouter);
+      // ── Context length: trigger compression and retry once ────────────────
+      if (errInfo.type === "context_len" && retryCount < 1) {
+        retryCount++;
+        yield { type: "text_delta", text: `\n_${errInfo.userMessage}_\n` };
+        // Force compress regardless of token threshold
+        const { messages: compressed } = await compressContext(
+          state.messages, apiKey, context.config.provider, activeModel, 128_000, 0.99
+        ).catch(() => ({ messages: state.messages }));
+        state.messages = compressed;
+        state.turnCount--;
+        continue;
+      }
+
+      // ── No retry — surface a clear, actionable message ────────────────────
       yield { type: "error", error: raw };
-      // Emit as text_delta so ALL consumers (Telegram, WhatsApp, dashboard) see it
-      yield { type: "text_delta", text: `\n\n⚠️ ${friendly}` };
+      yield { type: "text_delta", text: `\n\n⚠️ ${errInfo.userMessage}` };
       state.shouldContinue = false;
     }
   }
@@ -551,20 +551,22 @@ export async function* agentLoop(
   context.turnCount = state.turnCount;
 
   // Log performance for self-improvement
+  // Redact task name before persisting — user may have typed secrets in the chat
+  const rawTaskName = (typeof userMessage === "string" ? userMessage : searchQuery).slice(0, 100);
   const perfLog: PerformanceLog = {
     sessionId: context.sessionId,
-    taskName: (typeof userMessage === "string" ? userMessage : searchQuery).slice(0, 100),
+    taskName:  redact(rawTaskName),
     toolsUsed: [...new Set(toolsUsed)],
-    success: true,
-    duration: Date.now() - startTime,
+    success:   true,
+    duration:  Date.now() - startTime,
     timestamp: Date.now(),
   };
 
   await context.memory.add({
-    type: "pattern",
-    title: `perf_log:${context.sessionId}:${state.turnCount}`,
+    type:    "pattern",
+    title:   `perf_log:${context.sessionId}:${state.turnCount}`,
     content: JSON.stringify(perfLog),
-    tags: ["performance", ...toolsUsed],
+    tags:    ["performance", ...toolsUsed],
   });
 
   // Auto-reflect: extract memorable user facts (contacts, preferences, patterns)
