@@ -236,8 +236,10 @@ export interface AgentConfig {
       config: Record<string, string>;
     };
     agentmail?: {
-      apiKey:   string;
-      username: string;
+      apiKey:         string;
+      username:       string;
+      /** Optional email allowlist — if non-empty, only these senders can trigger the agent */
+      allowedSenders?: string[];
     };
   };
   /** Raw credentials bag — stores provider creds not covered by tools above */

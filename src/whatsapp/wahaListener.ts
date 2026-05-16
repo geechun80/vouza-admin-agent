@@ -137,7 +137,12 @@ async function processWAMessage(job: WAMessageJob): Promise<void> {
     const session = getOrCreateSession(chatId, baseCtx);
     let response  = "";
 
-    for await (const ev of agentLoop(userText, session.context, registry)) {
+    // Frame as external input to reduce prompt injection risk
+    const framedInput = isVoice
+      ? userText  // voice already framed by handleVoiceMessage
+      : `[Message from ${fromName} via WhatsApp]: ${userText}`;
+
+    for await (const ev of agentLoop(framedInput, session.context, registry)) {
       if (ev.type === "text_delta") response += ev.text;
       // Surface API / model errors so WhatsApp users know what happened
       if (ev.type === "error" && !response.includes("⚠️")) {

@@ -27,7 +27,7 @@ import {
   type BaileysStatus,
 } from "../../whatsapp/baileysListener.js";
 import { toDataURL as qrToDataURL } from "qrcode";
-import { handleTelegramWebhookUpdate } from "../../telegram/listener.js";
+import { handleTelegramWebhookUpdate, getWebhookSecret } from "../../telegram/listener.js";
 import {
   startAgentMailListener,
   stopAgentMailListener,
@@ -316,13 +316,19 @@ export async function startDashboard(port = 3456): Promise<void> {
     }
     try {
       const { message } = req.body;
+      if (!message || typeof message !== "string") {
+        return res.status(400).json({ success: false, error: "message is required" });
+      }
+      if (message.length > 10_000) {
+        return res.status(400).json({ success: false, error: "Message exceeds 10,000 character limit" });
+      }
       let output = "";
       for await (const event of agentInstance.runTask(message)) {
         if (event.type === "text_delta") output += event.text;
       }
       res.json({ success: true, output });
     } catch (err) {
-      res.json({ success: false, error: String(err) });
+      res.json({ success: false, error: "Task failed — check server logs for details" });
     }
   });
 
@@ -376,7 +382,7 @@ export async function startDashboard(port = 3456): Promise<void> {
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
-    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Origin", `http://localhost:${port}`);
     res.flushHeaders();
 
     const send = (data: object) => {
@@ -416,14 +422,14 @@ export async function startDashboard(port = 3456): Promise<void> {
   });
 
   // Clear a chat session (resets conversation history)
-  app.delete("/api/chat/session/:sessionId", (req, res) => {
+  app.delete("/api/chat/session/:sessionId", requireLocalOrigin, (req, res) => {
     clearSession(req.params.sessionId);
     res.json({ success: true });
   });
 
   // --- Voice Transcription (OpenAI Whisper) ---
   // Accepts base64-encoded audio from the browser microphone or uploaded audio file.
-  app.post("/api/transcribe", async (req, res) => {
+  app.post("/api/transcribe", requireLocalOrigin, async (req, res) => {
     const { audioBase64, mimeType, filename, language } = req.body as {
       audioBase64: string;
       mimeType:    string;
@@ -522,13 +528,24 @@ export async function startDashboard(port = 3456): Promise<void> {
       return res.status(400).json({ error: "Invalid webhook payload" });
     }
 
+    // WAHA auth: validate the X-Api-Key header against the configured WAHA API key.
+    // WAHA sends this header on all outbound webhook POSTs when an apiKey is configured.
+    const wa = agentInstance?.context.config.tools?.whatsapp;
+    if (wa?.provider === "waha") {
+      const expectedKey = (wa.config as any)?.apiKey as string | undefined;
+      if (expectedKey) {
+        const providedKey = req.headers["x-api-key"] as string | undefined;
+        if (providedKey !== expectedKey) {
+          return res.status(403).json({ error: "Unauthorized" });
+        }
+      }
+    }
+
     // ACK immediately — WAHA expects a fast response
     res.json({ success: true });
 
     // Process asynchronously after the ACK
     if (!agentInstance) return; // agent must be running to handle messages
-
-    const wa = agentInstance.context.config.tools?.whatsapp;
     if (!wa || wa.provider !== "waha") return; // only WAHA supports webhooks
 
     handleWAHAEvent(req.body, agentInstance.context, agentInstance.registry);
@@ -537,7 +554,7 @@ export async function startDashboard(port = 3456): Promise<void> {
   // --- WhatsApp Baileys — QR code SSE stream ---
   // The dashboard subscribes to this endpoint to get real-time QR code updates.
   // When the user's phone scans, the stream sends a "connected" event and closes.
-  app.get("/api/whatsapp/qr-stream", async (req, res) => {
+  app.get("/api/whatsapp/qr-stream", requireLocalOrigin, async (req, res) => {
     res.setHeader("Content-Type",  "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection",    "keep-alive");
@@ -620,9 +637,16 @@ export async function startDashboard(port = 3456): Promise<void> {
   // --- Telegram Webhook ---
   // When webhookUrl is configured in the wizard, Telegram POSTs updates here
   // instead of the agent polling. Requires a public HTTPS URL.
-  // No auth check needed — Telegram sends a random token in the URL path
-  // which we verify by checking against the configured bot token.
+  // Telegram sends the X-Telegram-Bot-Api-Secret-Token header (set during setWebhook).
   app.post("/api/telegram/webhook", (req, res) => {
+    // Verify the secret token Telegram sends on every webhook delivery
+    const secret = getWebhookSecret();
+    if (secret) {
+      const provided = req.headers["x-telegram-bot-api-secret-token"] as string | undefined;
+      if (provided !== secret) {
+        return res.status(403).json({ ok: false });
+      }
+    }
     // ACK immediately — Telegram expects 200 OK within a few seconds
     res.json({ ok: true });
     // Dispatch to the listener (no-op if webhook mode isn't active)
@@ -634,7 +658,7 @@ export async function startDashboard(port = 3456): Promise<void> {
   // --- Memory API ---
   const MEMORY_DIR = join(process.cwd(), "data", "memory");
 
-  app.get("/api/memories", async (_req, res) => {
+  app.get("/api/memories", requireLocalOrigin, async (_req, res) => {
     try {
       const store = createMemoryStore(MEMORY_DIR);
       await store.load();
@@ -688,7 +712,7 @@ export async function startDashboard(port = 3456): Promise<void> {
   }
 
   // List all conversations (metadata only, sorted newest first)
-  app.get("/api/conversations", async (_req, res) => {
+  app.get("/api/conversations", requireLocalOrigin, async (_req, res) => {
     try {
       await ensureConvDir();
       const files = (await readdir(CONV_DIR)).filter(f => f.endsWith(".json"));

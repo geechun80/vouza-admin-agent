@@ -89,6 +89,14 @@ let _starting   = false;
 
 const threadSessions: Map<string, ThreadSession> = new Map();
 
+// Reply depth cap — prevents infinite agent→mail→agent loops
+const MAX_AUTO_REPLIES = 5;
+const replyDepths: Map<string, number> = new Map();
+
+// Reset depth counters every 24h so threads can reopen the next day
+const _depthResetTimer = setInterval(() => replyDepths.clear(), 24 * 60 * 60 * 1000);
+if (_depthResetTimer.unref) _depthResetTimer.unref();
+
 // Prune sessions idle > 2 hours every 30 minutes
 const _pruneTimer = setInterval(() => {
   const cutoff = Date.now() - 2 * 60 * 60 * 1000;
@@ -273,9 +281,35 @@ async function processThread(
 
   if (!userText.trim()) return;
 
+  // Sender allowlist — if configured, only whitelisted addresses can trigger the agent
+  const allowedSenders = (_baseCtx!.config.tools?.agentmail as any)?.allowedSenders as string[] | undefined;
+  if (allowedSenders && allowedSenders.length > 0) {
+    const senderEmail = newest.from.email.toLowerCase();
+    const allowed = allowedSenders.some((s) => s.toLowerCase() === senderEmail);
+    if (!allowed) {
+      console.warn(chalk.yellow(
+        `  [AgentMail] Rejected message from unlisted sender: ${newest.from.email}`
+      ));
+      return;
+    }
+  }
+
+  // Reply depth cap — prevents infinite reply loops
+  const depth = replyDepths.get(thread.id) ?? 0;
+  if (depth >= MAX_AUTO_REPLIES) {
+    console.warn(chalk.yellow(
+      `  [AgentMail] Max auto-replies (${MAX_AUTO_REPLIES}) reached for thread ${thread.id} — skipping`
+    ));
+    return;
+  }
+  replyDepths.set(thread.id, depth + 1);
+
   console.log(chalk.gray(
     `  [AgentMail] ${fromName} <${newest.from.email}>: ${userText.slice(0, 100)}${userText.length > 100 ? "…" : ""}`
   ));
+
+  // Frame as external input to reduce prompt injection risk
+  const framedInput = `[Email from ${fromName} <${newest.from.email}>]:\n${userText}`;
 
   // Get or create per-thread session
   const session = getOrCreateSession(thread.id);
@@ -283,7 +317,7 @@ async function processThread(
   // Run agent loop
   let response = "";
   try {
-    for await (const ev of agentLoop(userText, session.context, _registry)) {
+    for await (const ev of agentLoop(framedInput, session.context, _registry)) {
       if (ev.type === "text_delta") response += ev.text;
       if (ev.type === "error" && !response.includes("⚠️")) {
         response += `\n\n⚠️ ${ev.error}`;

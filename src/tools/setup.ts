@@ -734,8 +734,6 @@ export const saveIntegrationCredentialsTool = buildTool({
           cfg.credentials.gmailPass     = c.gmailPass;
           cfg.tools.gmail = { user: c.gmailUser, appPassword: c.gmailPass, emailAddress: c.gmailUser };
           if (ctx?.config?.tools) ctx.config.tools.gmail = cfg.tools.gmail;
-          process.env.GMAIL_USER         = c.gmailUser;
-          process.env.GMAIL_APP_PASSWORD = c.gmailPass;
           break;
         }
 
@@ -753,10 +751,6 @@ export const saveIntegrationCredentialsTool = buildTool({
             email: c.outlookEmail || "",
           };
           if (ctx?.config?.tools) ctx.config.tools.outlook = cfg.tools.outlook;
-          process.env.OUTLOOK_CLIENT_ID     = c.outlookClientId;
-          process.env.OUTLOOK_CLIENT_SECRET = c.outlookSecret;
-          process.env.OUTLOOK_TENANT_ID     = c.outlookTenant;
-          if (c.outlookEmail) process.env.OUTLOOK_EMAIL = c.outlookEmail;
           break;
         }
 
@@ -768,10 +762,6 @@ export const saveIntegrationCredentialsTool = buildTool({
           cfg.credentials.smtpUser = c.smtpUser;
           cfg.credentials.smtpPass = c.smtpPass;
           cfg.tools.smtp = { host: c.smtpHost, port: c.smtpPort || "587", user: c.smtpUser, pass: c.smtpPass };
-          process.env.SMTP_HOST = c.smtpHost;
-          process.env.SMTP_PORT = c.smtpPort || "587";
-          process.env.SMTP_USER = c.smtpUser;
-          process.env.SMTP_PASS = c.smtpPass;
           break;
         }
 
@@ -791,7 +781,6 @@ export const saveIntegrationCredentialsTool = buildTool({
             ],
           };
           if (ctx?.config?.tools) ctx.config.tools.google = cfg.tools.google;
-          process.env.GOOGLE_SERVICE_ACCOUNT_KEY = c.googleSaKey;
           break;
         }
 
@@ -801,7 +790,6 @@ export const saveIntegrationCredentialsTool = buildTool({
           cfg.tools.telegram = { botToken: c.telegramToken };
           if (ctx?.config?.tools)  ctx.config.tools.telegram = cfg.tools.telegram;
           if (ctx?.config)        (ctx.config as any).telegramToken = c.telegramToken;
-          process.env.TELEGRAM_BOT_TOKEN = c.telegramToken;
           break;
         }
 
@@ -810,7 +798,6 @@ export const saveIntegrationCredentialsTool = buildTool({
           cfg.credentials.slackToken = c.slackToken;
           cfg.tools.slack = { botToken: c.slackToken };
           if (ctx?.config?.tools) ctx.config.tools.slack = cfg.tools.slack;
-          process.env.SLACK_BOT_TOKEN = c.slackToken;
           break;
         }
 
@@ -820,8 +807,6 @@ export const saveIntegrationCredentialsTool = buildTool({
           if (c.wahaKey) cfg.credentials.wahaKey = c.wahaKey;
           cfg.tools.whatsapp = { provider: "waha", config: { serverUrl: c.wahaUrl, apiKey: c.wahaKey || "" } };
           if (ctx?.config?.tools) ctx.config.tools.whatsapp = cfg.tools.whatsapp;
-          process.env.WAHA_SERVER_URL = c.wahaUrl;
-          if (c.wahaKey) process.env.WAHA_API_KEY = c.wahaKey;
           break;
         }
 
@@ -833,9 +818,6 @@ export const saveIntegrationCredentialsTool = buildTool({
           cfg.credentials.twilioNum   = c.twilioNum;
           cfg.tools.whatsapp = { provider: "twilio", config: { accountSid: c.twilioSid, authToken: c.twilioToken, fromNumber: c.twilioNum } };
           if (ctx?.config?.tools) ctx.config.tools.whatsapp = cfg.tools.whatsapp;
-          process.env.TWILIO_ACCOUNT_SID  = c.twilioSid;
-          process.env.TWILIO_AUTH_TOKEN   = c.twilioToken;
-          process.env.TWILIO_PHONE_NUMBER = c.twilioNum;
           break;
         }
 
@@ -844,8 +826,6 @@ export const saveIntegrationCredentialsTool = buildTool({
           cfg.credentials.groqApiKey = c.groqApiKey;
           if (ctx?.config) (ctx.config as any).whisperApiKey = c.groqApiKey;
           if (ctx?.config) (ctx.config as any).whisperProvider = "groq";
-          process.env.GROQ_API_KEY    = c.groqApiKey;
-          process.env.WHISPER_PROVIDER = "groq";
           break;
         }
 
@@ -854,8 +834,6 @@ export const saveIntegrationCredentialsTool = buildTool({
           cfg.credentials.openaiVoiceKey = c.openaiVoiceKey;
           if (ctx?.config) (ctx.config as any).whisperApiKey = c.openaiVoiceKey;
           if (ctx?.config) (ctx.config as any).whisperProvider = "openai";
-          process.env.OPENAI_API_KEY  = c.openaiVoiceKey;
-          process.env.WHISPER_PROVIDER = "openai";
           break;
         }
 

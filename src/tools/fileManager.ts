@@ -11,10 +11,38 @@
 import { z } from "zod";
 import { buildTool } from "./registry.js";
 import { readdir, readFile, writeFile, rename, mkdir, stat, unlink, copyFile as fsCopyFile } from "fs/promises";
-import { join, extname, basename, dirname } from "path";
+import { join, extname, basename, dirname, resolve, sep } from "path";
 import { createRequire } from "module";
 import type { VisionContentBlock } from "../types/index.js";
 import { scanFile } from "./security.js";
+
+// ---------------------------------------------------------------------------
+// Workspace path guard — confines all file operations to the workspace dir.
+// This prevents external channel messages from being used to read/write
+// arbitrary host files (e.g. ~/.ssh, /etc/passwd, C:\Windows\System32).
+//
+// The workspace directory is created automatically on first use.
+// To give the agent access to a file, copy it into workspace/.
+// ---------------------------------------------------------------------------
+
+const WORKSPACE_DIR = resolve(process.cwd(), "workspace");
+// Ensure workspace exists on module load (non-fatal if it fails)
+mkdir(WORKSPACE_DIR, { recursive: true }).catch(() => {});
+
+/**
+ * Resolve `inputPath` to an absolute path and verify it is inside WORKSPACE_DIR.
+ * Returns the resolved path on success, or null if the path escapes the sandbox.
+ */
+function safePath(inputPath: string): string | null {
+  const abs = resolve(WORKSPACE_DIR, inputPath);
+  return abs.startsWith(WORKSPACE_DIR + sep) || abs === WORKSPACE_DIR
+    ? abs
+    : null;
+}
+
+const WORKSPACE_ERROR = (p: string) =>
+  `Path "${p}" is outside the agent workspace. ` +
+  `Copy the file to the workspace/ folder first, or use a relative path inside workspace/.`;
 
 // CommonJS interop for pdf-parse and adm-zip (no ESM export)
 const require = createRequire(import.meta.url);
@@ -212,8 +240,12 @@ export const readFileTool = buildTool({
   }),
   async call(input): Promise<any> {
     try {
+      // ── Workspace path guard ───────────────────────────────────────────────
+      const safe = safePath(input.filePath);
+      if (!safe) return { success: false, error: WORKSPACE_ERROR(input.filePath) };
+
       // ── Security scan before any parsing ──────────────────────────────────
-      const scan = await scanFile(input.filePath);
+      const scan = await scanFile(safe);
       if (scan.blocked) {
         return { success: false, error: `File blocked: ${scan.blockReason}` };
       }
@@ -221,35 +253,35 @@ export const readFileTool = buildTool({
         console.warn("[readFileTool] Security warnings:", scan.warnings);
       }
 
-      const stats = await stat(input.filePath);
-      const ext = extname(input.filePath).toLowerCase();
+      const stats = await stat(safe);
+      const ext = extname(safe).toLowerCase();
 
       // ── PDF ────────────────────────────────────────────────────────────────
       if (PDF_EXTS.has(ext)) {
-        const text = await parsePDF(input.filePath);
+        const text = await parsePDF(safe);
         return {
           success: true,
-          data: { format: "pdf", filePath: input.filePath, size: stats.size,
+          data: { format: "pdf", filePath: safe, size: stats.size,
             modified: stats.mtime.toISOString(), content: text, charCount: text.length },
         };
       }
 
       // ── Word ───────────────────────────────────────────────────────────────
       if (WORD_EXTS.has(ext)) {
-        const text = await parseWord(input.filePath);
+        const text = await parseWord(safe);
         return {
           success: true,
-          data: { format: "docx", filePath: input.filePath, size: stats.size,
+          data: { format: "docx", filePath: safe, size: stats.size,
             modified: stats.mtime.toISOString(), content: text, charCount: text.length },
         };
       }
 
       // ── Excel ──────────────────────────────────────────────────────────────
       if (XL_EXTS.has(ext)) {
-        const result = await parseExcel(input.filePath);
+        const result = await parseExcel(safe);
         return {
           success: true,
-          data: { format: ext.slice(1), filePath: input.filePath, size: stats.size,
+          data: { format: ext.slice(1), filePath: safe, size: stats.size,
             modified: stats.mtime.toISOString(), sheets: result.sheets,
             activeSheet: result.activeSheet, headers: result.headers,
             rowCount: result.rows.length, rows: result.rows },
@@ -258,10 +290,10 @@ export const readFileTool = buildTool({
 
       // ── PowerPoint ─────────────────────────────────────────────────────────
       if (PPTX_EXTS.has(ext)) {
-        const result = await parsePPTX(input.filePath);
+        const result = await parsePPTX(safe);
         return {
           success: true,
-          data: { format: "pptx", filePath: input.filePath, size: stats.size,
+          data: { format: "pptx", filePath: safe, size: stats.size,
             modified: stats.mtime.toISOString(), slideCount: result.slideCount,
             content: result.text, charCount: result.text.length },
         };
@@ -269,7 +301,7 @@ export const readFileTool = buildTool({
 
       // ── Images ─────────────────────────────────────────────────────────────
       if (IMAGE_EXTS.has(ext)) {
-        const { data, visionBlock } = await readImageFile(input.filePath, stats.size, ext);
+        const { data, visionBlock } = await readImageFile(safe, stats.size, ext);
         return {
           success: true,
           data: { ...data, modified: stats.mtime.toISOString() },
@@ -278,10 +310,10 @@ export const readFileTool = buildTool({
       }
 
       // ── Plain text (default) ───────────────────────────────────────────────
-      const content = await readFile(input.filePath, input.encoding as BufferEncoding);
+      const content = await readFile(safe, input.encoding as BufferEncoding);
       return {
         success: true,
-        data: { format: ext.slice(1) || "txt", filePath: input.filePath,
+        data: { format: ext.slice(1) || "txt", filePath: safe,
           size: stats.size, modified: stats.mtime.toISOString(), content },
       };
     } catch (err) {
@@ -311,20 +343,23 @@ export const readExcelFileTool = buildTool({
   }),
   async call(input): Promise<any> {
     try {
+      const safe = safePath(input.filePath);
+      if (!safe) return { success: false, error: WORKSPACE_ERROR(input.filePath) };
+
       if (input.listSheetsOnly) {
         const ExcelJS = await import("exceljs");
         const workbook = new ExcelJS.default.Workbook();
-        const ext = extname(input.filePath).toLowerCase();
+        const ext = extname(safe).toLowerCase();
         if (ext === ".csv") {
-          await workbook.csv.readFile(input.filePath);
+          await workbook.csv.readFile(safe);
         } else {
-          await workbook.xlsx.readFile(input.filePath);
+          await workbook.xlsx.readFile(safe);
         }
         const sheets = workbook.worksheets.map((ws) => ws.name);
         return { success: true, data: { sheets, count: sheets.length } };
       }
 
-      const result = await parseExcel(input.filePath, input.sheetName, input.maxRows);
+      const result = await parseExcel(safe, input.sheetName, input.maxRows);
       return {
         success: true,
         data: {
@@ -356,7 +391,9 @@ export const listFilesTool = buildTool({
   }),
   async call(input) {
     try {
-      const files = await listDir(input.directory, input.recursive ?? false, input.extension);
+      const safeDir = safePath(input.directory);
+      if (!safeDir) return { success: false, error: WORKSPACE_ERROR(input.directory) };
+      const files = await listDir(safeDir, input.recursive ?? false, input.extension);
       return { success: true, data: { count: files.length, files } };
     } catch (err) {
       return { success: false, error: `Failed to list files: ${err}` };
@@ -379,9 +416,11 @@ export const writeFileTool = buildTool({
   }),
   async call(input) {
     try {
-      await mkdir(dirname(input.filePath), { recursive: true });
-      await writeFile(input.filePath, input.content, input.encoding as BufferEncoding);
-      return { success: true, data: { filePath: input.filePath, bytesWritten: input.content.length } };
+      const safe = safePath(input.filePath);
+      if (!safe) return { success: false, error: WORKSPACE_ERROR(input.filePath) };
+      await mkdir(dirname(safe), { recursive: true });
+      await writeFile(safe, input.content, input.encoding as BufferEncoding);
+      return { success: true, data: { filePath: safe, bytesWritten: input.content.length } };
     } catch (err) {
       return { success: false, error: `Failed to write file: ${err}` };
     }
@@ -409,7 +448,9 @@ export const organizeFilesTool = buildTool({
   }),
   async call(input) {
     try {
-      const files = await listDir(input.sourceDir, false);
+      const safeSource = safePath(input.sourceDir);
+      if (!safeSource) return { success: false, error: WORKSPACE_ERROR(input.sourceDir) };
+      const files = await listDir(safeSource, false);
       const actions: Array<{ file: string; from: string; to: string }> = [];
 
       for (const file of files) {
@@ -452,8 +493,10 @@ export const deleteFileTool = buildTool({
   }),
   async call(input) {
     try {
-      await unlink(input.filePath);
-      return { success: true, data: { deleted: input.filePath } };
+      const safe = safePath(input.filePath);
+      if (!safe) return { success: false, error: WORKSPACE_ERROR(input.filePath) };
+      await unlink(safe);
+      return { success: true, data: { deleted: safe } };
     } catch (err) {
       return { success: false, error: `Failed to delete file: ${err}` };
     }
@@ -475,16 +518,21 @@ export const copyFileTool = buildTool({
   }),
   async call(input) {
     try {
+      const safeSrc  = safePath(input.sourcePath);
+      if (!safeSrc)  return { success: false, error: WORKSPACE_ERROR(input.sourcePath) };
+      const safeDest = safePath(input.destPath);
+      if (!safeDest) return { success: false, error: WORKSPACE_ERROR(input.destPath) };
+
       // Check destination exists
       if (!input.overwrite) {
         try {
-          await stat(input.destPath);
-          return { success: false, error: `Destination already exists: ${input.destPath}. Set overwrite=true to replace it.` };
+          await stat(safeDest);
+          return { success: false, error: `Destination already exists: ${safeDest}. Set overwrite=true to replace it.` };
         } catch { /* doesn't exist — safe to proceed */ }
       }
-      await mkdir(dirname(input.destPath), { recursive: true });
-      await fsCopyFile(input.sourcePath, input.destPath);
-      return { success: true, data: { from: input.sourcePath, to: input.destPath } };
+      await mkdir(dirname(safeDest), { recursive: true });
+      await fsCopyFile(safeSrc, safeDest);
+      return { success: true, data: { from: safeSrc, to: safeDest } };
     } catch (err) {
       return { success: false, error: `Failed to copy file: ${err}` };
     }
@@ -505,9 +553,13 @@ export const renameFileTool = buildTool({
   }),
   async call(input) {
     try {
-      await mkdir(dirname(input.newPath), { recursive: true });
-      await rename(input.oldPath, input.newPath);
-      return { success: true, data: { from: input.oldPath, to: input.newPath } };
+      const safeOld = safePath(input.oldPath);
+      if (!safeOld) return { success: false, error: WORKSPACE_ERROR(input.oldPath) };
+      const safeNew = safePath(input.newPath);
+      if (!safeNew) return { success: false, error: WORKSPACE_ERROR(input.newPath) };
+      await mkdir(dirname(safeNew), { recursive: true });
+      await rename(safeOld, safeNew);
+      return { success: true, data: { from: safeOld, to: safeNew } };
     } catch (err) {
       return { success: false, error: `Failed to rename file: ${err}` };
     }

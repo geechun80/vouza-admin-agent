@@ -17,7 +17,7 @@
 //   - Bot command menu registered via setMyCommands on startup
 // =============================================================================
 
-import { randomUUID } from "crypto";
+import { randomUUID, createHash } from "crypto";
 import chalk from "chalk";
 import type { AgentContext } from "../types/index.js";
 import type { ToolRegistry } from "../tools/registry.js";
@@ -62,6 +62,10 @@ if (pruneInterval.unref) pruneInterval.unref();
 let _webhookToken:    string         | null = null;
 let _webhookCtx:      AgentContext   | null = null;
 let _webhookRegistry: ToolRegistry   | null = null;
+let _webhookSecret:   string               = "";
+
+/** Return the webhook secret so server.ts can verify incoming Telegram updates. */
+export function getWebhookSecret(): string { return _webhookSecret; }
 
 // Polling-mode running flag + offset
 let _polling      = false;
@@ -105,6 +109,8 @@ export async function startTelegramListener(
   if (webhookUrl) {
     // ── Webhook mode ───────────────────────────────────────────────────────
     const hookEndpoint = `${webhookUrl.replace(/\/$/, "")}/api/telegram/webhook`;
+    // Derive a stable secret from the bot token so restarts keep the same value
+    _webhookSecret = createHash("sha256").update(token).digest("hex").slice(0, 32);
     const reg = await fetch(`${TELEGRAM_API}${token}/setWebhook`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -112,6 +118,7 @@ export async function startTelegramListener(
         url: hookEndpoint,
         allowed_updates: ["message"],
         drop_pending_updates: true,
+        secret_token: _webhookSecret,
       }),
     });
     const regData = await reg.json() as any;
@@ -322,7 +329,7 @@ async function handleMessage(
     const chatCtx   = getOrCreateChatContext(chatId, baseCtx);
     const agentInput = isVoice
       ? `🎙️ [Voice message from ${fromName}]: "${text}"`
-      : text;
+      : `[Message from ${fromName} via Telegram]: ${text}`;
 
     // Send a placeholder message and grab its message_id for live edits
     const initRes  = await fetch(`${TELEGRAM_API}${token}/sendMessage`, {

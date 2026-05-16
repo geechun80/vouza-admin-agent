@@ -219,6 +219,7 @@ export async function startBaileysListener(
       if (msg.key.fromMe)                              continue; // ignore outgoing
       if (!msg.key.remoteJid)                          continue;
       if (isJidBroadcast(msg.key.remoteJid))           continue; // ignore broadcasts
+      if (msg.key.remoteJid.endsWith("@g.us"))         continue; // ignore group chats
 
       const chatId   = msg.key.remoteJid;
       const fromName = msg.pushName || chatId.split("@")[0] || "User";
@@ -302,7 +303,12 @@ async function handleMessage(job: MsgJob): Promise<void> {
     const session  = getOrCreateSession(chatId);
     let   response = "";
 
-    for await (const ev of agentLoop(userText, session.context, _registry)) {
+    // Frame as external input to reduce prompt injection risk
+    const framedInput = isVoice
+      ? userText  // voice already framed by handleVoiceMessage
+      : `[Message from ${fromName} via WhatsApp]: ${userText}`;
+
+    for await (const ev of agentLoop(framedInput, session.context, _registry)) {
       if (ev.type === "text_delta") response += ev.text;
       if (ev.type === "tool_start") {
         // Refresh typing indicator during long tool use
