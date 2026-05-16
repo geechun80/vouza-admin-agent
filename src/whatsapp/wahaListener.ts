@@ -58,8 +58,17 @@ export function handleWAHAEvent(
   baseCtx: AgentContext,
   registry: ToolRegistry
 ): void {
-  // WAHA sends many event types; we only care about incoming messages
-  if (event.event !== "message" && event.event !== "message.any") return;
+  // WAHA sends many event types; we only care about incoming messages.
+  // Event name varies by WAHA version:
+  //   older WAHA:  "message"
+  //   WAHA v2+:    "message.received"
+  //   group msgs:  "message.any"
+  const evName = (event.event as string) || "";
+  const isMsgEvent =
+    evName === "message" ||
+    evName === "message.received" ||
+    evName === "message.any";
+  if (!isMsgEvent) return;
 
   const payload = event.payload;
   if (!payload || !payload.from) return;
@@ -204,7 +213,11 @@ async function downloadWAHAAudio(
   baseCtx: AgentContext
 ): Promise<Buffer | null> {
   const waConfig = baseCtx.config.tools?.whatsapp?.config ?? {};
-  const apiKey   = waConfig.apiKey as string | undefined;
+  // Support both wizard DOM IDs (wahaKey) and canonical names (apiKey)
+  const apiKey = (
+    (waConfig.wahaKey as string | undefined) ||
+    (waConfig.apiKey  as string | undefined)
+  );
 
   // WAHA puts the absolute download URL directly in the payload
   const mediaUrl = payload.mediaUrl as string | undefined;
@@ -228,10 +241,24 @@ async function sendWAHAText(
   text:    string,
   baseCtx: AgentContext
 ): Promise<void> {
-  const waConfig  = baseCtx.config.tools?.whatsapp?.config ?? {};
-  const serverUrl = (waConfig.serverUrl as string | undefined) || "http://localhost:3000";
-  const apiKey    = waConfig.apiKey   as string | undefined;
-  const session   = (waConfig.sessionName as string | undefined) || "default";
+  const waConfig = baseCtx.config.tools?.whatsapp?.config ?? {};
+
+  // Support both wizard DOM field IDs (wahaUrl / wahaKey / wahaSession)
+  // and the canonical runtime names (serverUrl / apiKey / sessionName).
+  const serverUrl = (
+    (waConfig.wahaUrl      as string | undefined) ||
+    (waConfig.serverUrl    as string | undefined) ||
+    "http://localhost:3000"
+  ).replace(/\/$/, ""); // strip trailing slash
+  const apiKey = (
+    (waConfig.wahaKey  as string | undefined) ||
+    (waConfig.apiKey   as string | undefined)
+  );
+  const session = (
+    (waConfig.wahaSession  as string | undefined) ||
+    (waConfig.sessionName  as string | undefined) ||
+    "default"
+  );
 
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (apiKey) headers["X-Api-Key"] = apiKey;
@@ -240,11 +267,25 @@ async function sendWAHAText(
   for (let i = 0; i < text.length; i += MAX_MSG_LEN) {
     const chunk = text.slice(i, i + MAX_MSG_LEN);
     try {
-      await fetch(`${serverUrl}/api/sendText`, {
+      // WAHA v2+ format: POST /api/{session}/sendText  (preferred)
+      let res = await fetch(`${serverUrl}/api/${session}/sendText`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ session, chatId, text: chunk }),
+        body: JSON.stringify({ chatId, text: chunk }),
       });
+
+      // Fallback to old WAHA format: POST /api/sendText with session in body
+      if (!res.ok) {
+        res = await fetch(`${serverUrl}/api/sendText`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ session, chatId, text: chunk }),
+        });
+      }
+
+      if (!res.ok) {
+        console.error(chalk.red(`  [WhatsApp] WAHA send returned HTTP ${res.status} for ${chatId}`));
+      }
     } catch (err) {
       console.error(chalk.red(`  [WhatsApp] Failed to send message to ${chatId}:`, err));
     }

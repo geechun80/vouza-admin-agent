@@ -205,9 +205,21 @@ export async function loadConfigFromJson(): Promise<AgentConfig> {
     }
     if (saved.channels?.whatsapp?.enabled) {
       const waProvider = saved.channels.whatsapp.provider || "web";
+      const rawCfg = saved.channels.whatsapp.config || {};
+
+      // Normalize WAHA wizard field IDs (wahaUrl / wahaKey / wahaSession) to
+      // the canonical runtime names (serverUrl / apiKey / sessionName) that
+      // wahaListener.ts and the send helpers expect.
+      let normalizedCfg: Record<string, string> = { ...rawCfg };
+      if (waProvider === "waha") {
+        normalizedCfg.serverUrl  = rawCfg.serverUrl  || rawCfg.wahaUrl     || "http://localhost:3000";
+        normalizedCfg.apiKey     = rawCfg.apiKey     || rawCfg.wahaKey     || "";
+        normalizedCfg.sessionName = rawCfg.sessionName || rawCfg.wahaSession || "default";
+      }
+
       baseConfig.tools.whatsapp = {
         provider: waProvider,
-        config: saved.channels.whatsapp.config || {},
+        config: normalizedCfg,
       };
     }
 

@@ -898,12 +898,15 @@ async function testConnection(type: string, config: Record<string, string>): Pro
     case "waha":
       try {
         const headers: Record<string, string> = {};
-        if (config.wahaApiKey) headers["X-Api-Key"] = config.wahaApiKey;
-        const res = await fetch(`${config.wahaUrl}/api/sessions`, { headers });
+        // Wizard saves the key as "wahaKey" (the DOM field ID); support both names
+        const wahaKey = config.wahaKey || config.wahaApiKey;
+        if (wahaKey) headers["X-Api-Key"] = wahaKey;
+        const wahaBase = (config.wahaUrl || "http://localhost:3000").replace(/\/$/, "");
+        const res = await fetch(`${wahaBase}/api/sessions`, { headers });
         if (res.ok) return { success: true, message: "WAHA server connected!" };
-        return { success: false, message: "WAHA server not reachable" };
+        return { success: false, message: `WAHA server returned HTTP ${res.status}` };
       } catch (e) {
-        return { success: false, message: `Connection failed: ${e}` };
+        return { success: false, message: `WAHA not reachable: ${e}` };
       }
 
     case "groq-whisper":
