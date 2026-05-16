@@ -276,20 +276,56 @@ export function clearSession(sessionId: string): void {
   sessions.delete(sessionId);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Step-aware system prompt builder
+// ─────────────────────────────────────────────────────────────────────────────
+
+const STEP_CONTEXT: Record<number, string> = {
+  1: "The user is on **Step 1 — Your Profile**. They are filling in their name, email address, and choosing an AI model. Help them understand what each field does. The most important action here is completing the profile form and choosing a model.",
+  2: "The user is on **Step 2 — Connect Apps**. They are entering their AI API key and setting up integrations (Gmail, Telegram, Calendar, Slack, etc.). Focus on whichever integration they are working on. If they have not entered an AI key yet, encourage them to do that first — it unlocks the live assistant.",
+  3: "The user is on **Step 3 — Choose Skills**. They are selecting which automated tasks to enable (Email Triage, Daily Briefing, Meeting Scheduling, Voice Notes, etc.). Explain what each skill does and what prerequisites (integrations) it needs. Help them pick skills that match their actual connected apps.",
+  4: "The user is on **Step 4 — Review & Go Live**. They are reviewing their full configuration before clicking 'Go Live'. Help them spot any missing connections and confirm they are ready to launch.",
+};
+
+function buildSystemPrompt(wizardStep?: number, userName?: string): string {
+  let suffix = "";
+
+  if (userName) {
+    suffix +=
+      "\n\n## ── CURRENT USER ─────────────────────────────────────────────────────────\n" +
+      `The user's name is **${userName}**. Address them by name occasionally — on greeting, on key milestones, and when giving direct advice. Don't overdo it; once every few turns is natural.\n`;
+  }
+
+  const stepGuide = wizardStep ? STEP_CONTEXT[wizardStep] : undefined;
+  if (stepGuide) {
+    suffix +=
+      "\n\n## ── WIZARD CONTEXT ──────────────────────────────────────────────────────────\n" +
+      stepGuide + "\n";
+  }
+
+  return suffix ? CHAT_SYSTEM_PROMPT + suffix : CHAT_SYSTEM_PROMPT;
+}
+
 /**
  * Stream a chat message through the agent loop.
  * Yields the same StreamEvent objects as agentLoop.
+ *
+ * @param wizardStep  Current wizard step (1-4) passed from the browser
+ * @param userName    User's name from the Step 1 form (for personalisation)
  */
 export async function* streamChat(
   sessionId: string,
   message: string | any[],
   savedConfig: any,
-  apiKeyOverride?: string
+  apiKeyOverride?: string,
+  wizardStep?: number,
+  userName?: string,
 ): AsyncGenerator<Record<string, unknown>> {
   const session = getOrCreateSession(sessionId, savedConfig, apiKeyOverride);
   session.lastActive = Date.now();
 
-  yield* agentLoop(message, session.context, session.registry, CHAT_SYSTEM_PROMPT);
+  const systemPrompt = buildSystemPrompt(wizardStep, userName);
+  yield* agentLoop(message, session.context, session.registry, systemPrompt);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

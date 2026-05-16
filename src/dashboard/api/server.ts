@@ -321,12 +321,14 @@ export async function startDashboard(port = 3456): Promise<void> {
 
   // --- Live Agent Chat (SSE streaming) ---
   app.post("/api/chat", requireLocalOrigin, async (req, res) => {
-    const { message, sessionId, apiKey, imageBase64, imageMimeType } = req.body as {
+    const { message, sessionId, apiKey, imageBase64, imageMimeType, wizardStep, userName } = req.body as {
       message: string;
       sessionId: string;
       apiKey?: string;
       imageBase64?: string;
       imageMimeType?: string;
+      wizardStep?: number;
+      userName?: string;
     };
 
     if (!message || !sessionId) {
@@ -365,7 +367,7 @@ export async function startDashboard(port = 3456): Promise<void> {
         messagePayload = message;
       }
 
-      for await (const event of streamChat(sessionId, messagePayload, config, apiKey)) {
+      for await (const event of streamChat(sessionId, messagePayload, config, apiKey, wizardStep, userName)) {
         send(event);
       }
     } catch (err) {

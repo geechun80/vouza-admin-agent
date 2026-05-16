@@ -2805,6 +2805,7 @@ async function testConn(type, config, badgeId) {
       state.connStatus[statusId] = true;
       state.connStatus[type]     = true;
       toast(d.message, 'success');
+      updateTips(); // refresh chips to reflect newly connected app
       // Auto-save credentials immediately on success so they survive page reloads
       // and aren't lost if the user never reaches the Go Live step.
       const nonEmpty = Object.fromEntries(
@@ -3049,40 +3050,75 @@ const chat = {
 };
 
 // Step-specific opening messages (displayed before the user types anything)
-const GUIDE_SCRIPTS = {
-  1: [
-    "👋 Hi! I'm your Vouza AI assistant. I'm here to help with both setup **and** any office tasks.",
-    "Start by filling in your name and email above. Then pick your AI model below — Claude Sonnet is the best choice for most people.",
-    "Once you add your API key in Step 2, I'll be fully live and can help you send emails, read documents, analyse images, and more!",
-  ],
-  2: [
-    "Now let's connect your apps. 🔌 Enter your **AI API key** first — that's what powers me.",
-    "Once your key is in, type anything in the chat below and I'll respond as a real AI assistant, not a script.",
-    "You can also attach an **image or document** using the 📎 button — I can analyse invoices, charts, screenshots, and any office documents.",
-  ],
-  3: [
-    "Great progress! Now choose which tasks you want me to handle automatically. ⚡",
-    "**Email Triage** and **Morning Briefing** are the most popular — they save most people 30–60 minutes a day.",
-    "Everything here can be changed later, so just toggle what feels right for now.",
-  ],
-  4: [
-    "You're all set! 🎉 Review your configuration below.",
-    "Click **Go Live** to start your AI. After that, I'll be available 24/7 to handle your emails, meetings, messages, and more.",
-  ],
-};
+/** Return name-personalised scripted messages for a given step */
+function getGuideScripts(step) {
+  const name = document.getElementById('userName')?.value?.trim();
+  const hi   = name ? `Hi **${name}**! ` : '';
+  return {
+    1: [
+      "👋 Hi! I'm **Vee**, your Vouza AI assistant. I'm here to help you set up your AI — and handle any office task once you're live.",
+      "Fill in your name and email above, then pick your AI model. **Claude Sonnet** is the best choice for most people.",
+      "Once you complete setup I can send emails, read documents, book meetings, transcribe voice notes, and more!",
+    ],
+    2: [
+      `${hi}Now let's connect your apps. 🔌 Paste your **AI API key** first — that's what powers my brain.`,
+      "Once your key is saved, type anything below and I'll respond as a real AI assistant — not just a script.",
+      "Also connect **Email** and **Telegram** — those two unlock the most powerful features, including mobile access from your phone.",
+    ],
+    3: [
+      `${hi}Great progress! ⚡ Now choose which tasks you want me to handle automatically.`,
+      "**Email Triage** and **Daily Briefing** are the most popular — they save people 30–60 minutes a day.",
+      "Everything can be changed later, so just toggle what feels right for now.",
+    ],
+    4: [
+      `${hi}You're almost there! 🚀 Review your full configuration below.`,
+      "Click **Go Live** and I'll be available 24/7 — emails, meetings, messages, voice notes, and more.",
+    ],
+  }[step] || [];
+}
 
-const TIPS_BY_STEP = {
-  1: ['What AI model is best?', 'Do I need an API key?', 'What can you do for me?'],
-  2: ['Read my latest emails', 'List files in my Documents folder', 'What can you do?'],
-  3: ['What does Email Triage do?', 'Analyse this image 📎', 'What is self-learning?'],
-  4: ['How much does this cost?', 'Draft an email for me', 'Show me what you can do'],
-};
+/** Return connection-aware tip chips for the current wizard step */
+function getDynamicTips(step) {
+  const cs = state.connStatus || {};
+  const hasEmail    = cs.email || cs.gmail || cs['email-gmail'] || cs['email-smtp'] || cs['email-outlook'];
+  const hasTelegram = cs.telegram;
+  const hasCalendar = cs.calendar || cs['calendar-google'] || cs['calendar-outlook'];
+  const hasSlack    = cs.slack;
+  const hasKey      = !!(document.getElementById('aiProviderKey')?.value?.trim() ||
+                         (document.getElementById('aiProviderKey')?.placeholder || '').includes('saved') ||
+                         state.operatorDefaults?.hasDefaultKey);
+
+  switch (step) {
+    case 1:
+      return ['What AI model is best for me?', 'What can you do once set up?', 'Is my data kept private?'];
+    case 2: {
+      const tips = [];
+      if (!hasKey)      tips.push('How do I get an API key?');
+      if (!hasEmail)    tips.push('Help me connect Gmail →');
+      if (!hasTelegram) tips.push('Set up my Telegram bot →');
+      if (!hasCalendar) tips.push('Connect Google Calendar →');
+      if (!hasSlack)    tips.push('Connect Slack →');
+      // Pad with general tips if everything is connected
+      const fallbacks = ['Check my setup status', 'Read my latest emails', 'What skills should I enable?'];
+      for (const f of fallbacks) { if (tips.length < 3) tips.push(f); }
+      return tips.slice(0, 3);
+    }
+    case 3:
+      return ['What does Email Triage do?', 'How does the Daily Briefing work?', 'Can I change skills later?'];
+    case 4:
+      return ['Check my setup status', 'What happens when I go live?', 'Can I add more apps later?'];
+    default:
+      return ['What can you do?', 'Show my setup status', 'How do I add more apps?'];
+  }
+}
 
 // ── Scripted step messages (no API key needed) ──────────────────────────────
 
+let _hasAutoProbed = false; // prevent repeat probes on step-revisits
+
 function guideForStep(n) {
-  const msgs = GUIDE_SCRIPTS[n];
-  if (!msgs) return;
+  const msgs = getGuideScripts(n);
+  if (!msgs.length) return;
   const delay = n === 1 ? 900 : 400;
   let t = delay;
   for (const m of msgs) {
@@ -3090,6 +3126,26 @@ function guideForStep(n) {
     t += m.length * 14 + 700;
   }
   setTimeout(updateTips, t);
+
+  // ── Proactive setup probe: only on first visit to step 1 ─────────────────
+  // After scripted intro settles, the live AI quietly calls get_setup_status
+  // and delivers a personalised welcome — no user action required.
+  if (n === 1 && !_hasAutoProbed && !_isResume) {
+    _hasAutoProbed = true;
+    setTimeout(() => {
+      const box      = document.getElementById('guideMessages');
+      const userMsgs = box?.querySelectorAll('.guide-msg.user');
+      if (!userMsgs?.length && !chat.busy) {
+        // Hidden probe — no user bubble shown; agent responds naturally
+        callLiveAgent(
+          'Please call get_setup_status now and give me a brief, friendly 2-sentence personalised welcome. ' +
+          'Tell me what is already connected (if anything) and what the single most important next step is. ' +
+          'Do NOT repeat the scripted intro — this is your first LIVE response.',
+          null
+        );
+      }
+    }, t + 1500);
+  }
 }
 
 // guideMsg(role, text) — called from revealGoLive() and launchAgent()
@@ -3437,11 +3493,13 @@ async function callLiveAgent(text, image) {
 
   try {
     const body = {
-      message:     text || '(image attached)',
-      sessionId:   CHAT_SESSION_ID,
-      apiKey:      apiKey || undefined,
-      imageBase64: image?.base64  || undefined,
-      imageMimeType: image?.mimeType || undefined,
+      message:       text || '(image attached)',
+      sessionId:     CHAT_SESSION_ID,
+      apiKey:        apiKey || undefined,
+      imageBase64:   image?.base64    || undefined,
+      imageMimeType: image?.mimeType  || undefined,
+      wizardStep:    state.step       || undefined,
+      userName:      document.getElementById('userName')?.value?.trim() || undefined,
     };
 
     const resp = await fetch('/api/chat', {
@@ -3898,7 +3956,7 @@ function setInputEnabled(on) {
 
 function updateTips() {
   const tips = document.getElementById('guideTips');
-  const arr  = TIPS_BY_STEP[state.step] || [];
+  const arr  = getDynamicTips(state.step);
   tips.innerHTML = arr.map(t => {
     const safe = t.replace(/'/g, "\\'");
     return `<div class="tip-chip" onclick="document.getElementById('guideInput').value='${safe}';sendGuideMsg()">${t}</div>`;
