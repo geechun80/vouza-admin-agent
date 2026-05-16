@@ -3492,10 +3492,20 @@ async function callLiveAgent(text, image) {
   const apiKey = document.getElementById('aiProviderKey')?.value?.trim() || '';
 
   try {
+    // Security: only transmit the API key from the browser if the user is actively
+    // testing a NEW key that hasn't been saved to config.json yet.
+    // For established users the key lives in config.json server-side — the browser
+    // should never re-send it on every chat request to avoid unnecessary exposure.
+    // Detection: if the key field placeholder says "saved", a key is already stored.
+    const keyEl         = document.getElementById('aiProviderKey');
+    const typedKey      = keyEl?.value?.trim() || '';
+    const isKeySaved    = (keyEl?.placeholder || '').toLowerCase().includes('saved');
+    const apiKeyToSend  = (typedKey && !isKeySaved) ? typedKey : undefined;
+
     const body = {
       message:       text || '(image attached)',
       sessionId:     CHAT_SESSION_ID,
-      apiKey:        apiKey || undefined,
+      apiKey:        apiKeyToSend,         // undefined for established users
       imageBase64:   image?.base64    || undefined,
       imageMimeType: image?.mimeType  || undefined,
       wizardStep:    state.step       || undefined,

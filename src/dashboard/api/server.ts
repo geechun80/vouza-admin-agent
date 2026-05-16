@@ -5,7 +5,7 @@
 
 import express from "express";
 import { readFile, writeFile, mkdir, readdir, unlink, access } from "fs/promises";
-import { join, dirname } from "path";
+import { join, dirname, resolve, sep } from "path";
 import { fileURLToPath } from "url";
 import { exec } from "child_process";
 import { promisify } from "util";
@@ -96,6 +96,26 @@ function requireLocalOrigin(
     return next();
   }
   res.status(403).json({ error: "Forbidden: cross-origin request rejected" });
+}
+
+/**
+ * Safely resolve a conversation ID to an absolute file path.
+ *
+ * Prevents path-traversal attacks (e.g. id = "../../config") by:
+ *   1. Allowlisting the ID to alphanumerics, dashes, and underscores only.
+ *   2. Verifying the resolved path is strictly inside convDir.
+ *
+ * Returns the safe path, or null if the ID is invalid.
+ * Callers must return 400 when null is returned.
+ */
+function safeConvPath(id: string, convDir: string): string | null {
+  // Step 1 — allowlist: only safe filename characters, max 64 chars
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(id)) return null;
+  // Step 2 — confirm resolved path stays inside convDir
+  const resolved = resolve(convDir, `${id}.json`);
+  const base     = resolve(convDir) + sep;
+  if (!resolved.startsWith(base)) return null;
+  return resolved;
 }
 
 export async function startDashboard(port = 3456): Promise<void> {
@@ -292,7 +312,9 @@ export async function startDashboard(port = 3456): Promise<void> {
   });
 
   // --- Test Connection API ---
-  app.post("/api/test-connection", async (req, res) => {
+  // requireLocalOrigin prevents any cross-origin page from using this endpoint
+  // as an outbound relay to probe third-party credentials.
+  app.post("/api/test-connection", requireLocalOrigin, async (req, res) => {
     const { type, config: connConfig } = req.body;
     try {
       const result = await testConnection(type, connConfig);
@@ -472,6 +494,19 @@ export async function startDashboard(port = 3456): Promise<void> {
   //   URL: http://localhost:3456/api/whatsapp/webhook   (or your server's URL)
   //   Events: message  (or "message.any" to also catch group messages)
   app.post("/api/whatsapp/webhook", (req, res) => {
+    // Schema validation — reject payloads that don't match the WAHA event structure.
+    // This limits prompt-injection attempts via crafted POST requests.
+    // A valid WAHA event always has: { event: string, payload: object, session: string }
+    const body = req.body;
+    if (
+      !body ||
+      typeof body.event    !== "string" ||
+      typeof body.payload  !== "object" || body.payload === null ||
+      typeof body.session  !== "string"
+    ) {
+      return res.status(400).json({ error: "Invalid webhook payload" });
+    }
+
     // ACK immediately — WAHA expects a fast response
     res.json({ success: true });
 
@@ -500,18 +535,18 @@ export async function startDashboard(port = 3456): Promise<void> {
     }
   });
 
-  app.delete("/api/memories/:id", async (req, res) => {
+  app.delete("/api/memories/:id", requireLocalOrigin, async (req, res) => {
     try {
       const store = createMemoryStore(MEMORY_DIR);
       await store.load();
-      await store.remove(req.params.id);
+      await store.remove(String(req.params.id));
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ success: false, error: String(err) });
     }
   });
 
-  app.post("/api/memories", async (req, res) => {
+  app.post("/api/memories", requireLocalOrigin, async (req, res) => {
     try {
       const { type, title, content, tags } = req.body;
       if (!type || !title || !content) {
@@ -559,28 +594,32 @@ export async function startDashboard(port = 3456): Promise<void> {
   });
 
   // Get full conversation (with messages)
-  app.get("/api/conversations/:id", async (req, res) => {
+  app.get("/api/conversations/:id", requireLocalOrigin, async (req, res) => {
+    const file = safeConvPath(String(req.params.id), CONV_DIR);
+    if (!file) return res.status(400).json({ error: "Invalid conversation ID" });
     try {
-      const file = join(CONV_DIR, `${req.params.id}.json`);
       const raw = await readFile(file, "utf8");
       res.json(JSON.parse(raw));
     } catch { res.status(404).json({ error: "Not found" }); }
   });
 
   // Create or update conversation
-  app.post("/api/conversations/:id", async (req, res) => {
+  app.post("/api/conversations/:id", requireLocalOrigin, async (req, res) => {
+    const file = safeConvPath(String(req.params.id), CONV_DIR);
+    if (!file) return res.status(400).json({ error: "Invalid conversation ID" });
     try {
       await ensureConvDir();
-      const file = join(CONV_DIR, `${req.params.id}.json`);
       await writeFile(file, JSON.stringify(req.body, null, 2), "utf8");
       res.json({ success: true });
     } catch (err) { res.status(500).json({ error: String(err) }); }
   });
 
   // Delete conversation
-  app.delete("/api/conversations/:id", async (req, res) => {
+  app.delete("/api/conversations/:id", requireLocalOrigin, async (req, res) => {
+    const file = safeConvPath(String(req.params.id), CONV_DIR);
+    if (!file) return res.status(400).json({ error: "Invalid conversation ID" });
     try {
-      await unlink(join(CONV_DIR, `${req.params.id}.json`));
+      await unlink(file);
       res.json({ success: true });
     } catch { res.json({ success: true }); } // already gone is fine
   });
