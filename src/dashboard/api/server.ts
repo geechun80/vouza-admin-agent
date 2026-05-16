@@ -17,6 +17,16 @@ import { launchAgent, getAgentStatus, type AgentInstance } from "../../bridge/la
 import { streamChat, clearSession } from "./chat.js";
 import { createMemoryStore } from "../../memory/store.js";
 import { handleWAHAEvent } from "../../whatsapp/wahaListener.js";
+import {
+  startBaileysListener,
+  stopBaileysListener,
+  isBaileysConnected,
+  onBaileysQR,
+  onBaileysStatus,
+  sendBaileysMessage,
+  type BaileysStatus,
+} from "../../whatsapp/baileysListener.js";
+import { toDataURL as qrToDataURL } from "qrcode";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = join(process.cwd(), "data", "config.json");
@@ -517,6 +527,83 @@ export async function startDashboard(port = 3456): Promise<void> {
     if (!wa || wa.provider !== "waha") return; // only WAHA supports webhooks
 
     handleWAHAEvent(req.body, agentInstance.context, agentInstance.registry);
+  });
+
+  // --- WhatsApp Baileys — QR code SSE stream ---
+  // The dashboard subscribes to this endpoint to get real-time QR code updates.
+  // When the user's phone scans, the stream sends a "connected" event and closes.
+  app.get("/api/whatsapp/qr-stream", async (req, res) => {
+    res.setHeader("Content-Type",  "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection",    "keep-alive");
+    res.flushHeaders();
+
+    const sendEvent = (name: string, data: Record<string, unknown>) => {
+      res.write(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+
+    // Already connected — tell the client immediately
+    if (isBaileysConnected()) {
+      sendEvent("connected", { message: "WhatsApp already connected!" });
+      return res.end();
+    }
+
+    // Subscribe to QR and status events
+    const offQR = onBaileysQR(async (qr) => {
+      try {
+        const dataUrl = await qrToDataURL(qr, { width: 300, margin: 2 });
+        sendEvent("qr", { dataUrl });
+      } catch {
+        sendEvent("qr", { dataUrl: "" });
+      }
+    });
+
+    const offStatus = onBaileysStatus((status: BaileysStatus) => {
+      sendEvent("status", { status });
+      if (status === "connected" || status === "logged_out") {
+        cleanup();
+      }
+    });
+
+    const cleanup = () => {
+      offQR();
+      offStatus();
+      res.end();
+    };
+
+    req.on("close", cleanup);
+
+    // Start Baileys if the agent is running and provider is "web"
+    if (agentInstance) {
+      const wa = agentInstance.context.config.tools?.whatsapp;
+      if (!wa || wa.provider === "web" || !wa.provider) {
+        startBaileysListener(agentInstance.context, agentInstance.registry).catch((err) => {
+          sendEvent("error", { message: String(err) });
+          cleanup();
+        });
+      } else {
+        sendEvent("error", { message: "WhatsApp provider is not set to 'web'. Switch provider in the wizard." });
+        cleanup();
+      }
+    } else {
+      sendEvent("error", { message: "Agent not running — launch it first, then connect WhatsApp." });
+      cleanup();
+    }
+  });
+
+  // --- WhatsApp Baileys — logout (force new QR) ---
+  app.post("/api/whatsapp/logout", requireLocalOrigin, async (_req, res) => {
+    try {
+      await stopBaileysListener();
+      res.json({ success: true });
+    } catch (err) {
+      res.json({ success: false, error: String(err) });
+    }
+  });
+
+  // --- WhatsApp Baileys — connection status ---
+  app.get("/api/whatsapp/status", (_req, res) => {
+    res.json({ connected: isBaileysConnected() });
   });
 
   // --- Memory API ---

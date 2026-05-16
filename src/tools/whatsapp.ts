@@ -1,10 +1,11 @@
 // =============================================================================
 // WhatsApp Tool — Multi-provider: Twilio, Meta Cloud API, WAHA, WhatsApp Web
-// WhatsApp Web uses whatsapp-web.js for QR code pairing (local session)
+// WhatsApp Web uses Baileys (native WS protocol — no Docker/WAHA needed)
 // =============================================================================
 
 import { z } from "zod";
 import { buildTool } from "./registry.js";
+import { sendBaileysMessage, isBaileysConnected } from "../whatsapp/baileysListener.js";
 
 // --- Send WhatsApp Message ---
 
@@ -156,21 +157,14 @@ async function sendViaWaha(to: string, message: string, config: Record<string, s
   return { success: false, error: data.message || "WAHA send failed" };
 }
 
-// --- WhatsApp Web (whatsapp-web.js) ---
-// Communicates with a local WhatsApp Web session server
-async function sendViaWhatsAppWeb(to: string, message: string, config: Record<string, string>) {
-  const serverUrl = config.serverUrl || "http://localhost:3001";
+// --- WhatsApp Web (Baileys — native WS protocol) ---
+async function sendViaWhatsAppWeb(to: string, message: string, _config: Record<string, string>) {
+  if (!isBaileysConnected()) {
+    return { success: false, error: "WhatsApp not connected. Open the dashboard and scan the QR code first." };
+  }
   const chatId = to.replace(/[^0-9]/g, "") + "@c.us";
-
-  const res = await fetch(`${serverUrl}/api/send`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chatId, message }),
-  });
-
-  const data = await res.json();
-  if (data.success) return { success: true, data: { messageId: data.messageId } };
-  return { success: false, error: data.error || "WhatsApp Web send failed" };
+  await sendBaileysMessage(chatId, message);
+  return { success: true, data: { chatId } };
 }
 
 async function readViaWaha(chatId: string | undefined, limit: number, config: Record<string, string>) {
@@ -193,14 +187,11 @@ async function readViaWaha(chatId: string | undefined, limit: number, config: Re
   return { success: true, data: { messages: data } };
 }
 
-async function readViaWhatsAppWeb(chatId: string | undefined, limit: number, config: Record<string, string>) {
-  const serverUrl = config.serverUrl || "http://localhost:3001";
-  const params = new URLSearchParams({ limit: String(limit) });
-  if (chatId) params.set("chatId", chatId);
-
-  const res = await fetch(`${serverUrl}/api/messages?${params}`);
-  const data = await res.json();
-
-  if (data.success) return { success: true, data: { messages: data.messages } };
-  return { success: false, error: data.error || "Failed to read messages" };
+async function readViaWhatsAppWeb(_chatId: string | undefined, _limit: number, _config: Record<string, string>) {
+  // Baileys doesn't maintain an offline message store — messages are processed
+  // in real-time as they arrive and forwarded to the agent loop.
+  return {
+    success: false,
+    error: "Message history reading is not supported with WhatsApp Web (Baileys). Messages are delivered in real-time as you send them.",
+  };
 }

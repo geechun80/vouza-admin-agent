@@ -1948,12 +1948,12 @@ const CHANNELS = [
   { id:'whatsapp', name:'WhatsApp', desc:'Send tasks, get results — straight from your WhatsApp. Your PC runs the AI, you chat from anywhere.',
     icon:'whatsapp', badge:'popular', mobile:true,
     howTo:[
-      { text:'Select <strong>WhatsApp Web (Free)</strong> as provider below' },
-      { text:'Click <strong>Connect</strong> — a QR code will appear on screen' },
-      { text:'Open WhatsApp on your phone → <strong>Linked Devices → Scan QR</strong>' },
-      { text:'Message this number anytime to give tasks to your AI' },
+      { text:'Select <strong>WhatsApp Web (Free)</strong> — uses the Baileys protocol (no extra software needed)' },
+      { text:'Launch your agent, then click <strong>Connect WhatsApp</strong> — a QR code appears in the dashboard' },
+      { text:'Open WhatsApp on your phone → <strong>Settings → Linked Devices → Link a Device</strong> → scan QR' },
+      { text:'Once linked, message your own number — your AI will reply instantly!' },
     ],
-    providers:[{v:'web',l:'WhatsApp Web (Free - scan QR)'},{v:'twilio',l:'Twilio'},{v:'meta',l:'Meta Cloud API'},{v:'waha',l:'WAHA (Self-hosted)'}] },
+    providers:[{v:'web',l:'WhatsApp Web (Free — scan QR)'},{v:'twilio',l:'Twilio'},{v:'meta',l:'Meta Cloud API'},{v:'waha',l:'WAHA (Self-hosted)'}] },
   { id:'telegram', name:'Telegram', desc:'Create a private Telegram bot — message it from your phone to control your AI from anywhere.',
     icon:'telegram', badge:'free', mobile:true,
     howTo:[
@@ -2691,6 +2691,12 @@ function renderChannelCredentials() {
 
 function buildCredCard(id, conf) {
   const sc = state.connStatus[id];
+
+  // Special card for WhatsApp Web (Baileys) — shows QR panel instead of fields
+  if (id === 'whatsapp' && conf.testType === 'whatsapp-web') {
+    return buildWhatsAppWebQRCard(sc);
+  }
+
   return `
     <div class="glass-card">
       <div class="glass-card-header">
@@ -2709,6 +2715,109 @@ function buildCredCard(id, conf) {
         </div>`).join('')}
       <button class="btn btn-test" onclick="testConnFor('${id}','${conf.testType}')">🔌 Test Connection</button>
     </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// WhatsApp Web — Baileys QR scan card
+// ---------------------------------------------------------------------------
+let _waQREventSource = null;
+
+function buildWhatsAppWebQRCard(isConnected) {
+  return `
+    <div class="glass-card" id="wa-qr-card">
+      <div class="glass-card-header">
+        <div class="glass-card-icon">${ICONS.whatsapp||''}</div>
+        <div class="glass-card-title">WhatsApp Web (QR Scan)</div>
+        <span class="glass-card-badge ${isConnected?'badge-connected':'badge-pending'}" id="status-whatsapp">
+          ${isConnected?'✅ Connected':'Not Connected'}
+        </span>
+      </div>
+      <div id="wa-qr-area" style="text-align:center;padding:16px 0">
+        ${isConnected
+          ? `<div style="font-size:32px;margin-bottom:8px">✅</div>
+             <div style="color:var(--success);font-weight:600">WhatsApp Connected</div>
+             <div class="hint" style="margin-top:6px">Your phone is linked. Messages will be handled by the AI.</div>
+             <button class="btn btn-ghost" style="margin-top:12px;font-size:12px" onclick="waQRLogout()">🔓 Unlink (scan new QR)</button>`
+          : `<div class="hint" style="margin-bottom:14px">Click <strong>Connect</strong> to generate a QR code, then scan it with your phone.</div>
+             <div id="wa-qr-img" style="display:none;margin:0 auto 12px">
+               <img id="wa-qr-png" style="width:220px;height:220px;border-radius:12px;background:#fff;padding:8px" src="" alt="QR Code">
+             </div>
+             <div id="wa-qr-status" style="color:var(--text-dim);font-size:13px;margin-bottom:12px"></div>
+             <button id="wa-connect-btn" class="btn btn-primary" onclick="waQRConnect()">📱 Connect WhatsApp</button>`
+        }
+      </div>
+      <div class="hint">💡 Open WhatsApp on your phone → <strong>Settings → Linked Devices → Link a Device</strong> → scan the QR code above.</div>
+    </div>`;
+}
+
+async function waQRConnect() {
+  const btn = document.getElementById('wa-connect-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Connecting…'; }
+  document.getElementById('wa-qr-status').textContent = 'Launching agent connection…';
+
+  // Close previous SSE if open
+  if (_waQREventSource) { _waQREventSource.close(); _waQREventSource = null; }
+
+  _waQREventSource = new EventSource('/api/whatsapp/qr-stream');
+
+  _waQREventSource.addEventListener('qr', (e) => {
+    const { dataUrl } = JSON.parse(e.data);
+    const img = document.getElementById('wa-qr-png');
+    const div = document.getElementById('wa-qr-img');
+    if (img && div) { img.src = dataUrl; div.style.display = 'block'; }
+    document.getElementById('wa-qr-status').textContent = '📷 Scan this QR code with your phone now';
+    if (btn) { btn.textContent = '🔄 Waiting for scan…'; }
+  });
+
+  _waQREventSource.addEventListener('status', (e) => {
+    const { status } = JSON.parse(e.data);
+    const statusEl = document.getElementById('wa-qr-status');
+    if (status === 'connecting')   { if (statusEl) statusEl.textContent = '🔌 Connecting to WhatsApp…'; }
+    if (status === 'qr_ready')     { if (statusEl) statusEl.textContent = '📷 QR ready — scan with your phone'; }
+    if (status === 'connected')    { waQROnConnected(); }
+    if (status === 'logged_out')   { if (statusEl) statusEl.textContent = '❌ Logged out — click Connect again'; if (btn) { btn.disabled = false; btn.textContent = '📱 Connect WhatsApp'; } }
+    if (status === 'disconnected') { if (statusEl) statusEl.textContent = '⚠️ Disconnected — reconnecting…'; }
+  });
+
+  _waQREventSource.addEventListener('connected', () => waQROnConnected());
+
+  _waQREventSource.addEventListener('error', (e) => {
+    try {
+      const { message } = JSON.parse(e.data);
+      document.getElementById('wa-qr-status').textContent = '⚠️ ' + message;
+    } catch {}
+    if (btn) { btn.disabled = false; btn.textContent = '📱 Connect WhatsApp'; }
+  });
+
+  _waQREventSource.onerror = () => {
+    document.getElementById('wa-qr-status').textContent = '⚠️ Connection lost — try again';
+    if (btn) { btn.disabled = false; btn.textContent = '📱 Connect WhatsApp'; }
+  };
+}
+
+function waQROnConnected() {
+  if (_waQREventSource) { _waQREventSource.close(); _waQREventSource = null; }
+  state.connStatus['whatsapp'] = true;
+  const badge = document.getElementById('status-whatsapp');
+  if (badge) { badge.className = 'glass-card-badge badge-connected'; badge.textContent = '✅ Connected'; }
+  const area = document.getElementById('wa-qr-area');
+  if (area) area.innerHTML = `
+    <div style="font-size:32px;margin-bottom:8px">✅</div>
+    <div style="color:var(--success);font-weight:600">WhatsApp Connected!</div>
+    <div class="hint" style="margin-top:6px">Your phone is now linked. Send a message from WhatsApp to test.</div>
+    <button class="btn btn-ghost" style="margin-top:12px;font-size:12px" onclick="waQRLogout()">🔓 Unlink (scan new QR)</button>
+  `;
+  updateTips();
+  toast('✅ WhatsApp connected! Send a message from your phone to test.', 'success');
+}
+
+async function waQRLogout() {
+  await fetch('/api/whatsapp/logout', { method: 'POST' });
+  state.connStatus['whatsapp'] = false;
+  // Re-render the card in disconnected state
+  const channelCreds = document.getElementById('channelCredentials');
+  if (channelCreds) renderChannelCredentials?.();
+  toast('WhatsApp unlinked. Scan QR again to reconnect.', 'info');
 }
 
 function checkGoogleUnified() {

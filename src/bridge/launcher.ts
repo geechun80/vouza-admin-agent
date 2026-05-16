@@ -16,6 +16,7 @@ import { TaskScheduler } from "../tasks/scheduler.js";
 
 // Import all tools
 import { startTelegramListener, stopTelegramListener } from "../telegram/listener.js";
+import { startBaileysListener, stopBaileysListener, isBaileysConnected } from "../whatsapp/baileysListener.js";
 import { readEmailsTool, sendEmailTool, draftEmailTool, triageEmailsTool, getEmailThreadTool, replyEmailTool, deleteEmailTool } from "../tools/email.js";
 import { listEventsTool, createEventTool, updateEventTool, findFreeSlotsTool, deleteEventTool } from "../tools/calendar.js";
 import { readSpreadsheetTool, writeSpreadsheetTool, searchSpreadsheetTool } from "../tools/spreadsheet.js";
@@ -151,12 +152,20 @@ export async function launchAgent(): Promise<AgentInstance> {
   // bot and receive real AI responses back. Silently skips if not configured.
   await startTelegramListener(context, registry);
 
-  // --- Send launch notification to Telegram (if configured) ---
-  // Lets the user know the agent is live and kicks off guided onboarding.
   const tgToken = config.tools?.telegram?.botToken;
   if (tgToken) {
-    // We don't have a chat_id yet (user hasn't messaged), so just log guidance
     console.log(chalk.cyan(`  [Telegram] Bot is live — message it to start guided setup`));
+  }
+
+  // --- Start Baileys WhatsApp listener (if provider is "web") ---
+  // Uses the WhatsApp Web protocol to act as a Linked Device.
+  // QR code is surfaced via the /api/whatsapp/qr-stream SSE endpoint in the dashboard.
+  const waProvider = config.tools?.whatsapp?.provider;
+  if (waProvider === "web") {
+    console.log(chalk.cyan("  [WhatsApp] Starting Baileys listener (open dashboard → WhatsApp → Scan QR)"));
+    startBaileysListener(context, registry).catch((err) => {
+      console.error(chalk.red("  [WhatsApp] Baileys failed to start:", err));
+    });
   }
 
   return {
@@ -168,6 +177,7 @@ export async function launchAgent(): Promise<AgentInstance> {
     runTask: (message: string) => agentLoop(message, context, registry),
     stop: async () => {
       stopTelegramListener();
+      stopBaileysListener();
       scheduler.stopAll();
       await memory.save();
       console.log(chalk.cyan(`\n  ${config.name} stopped. Memory saved.\n`));
