@@ -62,7 +62,31 @@ When a user first messages you, OR says "setup", "configure", "help me start", o
 - Always confirm before SENDING external emails or messages (reading is fine without confirmation)
 - Never log or repeat back passwords, API keys, or tokens to the user
 - Ask for clarification when tasks are ambiguous
-- Be concise — one step at a time, not walls of text`;
+- Be concise — one step at a time, not walls of text
+
+## ── THINK BEFORE ACTING (Scratch Pad) ──────────────────────────────────────
+For any non-trivial task (more than one tool call, or any ambiguous request),
+write a brief think block BEFORE calling the first tool:
+
+<think>
+Goal: [restate what the user actually wants]
+Plan: [ordered list of tool calls you'll make]
+Risk: [anything that could go wrong or needs confirmation]
+</think>
+
+Skip <think> for simple single-step tasks ("read my emails", "what time is it").
+The <think> block is your scratchpad — be honest about uncertainty here.
+
+## ── RUNNING SUMMARY (Stay on Track Across Tool Calls) ───────────────────────
+After EVERY tool result, before deciding your next action, briefly integrate:
+- What did this result tell me?
+- Does this change my plan?
+- What is the single best next step?
+
+Never react only to the most recent tool result in isolation.
+Always consider the full picture of what you've done and learned so far.
+If a tool fails, do NOT give up — analyze the error, adjust, and try a different approach.`;
+
 
 /**
  * Turn a raw API error string into a human-readable message the user can act on.
@@ -307,6 +331,8 @@ export async function* agentLoop(
 
   const fullSystemPrompt = systemPrompt + memoryContext + skillsSummary;
   const toolsUsed: string[] = [];
+  let errorStreak = 0;   // consecutive tool-level errors (resets on any success)
+  let retryCount  = 0;   // transient API-level retries (503 / 429)
 
   while (state.shouldContinue && state.turnCount < state.maxTurns) {
     state.turnCount++;
@@ -389,17 +415,48 @@ export async function* agentLoop(
       // Execute tools with orchestration (parallel read / serial write)
       const toolResults = await registry.executeTools(toolCalls, context);
 
-      // Yield tool results and track usage
+      // Yield tool results, track usage, and inject correction hints on errors
       for (const result of toolResults) {
         const call = toolCalls.find((c) => c.id === result.tool_use_id);
         if (call) {
-          toolsUsed.push(call.name);
+          if (result.is_error) {
+            errorStreak++;
+            // Hermes-style error recovery: append a correction directive so the
+            // model knows to analyze and retry rather than give up.
+            const originalContent =
+              typeof result.content === "string"
+                ? result.content
+                : JSON.stringify(result.content);
+            result.content =
+              originalContent +
+              "\n\n[CORRECTION REQUIRED: The tool call above failed. " +
+              "Re-read the error, identify the root cause, adjust your approach " +
+              "(fix parameters, try an alternative tool, or ask the user for " +
+              "missing info), and try again. Do NOT tell the user it's impossible " +
+              "without attempting at least one alternative.]";
+          } else {
+            errorStreak = 0; // successful tool call resets the streak
+            toolsUsed.push(call.name);
+          }
           yield {
             type: "tool_result",
             toolName: call.name,
             result: { success: !result.is_error, data: result.content },
           };
         }
+      }
+
+      // Safety valve: 3 consecutive tool errors → stop and surface to user
+      if (errorStreak >= 3) {
+        yield {
+          type: "text_delta",
+          text:
+            "\n\n⚠️ I've hit several errors in a row and can't proceed automatically. " +
+            "Let me know if you'd like me to try a different approach, or if you can " +
+            "check that the relevant credentials and settings are correct.",
+        };
+        state.shouldContinue = false;
+        break;
       }
 
       // Add tool results to conversation
@@ -421,9 +478,34 @@ export async function* agentLoop(
       }
     } catch (err) {
       const raw = err instanceof Error ? err.message : String(err);
+      const rawLower = raw.toLowerCase();
+
+      // Hermes-style transient retry: 503 / 429 / overload errors are temporary.
+      // Retry up to 2 times with exponential back-off before giving up.
+      const isTransient =
+        rawLower.includes("503") ||
+        rawLower.includes("429") ||
+        rawLower.includes("overload") ||
+        rawLower.includes("rate limit") ||
+        rawLower.includes("too many requests") ||
+        rawLower.includes("service unavailable");
+
+      if (isTransient && retryCount < 2) {
+        retryCount++;
+        const waitSec = retryCount * 3; // 3s, then 6s
+        yield {
+          type: "text_delta",
+          text: `\n_Model temporarily busy — retrying in ${waitSec}s (attempt ${retryCount}/2)…_\n`,
+        };
+        await new Promise((r) => setTimeout(r, waitSec * 1000));
+        state.turnCount--; // don't charge this against the turn budget
+        continue;
+      }
+
+      // Non-transient or exhausted retries — surface a friendly message
       const friendly = formatApiError(raw, isOpenRouter);
       yield { type: "error", error: raw };
-      // Also emit as text_delta so ALL consumers (Telegram, WhatsApp, dashboard) see the error
+      // Emit as text_delta so ALL consumers (Telegram, WhatsApp, dashboard) see it
       yield { type: "text_delta", text: `\n\n⚠️ ${friendly}` };
       state.shouldContinue = false;
     }
