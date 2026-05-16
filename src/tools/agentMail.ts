@@ -60,12 +60,13 @@ export const agentMailListThreadsTool = buildTool({
   }),
   async call(input, context) {
     try {
-      const apiKey   = context.config.tools?.agentmail?.apiKey;
-      const username = context.config.tools?.agentmail?.username;
-      if (!apiKey)   return { success: false, error: "AgentMail not configured" };
-      if (!username) return { success: false, error: "AgentMail username not set — inbox may not be initialised yet" };
+      const apiKey  = context.config.tools?.agentmail?.apiKey;
+      const inboxId = (context.config.tools?.agentmail as any)?.inboxId as string | undefined;
+      if (!apiKey)  return { success: false, error: "AgentMail not configured" };
+      if (!inboxId) return { success: false, error: "AgentMail inbox not yet initialised — start the agent first" };
 
-      const data = await amFetch(apiKey, "GET", `/inboxes/${username}/threads?limit=${input.limit ?? 20}`);
+      const inboxPath = encodeURIComponent(inboxId);
+      const data = await amFetch(apiKey, "GET", `/inboxes/${inboxPath}/threads?limit=${input.limit ?? 20}`);
       const threads = (data.threads ?? []).map((t: any) => ({
         id:             t.id,
         subject:        t.subject,
@@ -97,13 +98,14 @@ export const agentMailGetThreadTool = buildTool({
   }),
   async call(input, context) {
     try {
-      const apiKey   = context.config.tools?.agentmail?.apiKey;
-      const username = context.config.tools?.agentmail?.username;
-      if (!apiKey)   return { success: false, error: "AgentMail not configured" };
-      if (!username) return { success: false, error: "AgentMail username not set" };
+      const apiKey  = context.config.tools?.agentmail?.apiKey;
+      const inboxId = (context.config.tools?.agentmail as any)?.inboxId as string | undefined;
+      if (!apiKey)  return { success: false, error: "AgentMail not configured" };
+      if (!inboxId) return { success: false, error: "AgentMail inbox not yet initialised" };
 
+      const inboxPath = encodeURIComponent(inboxId);
       const data = await amFetch(
-        apiKey, "GET", `/inboxes/${username}/threads/${input.threadId}`
+        apiKey, "GET", `/inboxes/${inboxPath}/threads/${input.threadId}`
       );
 
       const messages = (data.messages ?? []).map((m: any) => ({
@@ -150,11 +152,12 @@ export const agentMailSendEmailTool = buildTool({
   }),
   async call(input, context) {
     try {
-      const apiKey   = context.config.tools?.agentmail?.apiKey;
-      const username = context.config.tools?.agentmail?.username;
-      if (!apiKey)   return { success: false, error: "AgentMail not configured" };
-      if (!username) return { success: false, error: "AgentMail username not set" };
+      const apiKey  = context.config.tools?.agentmail?.apiKey;
+      const inboxId = (context.config.tools?.agentmail as any)?.inboxId as string | undefined;
+      if (!apiKey)  return { success: false, error: "AgentMail not configured" };
+      if (!inboxId) return { success: false, error: "AgentMail inbox not yet initialised" };
 
+      const inboxPath = encodeURIComponent(inboxId);
       const body: Record<string, unknown> = {
         to:   [{ email: input.to }],
         text: input.message,
@@ -162,12 +165,12 @@ export const agentMailSendEmailTool = buildTool({
       if (input.subject)  body.subject   = input.subject;
       if (input.threadId) body.thread_id = input.threadId;
 
-      const result = await amFetch(apiKey, "POST", `/inboxes/${username}/messages`, body);
+      const result = await amFetch(apiKey, "POST", `/inboxes/${inboxPath}/messages/send`, body);
 
       return {
         success: true,
         data: {
-          messageId: result.id,
+          messageId: result.message_id,
           threadId:  result.thread_id,
           to:        input.to,
         },

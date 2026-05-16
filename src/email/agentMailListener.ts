@@ -6,6 +6,11 @@
 // finds new messages across all threads, and runs the agentLoop to generate
 // a reply that is sent back into the same thread.
 //
+// Real API schema (confirmed via live call):
+//   inbox_id  — full email address, e.g. "admin-agent@agentmail.to"
+//               URL-encoded when used in path segments
+//   email     — same as inbox_id
+//
 // Pattern mirrors baileysListener.ts: idempotent start/stop, per-thread
 // isolated AgentContext, session map with 2-hour prune, state persisted to
 // data/agentmail-state.json so seen message IDs survive restarts.
@@ -23,21 +28,23 @@ import { agentLoop } from "../agent/loop.js";
 // Constants
 // ---------------------------------------------------------------------------
 
-const BASE_URL = "https://api.agentmail.to/v0";
+const BASE_URL         = "https://api.agentmail.to";
 const POLL_INTERVAL_MS = 60_000;
 const MAX_REPLY_CHARS  = 10_000;
-const STATE_PATH = join(process.cwd(), "data", "agentmail-state.json");
+const STATE_PATH       = join(process.cwd(), "data", "agentmail-state.json");
 
 // ---------------------------------------------------------------------------
-// Types
+// Types  (matched to the live API response)
 // ---------------------------------------------------------------------------
 
 interface AgentMailInboxInfo {
-  id:           string;
-  username:     string;
-  address:      string;
-  display_name: string;
-  created_at:   string;
+  inbox_id:        string;  // full email — "admin-agent@agentmail.to"
+  email:           string;  // same as inbox_id
+  display_name:    string;
+  organization_id: string;
+  pod_id:          string;
+  created_at:      string;
+  updated_at:      string;
 }
 
 interface AgentMailThread {
@@ -59,8 +66,8 @@ interface AgentMailMessage {
 }
 
 interface AgentMailState {
-  inbox:           AgentMailInboxInfo | null;
-  seenMessageIds:  string[];
+  inbox:          AgentMailInboxInfo | null;
+  seenMessageIds: string[];
 }
 
 interface ThreadSession {
@@ -72,17 +79,17 @@ interface ThreadSession {
 // Module-level singleton state
 // ---------------------------------------------------------------------------
 
-let _pollTimer:   ReturnType<typeof setInterval> | null = null;
-let _inbox:       AgentMailInboxInfo | null = null;
-let _baseCtx:     AgentContext | null = null;
-let _registry:    ToolRegistry | null = null;
-let _apiKey:      string = "";
-let _seenIds:     Set<string> = new Set();
-let _starting     = false;
+let _pollTimer: ReturnType<typeof setInterval> | null = null;
+let _inbox:     AgentMailInboxInfo | null = null;
+let _baseCtx:   AgentContext | null = null;
+let _registry:  ToolRegistry | null = null;
+let _apiKey:    string = "";
+let _seenIds:   Set<string> = new Set();
+let _starting   = false;
 
 const threadSessions: Map<string, ThreadSession> = new Map();
 
-// Prune sessions idle for > 2 hours every 30 minutes
+// Prune sessions idle > 2 hours every 30 minutes
 const _pruneTimer = setInterval(() => {
   const cutoff = Date.now() - 2 * 60 * 60 * 1000;
   for (const [id, s] of threadSessions) {
@@ -99,9 +106,9 @@ if (_pruneTimer.unref) _pruneTimer.unref();
  * Return current inbox info for the status endpoint.
  * Returns null if not yet configured or connected.
  */
-export function getAgentMailInbox(): { username: string; address: string } | null {
+export function getAgentMailInbox(): { inboxId: string; email: string } | null {
   if (!_inbox) return null;
-  return { username: _inbox.username, address: _inbox.address };
+  return { inboxId: _inbox.inbox_id, email: _inbox.email };
 }
 
 /**
@@ -130,8 +137,14 @@ export async function startAgentMailListener(
   try {
     await loadState();
     await ensureInbox(baseCtx.config);
+
+    // Expose the inbox_id to tools via runtime config so they can build paths
+    if (_inbox && _baseCtx.config.tools?.agentmail) {
+      (_baseCtx.config.tools.agentmail as any).inboxId = _inbox.inbox_id;
+    }
+
     startPollLoop();
-    console.log(chalk.green(`  [AgentMail] Connected — inbox address: ${_inbox?.address}`));
+    console.log(chalk.green(`  [AgentMail] Connected — inbox: ${_inbox?.email}`));
   } catch (err) {
     console.error(chalk.red("  [AgentMail] Failed to initialise:", err));
   } finally {
@@ -154,17 +167,23 @@ export function stopAgentMailListener(): void {
 // ---------------------------------------------------------------------------
 
 async function ensureInbox(config: AgentContext["config"]): Promise<void> {
-  // 1. Try to reuse an existing inbox that matches our slug
-  const desiredUsername = slugify(config.tools?.agentmail?.username || config.name || "admin-agent");
+  const desiredSlug = slugify(
+    (config.tools?.agentmail as any)?.username || config.name || "admin-agent"
+  );
 
-  // Load from persisted state first
-  if (_inbox && _inbox.username === desiredUsername) return;
+  // Reuse state if already found
+  if (_inbox) return;
 
-  // Fetch all inboxes
+  // Fetch existing inboxes
   const listRes = await amFetch("GET", "/inboxes");
   const inboxes: AgentMailInboxInfo[] = listRes.inboxes ?? [];
 
-  const existing = inboxes.find((i: AgentMailInboxInfo) => i.username === desiredUsername);
+  // Match on the username part before @
+  const existing = inboxes.find((i) => {
+    const slug = i.inbox_id.split("@")[0];
+    return slug === desiredSlug;
+  });
+
   if (existing) {
     _inbox = existing;
     await saveState();
@@ -173,13 +192,13 @@ async function ensureInbox(config: AgentContext["config"]): Promise<void> {
 
   // Create a new inbox
   const created = await amFetch("POST", "/inboxes", {
-    username:     desiredUsername,
+    username:     desiredSlug,
     display_name: config.name || "Admin Agent",
   });
 
   _inbox = created as AgentMailInboxInfo;
   await saveState();
-  console.log(chalk.green(`  [AgentMail] Created inbox: ${_inbox.address}`));
+  console.log(chalk.green(`  [AgentMail] Created inbox: ${_inbox.email}`));
 }
 
 // ---------------------------------------------------------------------------
@@ -189,7 +208,7 @@ async function ensureInbox(config: AgentContext["config"]): Promise<void> {
 function startPollLoop(): void {
   if (_pollTimer) return;
 
-  // Run immediately, then on interval
+  // Run once immediately, then on interval
   pollOnce().catch((err) => console.error(chalk.red("  [AgentMail] Poll error:", err)));
 
   _pollTimer = setInterval(() => {
@@ -202,9 +221,11 @@ function startPollLoop(): void {
 async function pollOnce(): Promise<void> {
   if (!_inbox || !_baseCtx || !_registry) return;
 
+  const inboxPath = encodeURIComponent(_inbox.inbox_id);
+
   let threads: AgentMailThread[];
   try {
-    const res = await amFetch("GET", `/inboxes/${_inbox.username}/threads?limit=50`);
+    const res = await amFetch("GET", `/inboxes/${inboxPath}/threads?limit=50`);
     threads = res.threads ?? [];
   } catch (err) {
     console.error(chalk.red("  [AgentMail] Failed to fetch threads:", err));
@@ -212,18 +233,21 @@ async function pollOnce(): Promise<void> {
   }
 
   for (const thread of threads) {
-    await processThread(thread).catch((err) => {
+    await processThread(thread, inboxPath).catch((err) => {
       console.error(chalk.red(`  [AgentMail] Error processing thread ${thread.id}:`, err));
     });
   }
 }
 
-async function processThread(thread: AgentMailThread): Promise<void> {
+async function processThread(
+  thread:    AgentMailThread,
+  inboxPath: string
+): Promise<void> {
   if (!_inbox || !_baseCtx || !_registry) return;
 
   let fullThread: { id: string; subject: string; messages: AgentMailMessage[] };
   try {
-    fullThread = await amFetch("GET", `/inboxes/${_inbox.username}/threads/${thread.id}`);
+    fullThread = await amFetch("GET", `/inboxes/${inboxPath}/threads/${thread.id}`);
   } catch {
     return;
   }
@@ -234,16 +258,16 @@ async function processThread(thread: AgentMailThread): Promise<void> {
   const unseen = messages.filter((m) => !_seenIds.has(m.id));
   if (unseen.length === 0) return;
 
-  // Mark all unseen as seen immediately to avoid double-processing
+  // Mark all unseen immediately to avoid double-processing on next poll
   for (const m of unseen) _seenIds.add(m.id);
   await saveState();
 
-  // Process the newest unseen message (avoid processing the agent's own outbound replies)
-  const agentAddress = _inbox.address.toLowerCase();
+  // Filter out outbound messages the agent already sent
+  const agentAddress = _inbox.email.toLowerCase();
   const inbound = unseen.filter((m) => m.from.email.toLowerCase() !== agentAddress);
   if (inbound.length === 0) return;
 
-  const newest = inbound[inbound.length - 1];
+  const newest   = inbound[inbound.length - 1];
   const fromName = newest.from.name || newest.from.email;
   const userText = newest.text || stripHtml(newest.html || "");
 
@@ -272,7 +296,7 @@ async function processThread(thread: AgentMailThread): Promise<void> {
   const reply = response.trim();
   if (!reply) return;
 
-  // Send reply (chunk if over limit)
+  // Send reply — chunked if over limit
   const chunks: string[] = [];
   for (let i = 0; i < reply.length; i += MAX_REPLY_CHARS) {
     chunks.push(reply.slice(i, i + MAX_REPLY_CHARS));
@@ -280,14 +304,13 @@ async function processThread(thread: AgentMailThread): Promise<void> {
 
   for (const chunk of chunks) {
     try {
-      const sentMsg = await amFetch("POST", `/inboxes/${_inbox.username}/messages`, {
+      const sentMsg = await amFetch("POST", `/inboxes/${inboxPath}/messages/send`, {
         to:        [{ email: newest.from.email, name: newest.from.name }],
-        subject:   thread.id ? undefined : `Re: ${newest.subject || "Your message"}`,
         text:      chunk,
         thread_id: thread.id,
       });
-      // Mark outbound reply as seen too
-      if (sentMsg?.id) _seenIds.add(sentMsg.id);
+      // Mark outbound reply as seen so it doesn't trigger a loop
+      if (sentMsg?.message_id) _seenIds.add(sentMsg.message_id);
     } catch (err) {
       console.error(chalk.red("  [AgentMail] Failed to send reply:", err));
     }
@@ -325,7 +348,7 @@ function getOrCreateSession(threadId: string): ThreadSession {
 
 async function loadState(): Promise<void> {
   try {
-    const raw = await readFile(STATE_PATH, "utf-8");
+    const raw    = await readFile(STATE_PATH, "utf-8");
     const state: AgentMailState = JSON.parse(raw);
     _inbox   = state.inbox;
     _seenIds = new Set(state.seenMessageIds || []);
@@ -350,7 +373,7 @@ async function saveState(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// HTTP helper
 // ---------------------------------------------------------------------------
 
 async function amFetch(method: string, path: string, body?: unknown): Promise<any> {
@@ -361,9 +384,7 @@ async function amFetch(method: string, path: string, body?: unknown): Promise<an
       "Content-Type": "application/json",
     },
   };
-  if (body !== undefined) {
-    options.body = JSON.stringify(body);
-  }
+  if (body !== undefined) options.body = JSON.stringify(body);
 
   const res = await fetch(`${BASE_URL}${path}`, options);
   if (!res.ok) {
@@ -372,6 +393,10 @@ async function amFetch(method: string, path: string, body?: unknown): Promise<an
   }
   return res.json();
 }
+
+// ---------------------------------------------------------------------------
+// Utility
+// ---------------------------------------------------------------------------
 
 function slugify(str: string): string {
   return str
@@ -387,12 +412,13 @@ function stripHtml(html: string): string {
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/p>/gi, "\n")
     .replace(/<[^>]+>/g, "")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+/** Active thread session count (for status/metrics). */
+export function activeAgentMailSessionCount(): number {
+  return threadSessions.size;
 }
