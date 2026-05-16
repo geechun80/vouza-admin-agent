@@ -235,6 +235,10 @@ export interface AgentConfig {
       provider: "twilio" | "meta" | "waha" | "web";
       config: Record<string, string>;
     };
+    agentmail?: {
+      apiKey:   string;
+      username: string;
+    };
   };
   /** Raw credentials bag — stores provider creds not covered by tools above */
   credentials?: Record<string, string>;

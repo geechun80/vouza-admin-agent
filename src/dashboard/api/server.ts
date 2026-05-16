@@ -28,6 +28,11 @@ import {
 } from "../../whatsapp/baileysListener.js";
 import { toDataURL as qrToDataURL } from "qrcode";
 import { handleTelegramWebhookUpdate } from "../../telegram/listener.js";
+import {
+  startAgentMailListener,
+  stopAgentMailListener,
+  getAgentMailInbox,
+} from "../../email/agentMailListener.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = join(process.cwd(), "data", "config.json");
@@ -607,6 +612,12 @@ export async function startDashboard(port = 3456): Promise<void> {
     res.json({ connected: isBaileysConnected() });
   });
 
+  // --- AgentMail status ---
+  app.get("/api/agentmail/status", (_req, res) => {
+    const inbox = getAgentMailInbox();
+    res.json({ configured: !!inbox, inbox });
+  });
+
   // --- Telegram Webhook ---
   // When webhookUrl is configured in the wizard, Telegram POSTs updates here
   // instead of the agent polling. Requires a public HTTPS URL.
@@ -1031,6 +1042,22 @@ async function testConnection(type: string, config: Record<string, string>): Pro
         if (res.ok) return { success: true, message: "OpenAI Whisper API connected — voice transcription ready!" };
         const err = await res.text();
         return { success: false, message: `OpenAI error: ${err.slice(0, 200)}` };
+      } catch (e) {
+        return { success: false, message: `Connection failed: ${e}` };
+      }
+
+    case "agentmail":
+      try {
+        const res = await fetch("https://api.agentmail.to/v0/inboxes", {
+          headers: { Authorization: `Bearer ${config.agentmailKey}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const count = data.inboxes?.length ?? 0;
+          return { success: true, message: `AgentMail connected — ${count} inbox${count !== 1 ? "es" : ""} found` };
+        }
+        const err = await res.text();
+        return { success: false, message: `AgentMail error: ${err.slice(0, 200)}` };
       } catch (e) {
         return { success: false, message: `Connection failed: ${e}` };
       }

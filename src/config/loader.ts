@@ -110,6 +110,14 @@ export function loadConfig(): AgentConfig {
 
       // WhatsApp (auto-detect provider)
       whatsapp: buildWhatsAppConfig(),
+
+      // AgentMail dedicated inbox
+      agentmail: process.env.AGENTMAIL_API_KEY
+        ? {
+            apiKey:   process.env.AGENTMAIL_API_KEY,
+            username: process.env.AGENTMAIL_USERNAME || "",
+          }
+        : undefined,
     },
   };
 }
@@ -204,6 +212,13 @@ export async function loadConfigFromJson(): Promise<AgentConfig> {
         emailAddress: ec.emailAddress || ec.gmailUser || "",
       };
     }
+    // AgentMail channel
+    if (saved.channels?.email?.provider === "agentmail" && saved.channels.email.enabled) {
+      const cfg = saved.channels.email.config || {};
+      const apiKey = cfg.agentmailKey || cfg.apiKey || "";
+      const username = cfg.agentmailUsername || "";
+      if (apiKey) baseConfig.tools.agentmail = { apiKey, username };
+    }
     if (saved.channels?.whatsapp?.enabled) {
       const waProvider = saved.channels.whatsapp.provider || "web";
       const rawCfg = saved.channels.whatsapp.config || {};
@@ -235,6 +250,14 @@ export async function loadConfigFromJson(): Promise<AgentConfig> {
 
     if (saved.selfImproveIntervalHours) {
       baseConfig.selfImproveIntervalHours = saved.selfImproveIntervalHours;
+    }
+
+    // ── AgentMail env-var fallback ─────────────────────────────────────────
+    if (process.env.AGENTMAIL_API_KEY) {
+      baseConfig.tools.agentmail = {
+        apiKey:   process.env.AGENTMAIL_API_KEY,
+        username: process.env.AGENTMAIL_USERNAME || "",
+      };
     }
 
     // ── Whisper voice transcription config ─────────────────────────────────

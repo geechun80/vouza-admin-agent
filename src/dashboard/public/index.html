@@ -1931,6 +1931,7 @@ const ICONS = {
   openrouter:`<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="#7c3aed" stroke-width="1.5"/><path d="M7 12h10M14 9l3 3-3 3" stroke="#a855f7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="7" cy="12" r="1.5" fill="#7c3aed"/></svg>`,
   mic:      `<svg viewBox="0 0 24 24" fill="none"><rect x="9" y="2" width="6" height="11" rx="3" stroke="#10b981" stroke-width="1.5"/><path d="M5 10a7 7 0 0014 0" stroke="#10b981" stroke-width="1.5" stroke-linecap="round"/><path d="M12 17v5M8 22h8" stroke="#10b981" stroke-width="1.5" stroke-linecap="round"/></svg>`,
   groq:     `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="#f97316" stroke-width="1.5"/><path d="M9 9c0-1.7 1.3-3 3-3s3 1.3 3 3v3a3 3 0 01-6 0V9z" fill="#f97316" opacity="0.8"/><path d="M12 15v4" stroke="#f97316" stroke-width="1.5" stroke-linecap="round"/></svg>`,
+  agentmail: `<svg viewBox="0 0 24 24" fill="none"><rect x="2" y="4" width="20" height="16" rx="2" fill="#6366f1"/><path d="M2 6l10 7 10-7" stroke="white" stroke-width="1.5"/><circle cx="18" cy="16" r="3" fill="#22d3ee"/><path d="M16.5 16l1 1 1.5-2" stroke="white" stroke-width="1.2" stroke-linecap="round"/></svg>`,
 };
 
 const PROVIDER_COLORS = {
@@ -1944,7 +1945,7 @@ const PROVIDER_COLORS = {
 // ============================================================
 const CHANNELS = [
   { id:'email',    name:'Email',    desc:'Read, send, and triage emails automatically.',           icon:'gmail',    badge:'popular',
-    providers:[{v:'gmail',l:'Gmail'},{v:'outlook',l:'Outlook / Microsoft 365'},{v:'smtp',l:'Custom SMTP'}] },
+    providers:[{v:'gmail',l:'Gmail'},{v:'outlook',l:'Outlook / Microsoft 365'},{v:'smtp',l:'Custom SMTP'},{v:'agentmail',l:'AgentMail (Dedicated Inbox)'}] },
   { id:'whatsapp', name:'WhatsApp', desc:'Send tasks, get results — straight from your WhatsApp. Your PC runs the AI, you chat from anywhere.',
     icon:'whatsapp', badge:'popular', mobile:true,
     howTo:[
@@ -2007,6 +2008,10 @@ const CRED_CONFIGS = {
         hint:'<strong>How to get your App Password:</strong> <a href="https://myaccount.google.com/security" target="_blank">Google Account → Security</a> → enable 2-Step Verification → scroll down to <strong>App passwords</strong> → create one for "Mail". Paste the 16-character code here. No spaces needed. <a href="https://myaccount.google.com/apppasswords" target="_blank">Go directly →</a>'}
     ] },
     outlook: { title:'Outlook / Microsoft 365', icon:'gmail', testType:'outlook', fields:[{id:'outlookClientId',label:'Azure App Client ID',type:'text',placeholder:'xxxxxxxx-xxxx'},{id:'outlookSecret',label:'Client Secret',type:'password',placeholder:'secret'},{id:'outlookTenant',label:'Tenant ID',type:'text',placeholder:'xxxxxxxx-xxxx'}] },
+    agentmail: { title:'AgentMail — Dedicated Agent Inbox', icon:'agentmail', testType:'agentmail', fields:[
+      {id:'agentmailKey', label:'AgentMail API Key', type:'password', placeholder:'am_...', hint:'Get your free key at <a href="https://agentmail.to" target="_blank">agentmail.to →</a> — your agent gets its own email address (e.g. my-agent@agentmail.to)'},
+      {id:'agentmailUsername', label:'Inbox Username (optional)', type:'text', placeholder:'my-agent', hint:'Lowercase letters, numbers, hyphens only. Leave blank to auto-generate. Your address will be username@agentmail.to'},
+    ]},
   },
   voice: {
     groq:   { title:'Groq Voice (Free & Fast)', icon:'groq', testType:'groq-whisper', fields:[{id:'groqApiKey',label:'Groq API Key',type:'password',placeholder:'gsk_...',hint:'Free at <a href="https://console.groq.com/keys" target="_blank">console.groq.com/keys →</a> · Works for Anthropic &amp; OpenRouter users too'}] },
@@ -3276,7 +3281,7 @@ function getGuideScripts(step) {
 /** Return connection-aware tip chips for the current wizard step */
 function getDynamicTips(step) {
   const cs = state.connStatus || {};
-  const hasEmail    = cs.email || cs.gmail || cs['email-gmail'] || cs['email-smtp'] || cs['email-outlook'];
+  const hasEmail    = cs.email || cs.gmail || cs['email-gmail'] || cs['email-smtp'] || cs['email-outlook'] || cs.agentmail;
   const hasTelegram = cs.telegram;
   const hasCalendar = cs.calendar || cs['calendar-google'] || cs['calendar-outlook'];
   const hasSlack    = cs.slack;

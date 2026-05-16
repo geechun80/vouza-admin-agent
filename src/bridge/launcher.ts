@@ -17,6 +17,7 @@ import { TaskScheduler } from "../tasks/scheduler.js";
 // Import all tools
 import { startTelegramListener, stopTelegramListener } from "../telegram/listener.js";
 import { startBaileysListener, stopBaileysListener, isBaileysConnected } from "../whatsapp/baileysListener.js";
+import { startAgentMailListener, stopAgentMailListener } from "../email/agentMailListener.js";
 import { readEmailsTool, sendEmailTool, draftEmailTool, triageEmailsTool, getEmailThreadTool, replyEmailTool, deleteEmailTool } from "../tools/email.js";
 import { listEventsTool, createEventTool, updateEventTool, findFreeSlotsTool, deleteEventTool } from "../tools/calendar.js";
 import { readSpreadsheetTool, writeSpreadsheetTool, searchSpreadsheetTool } from "../tools/spreadsheet.js";
@@ -24,6 +25,12 @@ import { sendSlackMessageTool, readSlackMessagesTool, listSlackChannelsTool } fr
 import { listFilesTool, readFileTool, readExcelFileTool, writeFileTool, organizeFilesTool, deleteFileTool, copyFileTool, renameFileTool } from "../tools/fileManager.js";
 import { sendTelegramMessageTool, readTelegramUpdatesTool, getTelegramBotInfoTool, forwardTelegramMessageTool } from "../tools/telegram.js";
 import { sendWhatsAppMessageTool, readWhatsAppMessagesTool } from "../tools/whatsapp.js";
+import {
+  agentMailListThreadsTool,
+  agentMailGetThreadTool,
+  agentMailSendEmailTool,
+  agentMailCreateInboxTool,
+} from "../tools/agentMail.js";
 import { saveMemoryTool, searchMemoryTool, forgetMemoryTool, updateMemoryTool, listAllMemoriesTool } from "../tools/memory.js";
 import { transcribeAudioTool, transcribeAndSummarizeTool } from "../tools/voice.js";
 import { getSetupStatusTool, saveIntegrationCredentialsTool } from "../tools/setup.js";
@@ -116,6 +123,12 @@ export async function launchAgent(): Promise<AgentInstance> {
   // Web search
   registry.register(webSearchTool as any);
 
+  // AgentMail tools
+  registry.register(agentMailListThreadsTool as any);
+  registry.register(agentMailGetThreadTool as any);
+  registry.register(agentMailSendEmailTool as any);
+  registry.register(agentMailCreateInboxTool as any);
+
   console.log(chalk.green(`  ${registry.getAll().length} tools registered`));
 
   // --- Load Memory ---
@@ -168,6 +181,14 @@ export async function launchAgent(): Promise<AgentInstance> {
     });
   }
 
+  // --- Start AgentMail Listener (if configured) ---
+  if (config.tools?.agentmail?.apiKey) {
+    console.log(chalk.cyan("  [AgentMail] Starting email listener..."));
+    startAgentMailListener(context, registry).catch((err) => {
+      console.error(chalk.red("  [AgentMail] Failed to start:", err));
+    });
+  }
+
   return {
     context,
     registry,
@@ -178,6 +199,7 @@ export async function launchAgent(): Promise<AgentInstance> {
     stop: async () => {
       stopTelegramListener();
       stopBaileysListener();
+      stopAgentMailListener();
       scheduler.stopAll();
       await memory.save();
       console.log(chalk.cyan(`\n  ${config.name} stopped. Memory saved.\n`));
