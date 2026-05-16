@@ -18,7 +18,9 @@ import { ToolRegistry } from "../tools/registry.js";
 import { randomUUID } from "crypto";
 import type { AIProvider } from "../config/models.js";
 import { classifyTask, selectModelForComplexity, TIER_LABELS, DEFAULT_OPENROUTER_TIERS } from "./router.js";
-import { autoReflect } from "./reflect.js";
+import { autoReflect }                from "./reflect.js";
+import { findRelevantSkills, autoWriteSkill } from "./skillWriter.js";
+import { compressContext, estimateConversationTokens } from "./contextCompressor.js";
 
 const DEFAULT_SYSTEM_PROMPT = `You are an AI-powered office administrator and executive assistant named Vouza.
 
@@ -329,13 +331,32 @@ export async function* agentLoop(
     ? `\n\n## Active Tasks\n${context.taskQueue.map((t) => `- ${t.name}: ${t.status}`).join("\n")}`
     : "";
 
-  const fullSystemPrompt = systemPrompt + memoryContext + skillsSummary;
+  // ── Phase 2: inject learned skills for this task ──────────────────────────
+  // Searches data/skills/*.md for procedures matching the current task.
+  // If found, the agent follows the proven steps instead of re-figuring them.
+  const learnedSkills = await findRelevantSkills(searchQuery).catch(() => "");
+
+  const fullSystemPrompt = systemPrompt + memoryContext + skillsSummary + learnedSkills;
   const toolsUsed: string[] = [];
   let errorStreak = 0;   // consecutive tool-level errors (resets on any success)
   let retryCount  = 0;   // transient API-level retries (503 / 429)
 
   while (state.shouldContinue && state.turnCount < state.maxTurns) {
     state.turnCount++;
+
+    // ── Phase 2: context compression ─────────────────────────────────────────
+    // Check token usage before every API call. If > 50% of the context window
+    // is consumed, compress the middle of the conversation to a structured
+    // summary so long sessions never hit context limits.
+    if (estimateConversationTokens(state.messages) > 10_000) { // skip on short convos
+      const { messages: compressed } = await compressContext(
+        state.messages,
+        apiKey,
+        context.config.provider,
+        activeModel
+      ).catch(() => ({ messages: state.messages, savedTokens: 0, compressed: false }));
+      state.messages = compressed;
+    }
 
     const apiMessages = state.messages.map((m) => ({
       role: m.role as "user" | "assistant",
@@ -546,9 +567,16 @@ export async function* agentLoop(
     tags: ["performance", ...toolsUsed],
   });
 
-  // Auto-reflect on the conversation to extract user facts worth remembering
+  // Auto-reflect: extract memorable user facts (contacts, preferences, patterns)
   if (state.turnCount >= 2) {
     autoReflect(state.messages, context).catch(() => {});
+  }
+
+  // ── Phase 2: auto-write skill ─────────────────────────────────────────────
+  // If this was a complex multi-tool session, document the procedure as a
+  // reusable SKILL.md so the agent can follow it automatically next time.
+  if (toolsUsed.length >= 3) {
+    autoWriteSkill(state.messages, toolsUsed, context).catch(() => {});
   }
 }
 
