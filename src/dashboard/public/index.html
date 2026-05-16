@@ -1964,7 +1964,7 @@ const CHANNELS = [
       { text:'Message your bot from any device to control your AI' },
     ],
   },
-  { id:'slack',    name:'Slack',    desc:'Post updates and respond in Slack channels.',              icon:'slack' },
+  // Slack deferred — Bolt SDK + Socket Mode listener not yet implemented
 ];
 
 const TOOLS = [
@@ -2000,7 +2000,7 @@ const CRED_CONFIGS = {
     {id:'telegramToken',label:'Bot Token',type:'password',placeholder:'123456789:ABCdef...',hint:'Get from <a href="https://t.me/BotFather" target="_blank">@BotFather on Telegram →</a>'},
     {id:'telegramWebhookUrl',label:'Webhook URL (optional)',type:'text',placeholder:'https://your-server.com',hint:'<strong>Cloud deployments only.</strong> Leave blank for local installs — long-polling is used automatically. Set to your public HTTPS URL (e.g. Fly.io, Railway, Render) to let Telegram push updates instead of the agent polling. The agent appends <code>/api/telegram/webhook</code> to this URL.'},
   ] } },
-  slack:    { default:{ title:'Slack Bot', icon:'slack', testType:'slack', fields:[{id:'slackToken',label:'Bot Token',type:'password',placeholder:'xoxb-...',hint:'Create at <a href="https://api.slack.com/apps" target="_blank">api.slack.com →</a>'}] } },
+  // slack: deferred — Bolt SDK + Socket Mode
   email: {
     gmail:   { title:'Gmail', icon:'gmail', testType:'gmail', fields:[
       {id:'gmailUser',label:'Gmail Address',type:'email',placeholder:'you@gmail.com'},
@@ -3284,7 +3284,6 @@ function getDynamicTips(step) {
   const hasEmail    = cs.email || cs.gmail || cs['email-gmail'] || cs['email-smtp'] || cs['email-outlook'] || cs.agentmail;
   const hasTelegram = cs.telegram;
   const hasCalendar = cs.calendar || cs['calendar-google'] || cs['calendar-outlook'];
-  const hasSlack    = cs.slack;
   const hasKey      = !!(document.getElementById('aiProviderKey')?.value?.trim() ||
                          (document.getElementById('aiProviderKey')?.placeholder || '').includes('saved') ||
                          state.operatorDefaults?.hasDefaultKey);
@@ -3298,7 +3297,6 @@ function getDynamicTips(step) {
       if (!hasEmail)    tips.push('Help me connect Gmail →');
       if (!hasTelegram) tips.push('Set up my Telegram bot →');
       if (!hasCalendar) tips.push('Connect Google Calendar →');
-      if (!hasSlack)    tips.push('Connect Slack →');
       // Pad with general tips if everything is connected
       const fallbacks = ['Check my setup status', 'Read my latest emails', 'What skills should I enable?'];
       for (const f of fallbacks) { if (tips.length < 3) tips.push(f); }
@@ -3830,8 +3828,7 @@ const TOOL_LABELS = {
   read_excel_file:      '📊 Reading spreadsheet',
   transcribe_audio:         '🎙️ Transcribing audio',
   transcribe_and_summarize: '🎙️ Transcribing & summarising',
-  send_slack_message:   '💬 Sending Slack message',
-  read_slack_messages:  '💬 Reading Slack',
+  // Slack tools removed — deferred to future Bolt SDK build
   send_telegram_message:'✈️ Sending Telegram',
   read_telegram_updates:'✈️ Reading Telegram',
   send_whatsapp_message:'📱 Sending WhatsApp',

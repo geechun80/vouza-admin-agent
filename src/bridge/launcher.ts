@@ -21,7 +21,8 @@ import { startAgentMailListener, stopAgentMailListener } from "../email/agentMai
 import { readEmailsTool, sendEmailTool, draftEmailTool, triageEmailsTool, getEmailThreadTool, replyEmailTool, deleteEmailTool } from "../tools/email.js";
 import { listEventsTool, createEventTool, updateEventTool, findFreeSlotsTool, deleteEventTool } from "../tools/calendar.js";
 import { readSpreadsheetTool, writeSpreadsheetTool, searchSpreadsheetTool } from "../tools/spreadsheet.js";
-import { sendSlackMessageTool, readSlackMessagesTool, listSlackChannelsTool } from "../tools/messenger.js";
+// Slack listener deferred — Bolt SDK + Socket Mode not yet implemented
+// import { sendSlackMessageTool, readSlackMessagesTool, listSlackChannelsTool } from "../tools/messenger.js";
 import { listFilesTool, readFileTool, readExcelFileTool, writeFileTool, organizeFilesTool, deleteFileTool, copyFileTool, renameFileTool } from "../tools/fileManager.js";
 import { sendTelegramMessageTool, readTelegramUpdatesTool, getTelegramBotInfoTool, forwardTelegramMessageTool } from "../tools/telegram.js";
 import { sendWhatsAppMessageTool, readWhatsAppMessagesTool } from "../tools/whatsapp.js";
@@ -79,11 +80,6 @@ export async function launchAgent(): Promise<AgentInstance> {
   registry.register(readSpreadsheetTool as any);
   registry.register(writeSpreadsheetTool as any);
   registry.register(searchSpreadsheetTool as any);
-
-  // Messaging tools — Slack
-  registry.register(sendSlackMessageTool as any);
-  registry.register(readSlackMessagesTool as any);
-  registry.register(listSlackChannelsTool as any);
 
   // Messaging tools — Telegram
   registry.register(sendTelegramMessageTool as any);

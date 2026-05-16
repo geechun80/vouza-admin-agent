@@ -95,11 +95,6 @@ export function loadConfig(): AgentConfig {
           }
         : undefined,
 
-      // Slack
-      slack: process.env.SLACK_BOT_TOKEN
-        ? { botToken: process.env.SLACK_BOT_TOKEN }
-        : undefined,
-
       // Telegram
       telegram: process.env.TELEGRAM_BOT_TOKEN
         ? {
@@ -199,11 +194,7 @@ export async function loadConfigFromJson(): Promise<AgentConfig> {
       const webhookUrl  = cfg.webhookUrl  || cfg.telegramWebhookUrl || "";
       if (botToken) baseConfig.tools.telegram = { botToken, webhookUrl: webhookUrl || undefined };
     }
-    if (saved.channels?.slack?.enabled) {
-      const cfg = saved.channels.slack.config || {};
-      const botToken = cfg.botToken || cfg.slackToken || cfg.slackBotToken;
-      if (botToken) baseConfig.tools.slack = { botToken };
-    }
+    // Slack deferred — Bolt Socket Mode listener not yet implemented
     if (saved.channels?.email?.enabled && saved.channels.email.config) {
       const ec = saved.channels.email.config;
       baseConfig.tools.gmail = {

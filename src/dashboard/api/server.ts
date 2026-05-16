@@ -74,7 +74,6 @@ const DEFAULT_CONFIG: SetupConfig = {
     email: { enabled: false, provider: "gmail", config: {} },
     whatsapp: { enabled: false, provider: "web", config: {} },
     telegram: { enabled: false, provider: "default", config: {} },
-    slack: { enabled: false, provider: "default", config: {} },
   },
   tools: {
     calendar: { enabled: false, provider: "google", config: {} },
@@ -807,10 +806,9 @@ export async function startDashboard(port = 3456): Promise<void> {
       // Auto-launch conditions:
       //  1. Setup fully completed, OR
       //  2. Operator key is set AND at least one channel token is saved
-      //     (bot should be live as soon as Telegram/Slack is configured, no need to finish wizard)
+      //     (bot should be live as soon as Telegram is configured, no need to finish wizard)
       const hasChannelToken = !!(
-        config.credentials?.telegramToken   || config.credentials?.telegramBotToken ||
-        config.credentials?.slackToken      || config.credentials?.slackBotToken
+        config.credentials?.telegramToken || config.credentials?.telegramBotToken
       );
       const shouldAutoLaunch = config.setupCompleted || (!!operatorKey && hasChannelToken);
       if (shouldAutoLaunch && !agentInstance && !launching) {
@@ -969,19 +967,6 @@ async function testConnection(type: string, config: Record<string, string>): Pro
         const data = await res.json();
         if (data.ok) return { success: true, message: `Connected as @${data.result.username}` };
         return { success: false, message: `Telegram error: ${data.description}` };
-      } catch (e) {
-        return { success: false, message: `Connection failed: ${e}` };
-      }
-
-    case "slack":
-      try {
-        const token = config.slackBotToken || config.botToken || config.slackToken;
-        const res = await fetch("https://slack.com/api/auth.test", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const data = await res.json();
-        if (data.ok) return { success: true, message: `Connected to workspace: ${data.team}` };
-        return { success: false, message: `Slack error: ${data.error}` };
       } catch (e) {
         return { success: false, message: `Connection failed: ${e}` };
       }
