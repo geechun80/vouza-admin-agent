@@ -2760,12 +2760,37 @@ async function waQRConnect() {
 
   _waQREventSource = new EventSource('/api/whatsapp/qr-stream');
 
+  let _waQRCount = 0;
   _waQREventSource.addEventListener('qr', (e) => {
     const { dataUrl } = JSON.parse(e.data);
     const img = document.getElementById('wa-qr-png');
     const div = document.getElementById('wa-qr-img');
-    if (img && div) { img.src = dataUrl; div.style.display = 'block'; }
-    document.getElementById('wa-qr-status').textContent = '📷 Scan this QR code with your phone now';
+    const statusEl = document.getElementById('wa-qr-status');
+
+    _waQRCount++;
+    const isRefresh = _waQRCount > 1;
+
+    if (img && div) {
+      // Brief flash to signal a new QR arrived
+      if (isRefresh && img.style) {
+        img.style.opacity = '0.3';
+        setTimeout(() => { img.style.opacity = '1'; img.style.transition = 'opacity 0.3s'; }, 50);
+      }
+      img.src = dataUrl;
+      div.style.display = 'block';
+    }
+
+    if (statusEl) {
+      statusEl.textContent = isRefresh
+        ? '🔄 QR refreshed — scan quickly before it expires again'
+        : '📷 Scan this QR code with your phone now';
+      // Reset back to plain instruction after 3s so it doesn't linger
+      if (isRefresh) {
+        setTimeout(() => {
+          if (statusEl) statusEl.textContent = '📷 Scan this QR code with your phone now';
+        }, 3000);
+      }
+    }
     if (btn) { btn.textContent = '🔄 Waiting for scan…'; }
   });
 
