@@ -392,10 +392,13 @@ function buildAgentConfig(saved: any, apiKeyOverride?: string): AgentConfig {
   // User key → their chosen model. Operator key → free operator model.
 
   // OpenRouter: build tiered model config
+  // When running on the operator key (no user key), pin ALL tiers to operatorModel so
+  // the task-complexity router always calls the intended guide-bot model.
+  // When the user has their own key, honour their saved tier selections.
   const openrouterTiers = (provider === "openrouter" || operatorProvider === "openrouter") ? {
-    fast:     (hasUserKey ? saved?.agent?.openrouterTiers?.fast    : undefined) || DEFAULT_OPENROUTER_TIERS.fast,
-    balanced: (hasUserKey ? saved?.agent?.openrouterTiers?.balanced : undefined) || DEFAULT_OPENROUTER_TIERS.balanced,
-    flagship: (hasUserKey ? saved?.agent?.openrouterTiers?.flagship : undefined) || DEFAULT_OPENROUTER_TIERS.flagship,
+    fast:     hasUserKey ? (saved?.agent?.openrouterTiers?.fast     || DEFAULT_OPENROUTER_TIERS.fast)     : operatorModel,
+    balanced: hasUserKey ? (saved?.agent?.openrouterTiers?.balanced  || DEFAULT_OPENROUTER_TIERS.balanced)  : operatorModel,
+    flagship: hasUserKey ? (saved?.agent?.openrouterTiers?.flagship  || DEFAULT_OPENROUTER_TIERS.flagship)  : operatorModel,
   } : undefined;
 
   // Display model: operator model when no user key, otherwise user selection
