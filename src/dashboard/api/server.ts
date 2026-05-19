@@ -634,6 +634,41 @@ export async function startDashboard(port = 3456): Promise<void> {
     res.json({ configured: !!inbox, inbox });
   });
 
+  // --- Service Health (Phase 3) ---
+  // Returns per-service status for all channel listeners registered with
+  // the ServiceManager.  Useful for a dashboard health panel.
+  app.get("/api/services/health", (_req, res) => {
+    if (!agentInstance) {
+      return res.json({ running: false, services: [] });
+    }
+    res.json({
+      running:  true,
+      services: agentInstance.serviceManager.health(),
+      healthy:  agentInstance.serviceManager.allHealthy(),
+    });
+  });
+
+  // --- Service Restart (Phase 3) ---
+  // Restart a single named service without restarting the whole agent.
+  // Useful after credential updates or after a recoverable failure.
+  app.post("/api/services/:name/restart", requireLocalOrigin, async (req, res) => {
+    if (!agentInstance) {
+      return res.json({ success: false, error: "Agent not running — launch it first." });
+    }
+    const name = String(req.params.name);
+    // Allowlist service names to prevent any injection via URL
+    if (!/^[a-zA-Z0-9_-]{1,40}$/.test(name)) {
+      return res.status(400).json({ success: false, error: "Invalid service name." });
+    }
+    try {
+      await agentInstance.serviceManager.restart(name);
+      const health = agentInstance.serviceManager.getHealth(name);
+      res.json({ success: true, health });
+    } catch (err) {
+      res.json({ success: false, error: String(err) });
+    }
+  });
+
   // --- Telegram Webhook ---
   // When webhookUrl is configured in the wizard, Telegram POSTs updates here
   // instead of the agent polling. Requires a public HTTPS URL.

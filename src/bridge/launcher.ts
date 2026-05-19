@@ -16,8 +16,9 @@ import { TaskScheduler } from "../tasks/scheduler.js";
 
 // Import all tools
 import { startTelegramListener, stopTelegramListener } from "../telegram/listener.js";
-import { startBaileysListener, stopBaileysListener, isBaileysConnected } from "../whatsapp/baileysManager.js";
+import { startBaileysListener, stopBaileysListener, isBaileysConnected, isBaileysWorkerRunning } from "../whatsapp/baileysManager.js";
 import { startAgentMailListener, stopAgentMailListener } from "../email/agentMailListener.js";
+import { ServiceManager } from "./serviceManager.js";
 import { readEmailsTool, sendEmailTool, draftEmailTool, triageEmailsTool, getEmailThreadTool, replyEmailTool, deleteEmailTool } from "../tools/email.js";
 import { listEventsTool, createEventTool, updateEventTool, findFreeSlotsTool, deleteEventTool } from "../tools/calendar.js";
 import { readSpreadsheetTool, writeSpreadsheetTool, searchSpreadsheetTool } from "../tools/spreadsheet.js";
@@ -39,13 +40,14 @@ import { webSearchTool } from "../tools/webSearch.js";
 import { runShellCommandTool } from "../tools/shell.js";
 
 export interface AgentInstance {
-  context: AgentContext;
-  registry: ToolRegistry;
-  scheduler: TaskScheduler;
-  skills: Map<string, SkillDefinition>;
-  selfImprove: ReturnType<typeof initSelfImproveLoop>;
-  runTask: (message: string) => AsyncGenerator<any>;
-  stop: () => Promise<void>;
+  context:        AgentContext;
+  registry:       ToolRegistry;
+  scheduler:      TaskScheduler;
+  skills:         Map<string, SkillDefinition>;
+  selfImprove:    ReturnType<typeof initSelfImproveLoop>;
+  serviceManager: ServiceManager;
+  runTask:        (message: string) => AsyncGenerator<any>;
+  stop:           () => Promise<void>;
 }
 
 /**
@@ -196,34 +198,44 @@ export async function launchAgent(): Promise<AgentInstance> {
 
   console.log(chalk.bold.green(`\n  ${config.name} is running!\n`));
 
-  // --- Start Telegram Listener (if configured) ---
-  // Runs in background — starts a long-polling loop so users can message the
-  // bot and receive real AI responses back. Silently skips if not configured.
-  await startTelegramListener(context, registry);
-
-  const tgToken = config.tools?.telegram?.botToken;
-  if (tgToken) {
-    console.log(chalk.cyan(`  [Telegram] Bot is live — message it to start guided setup`));
-  }
-
-  // --- Start Baileys WhatsApp listener (if provider is "web") ---
-  // Uses the WhatsApp Web protocol to act as a Linked Device.
-  // QR code is surfaced via the /api/whatsapp/qr-stream SSE endpoint in the dashboard.
+  // --- Service Manager — registers and starts all channel listeners ---
+  // Phase 3: replaces ad-hoc startXListener / stopXListener calls with a
+  // structured registry that tracks health and supports per-service restart.
   const waProvider = config.tools?.whatsapp?.provider;
-  if (waProvider === "web") {
-    console.log(chalk.cyan("  [WhatsApp] Starting Baileys listener (open dashboard → WhatsApp → Scan QR)"));
-    startBaileysListener(context, registry).catch((err) => {
-      console.error(chalk.red("  [WhatsApp] Baileys failed to start:", err));
-    });
-  }
 
-  // --- Start AgentMail Listener (if configured) ---
-  if (config.tools?.agentmail?.apiKey) {
-    console.log(chalk.cyan("  [AgentMail] Starting email listener..."));
-    startAgentMailListener(context, registry).catch((err) => {
-      console.error(chalk.red("  [AgentMail] Failed to start:", err));
-    });
-  }
+  const svcMgr = new ServiceManager();
+
+  svcMgr.register({
+    name:        "telegram",
+    displayName: "Telegram Bot",
+    enabled:     hasTelegram,
+    start:       (ctx, reg) => startTelegramListener(ctx, reg),
+    stop:        () => stopTelegramListener(),
+  });
+
+  svcMgr.register({
+    name:        "whatsapp",
+    displayName: "WhatsApp (Baileys)",
+    enabled:     hasWhatsApp && waProvider === "web",
+    start:       (ctx, reg) => startBaileysListener(ctx, reg),
+    stop:        () => stopBaileysListener(),
+    // Liveness probe: distinguish "worker up, waiting for QR" from "connected"
+    liveness:    () => {
+      if (isBaileysConnected())      return "running";
+      if (isBaileysWorkerRunning())  return "connecting";
+      return "error";
+    },
+  });
+
+  svcMgr.register({
+    name:        "agentmail",
+    displayName: "AgentMail",
+    enabled:     hasAgentMail,
+    start:       (ctx, reg) => startAgentMailListener(ctx, reg),
+    stop:        () => stopAgentMailListener(),
+  });
+
+  await svcMgr.startAll(context, registry);
 
   return {
     context,
@@ -231,11 +243,10 @@ export async function launchAgent(): Promise<AgentInstance> {
     scheduler,
     skills,
     selfImprove,
+    serviceManager: svcMgr,
     runTask: (message: string) => agentLoop(message, context, registry),
     stop: async () => {
-      stopTelegramListener();
-      stopBaileysListener();
-      stopAgentMailListener();
+      await svcMgr.stopAll();
       scheduler.stopAll();
       await memory.save();
       console.log(chalk.cyan(`\n  ${config.name} stopped. Memory saved.\n`));
@@ -244,19 +255,22 @@ export async function launchAgent(): Promise<AgentInstance> {
 }
 
 /**
- * Quick status check — returns agent health info.
+ * Quick status check — returns agent health info including per-service status.
  */
 export async function getAgentStatus(instance: AgentInstance) {
   return {
-    running: true,
-    name: instance.context.config.name,
-    model: instance.context.config.model,
-    provider: instance.context.config.provider,
-    toolCount: instance.registry.getAll().length,
-    memoryCount: instance.context.memory.entries.size,
-    skillCount: instance.skills.size,
+    running:        true,
+    name:           instance.context.config.name,
+    model:          instance.context.config.model,
+    provider:       instance.context.config.provider,
+    toolCount:      instance.registry.getAll().length,
+    memoryCount:    instance.context.memory.entries.size,
+    skillCount:     instance.skills.size,
     scheduledTasks: instance.scheduler.list().length,
-    sessionId: instance.context.sessionId,
-    turnCount: instance.context.turnCount,
+    sessionId:      instance.context.sessionId,
+    turnCount:      instance.context.turnCount,
+    // Phase 3 — service health per channel listener
+    services:       instance.serviceManager.health(),
+    allServicesHealthy: instance.serviceManager.allHealthy(),
   };
 }
