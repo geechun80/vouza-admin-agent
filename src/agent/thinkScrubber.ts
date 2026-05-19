@@ -20,7 +20,9 @@
  * this is applied only to user-visible stream output and memory saves.
  */
 export function scrubThinkBlocks(text: string): string {
-  if (!text.includes("<think>")) return text; // fast path — most responses have none
+  // Fast path — most responses have none. Case-insensitive check matches the
+  // case-insensitive regex below, so uppercase <THINK> tags also get scrubbed.
+  if (!/<think>/i.test(text)) return text;
   return text
     .replace(/<think>[\s\S]*?<\/think>/gi, "") // remove all think blocks
     .replace(/\n{3,}/g, "\n\n")               // collapse excess blank lines left behind

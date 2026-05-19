@@ -54,8 +54,11 @@ export function redact(text: string): string {
     // Reset lastIndex for global patterns between calls
     pattern.lastIndex = 0;
     result = result.replace(pattern, (match, group1) => {
-      // For labeled patterns (group 1 = the value portion), redact only the value
-      if (group1 !== undefined) {
+      // String.replace callback signature differs by capture-group count:
+      //   no capture groups:    (match, offset, string)        → group1 is a NUMBER (offset)
+      //   with capture groups:  (match, p1, …, offset, string) → group1 is a STRING (captured value)
+      // Type-check ensures we only do partial replacement when there's a real capture.
+      if (typeof group1 === "string") {
         return match.replace(group1, REDACT_LABEL);
       }
       return REDACT_LABEL;

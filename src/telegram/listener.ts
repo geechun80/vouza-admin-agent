@@ -521,7 +521,7 @@ async function processMessage(
  * Hermes-inspired: "show real Telegram buttons instead of asking users to type
  * a number — huge UX win on mobile."
  */
-function buildInlineKeyboard(
+export function buildInlineKeyboard(
   text: string
 ): { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } | undefined {
   const lines = text.split("\n");

@@ -10,7 +10,9 @@
     "build": "tsc && node -e \"const fs=require('fs');fs.cpSync('src/dashboard/public','dist/dashboard/public',{recursive:true,force:true});console.log('✓ public/ copied to dist/')\"",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
-    "setup": "tsx src/dashboard/launch.ts"
+    "setup": "tsx src/dashboard/launch.ts",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "test:watch": "node --import tsx --test --watch tests/*.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",
