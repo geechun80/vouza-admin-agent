@@ -141,9 +141,61 @@ export class ToolRegistry {
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return { tool_use_id: call.id, content: `Tool error: ${message}`, is_error: true };
+      return { tool_use_id: call.id, content: `Tool error: ${sanitizeToolError(message)}`, is_error: true };
     }
   }
+}
+
+// ── Tool error sanitization ────────────────────────────────────────────────────
+// Strips prompt-injection patterns from tool error strings before they are
+// re-injected into the model context. A malicious file, API response, or remote
+// service could craft an error message that contains instruction text.
+//
+// Inspiration: Hermes v0.14.0 — "Sanitize env and redact output in quick
+// commands" + "tool error strings are now sanitized before re-injection."
+//
+// Patterns targeted:
+//   • Role header mimicry  ("System:", "User:", "Assistant:")
+//   • Model template tokens ("[INST]", "<|system|>", "###System")
+//   • Jailbreak imperatives ("ignore all previous instructions")
+//   • Authority claims      ("you are now in developer mode")
+
+const INJECTION_PATTERNS: RegExp[] = [
+  // Role mimicry
+  /\b(system|assistant|user)\s*:\s*/gi,
+  // OpenAI / Llama template tokens
+  /\[INST\]|\[\/INST\]|<<SYS>>|<\/SYS>>/gi,
+  // Mistral / Gemma / Qwen control tokens
+  /<\|system\|>|<\|user\|>|<\|assistant\|>|<\|im_start\|>|<\|im_end\|>/gi,
+  // Markdown section headers that look like role headings
+  /^#{1,3}\s*(system|instruction|human|assistant)\b/gim,
+  // Classic jailbreak imperatives
+  /\b(ignore|forget|disregard|override)\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|rules?|constraints?|guidelines?)\b/gi,
+  // Authority claims
+  /\b(you are|you're)\s+(now\s+)?(in\s+)?(developer|admin|unrestricted|jailbreak|debug|god)\s+mode\b/gi,
+  // "New instructions" framing
+  /\bnew\s+instructions?\s*:\s*/gi,
+];
+
+function sanitizeToolError(raw: string): string {
+  // Truncate first — don't process enormous strings
+  let s = raw.slice(0, 600);
+  let sanitized = false;
+
+  for (const pattern of INJECTION_PATTERNS) {
+    const replaced = s.replace(pattern, "[redacted]");
+    if (replaced !== s) {
+      s = replaced;
+      sanitized = true;
+    }
+  }
+
+  // If we redacted anything, append a note so the model knows why
+  if (sanitized) {
+    s += " [Note: parts of this error were sanitized to prevent injection]";
+  }
+
+  return s;
 }
 
 // --- Zod to JSON Schema (minimal conversion) ---

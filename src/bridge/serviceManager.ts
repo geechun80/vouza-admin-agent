@@ -74,11 +74,29 @@ export interface ServiceDef {
 // ServiceManager
 // ---------------------------------------------------------------------------
 
+// ── Circuit breaker constants (inspired by Hermes v0.14.0 per-platform breaker) ─
+// If a service restarts more than CIRCUIT_MAX_RESTARTS times within
+// CIRCUIT_WINDOW_MS, the circuit trips and further restarts are blocked for
+// CIRCUIT_COOLDOWN_MS.  This prevents a bad credential / unreachable host from
+// hammering the network in a tight loop.
+
+const CIRCUIT_WINDOW_MS    = 60_000;       // 1-minute sliding window
+const CIRCUIT_MAX_RESTARTS = 3;            // max restarts allowed in that window
+const CIRCUIT_COOLDOWN_MS  = 5 * 60_000;  // cool-down before circuit auto-resets
+
+interface CircuitState {
+  /** Timestamps (ms) of recent restart attempts inside the window. */
+  attempts:   number[];
+  /** When the circuit was tripped (ms), or 0 if closed. */
+  trippedAt:  number;
+}
+
 export class ServiceManager {
-  private _defs   = new Map<string, ServiceDef>();
-  private _health = new Map<string, ServiceHealth>();
-  private _ctx:   AgentContext | null = null;
-  private _reg:   ToolRegistry | null = null;
+  private _defs    = new Map<string, ServiceDef>();
+  private _health  = new Map<string, ServiceHealth>();
+  private _circuit = new Map<string, CircuitState>();
+  private _ctx:    AgentContext | null = null;
+  private _reg:    ToolRegistry | null = null;
 
   /**
    * Register a service.  Must be called before startAll().
@@ -91,7 +109,55 @@ export class ServiceManager {
       displayName: def.displayName,
       status:      def.enabled ? "stopped" : "disabled",
     });
+    this._circuit.set(def.name, { attempts: [], trippedAt: 0 });
     return this;
+  }
+
+  // ── Circuit breaker helpers ─────────────────────────────────────────────────
+
+  /** Returns true if the circuit is currently open (service blocked). */
+  isCircuitTripped(name: string): boolean {
+    const c = this._circuit.get(name);
+    if (!c || c.trippedAt === 0) return false;
+    if (Date.now() - c.trippedAt >= CIRCUIT_COOLDOWN_MS) {
+      // Auto-reset after cooldown
+      c.trippedAt = 0;
+      c.attempts  = [];
+      return false;
+    }
+    return true;
+  }
+
+  /** Record a restart attempt and trip the circuit if threshold exceeded. */
+  private _recordRestart(name: string): void {
+    const c = this._circuit.get(name);
+    if (!c) return;
+    const now = Date.now();
+    // Drop attempts outside the sliding window
+    c.attempts = c.attempts.filter(t => now - t < CIRCUIT_WINDOW_MS);
+    c.attempts.push(now);
+    if (c.attempts.length >= CIRCUIT_MAX_RESTARTS) {
+      c.trippedAt = now;
+      c.attempts  = [];
+      console.warn(chalk.yellow(
+        `  [ServiceManager] ⚡ Circuit breaker tripped for "${name}" ` +
+        `(${CIRCUIT_MAX_RESTARTS} restarts in ${CIRCUIT_WINDOW_MS / 1000}s). ` +
+        `Cooling down for ${CIRCUIT_COOLDOWN_MS / 60000} min.`
+      ));
+    }
+  }
+
+  /** Manually reset the circuit breaker for a service. */
+  resetCircuit(name: string): void {
+    const c = this._circuit.get(name);
+    if (c) { c.attempts = []; c.trippedAt = 0; }
+  }
+
+  /** Remaining cooldown in ms (0 if circuit is closed). */
+  circuitCooldownMs(name: string): number {
+    const c = this._circuit.get(name);
+    if (!c || c.trippedAt === 0) return 0;
+    return Math.max(0, CIRCUIT_COOLDOWN_MS - (Date.now() - c.trippedAt));
   }
 
   /**
@@ -153,6 +219,18 @@ export class ServiceManager {
     if (!def.enabled) throw new Error(`Service "${name}" is disabled (no credentials)`);
     if (!this._ctx || !this._reg) throw new Error("startAll() must be called before restart()");
 
+    // ── Circuit breaker guard ─────────────────────────────────────────────────
+    if (this.isCircuitTripped(name)) {
+      const cooldownSec = Math.ceil(this.circuitCooldownMs(name) / 1000);
+      const msg = `Circuit breaker open for "${name}" — too many restarts. ` +
+                  `Auto-reset in ${cooldownSec}s. ` +
+                  `Fix the underlying issue (credentials, network) then call resetCircuit().`;
+      const h = this._health.get(name)!;
+      h.status = "error";
+      h.error  = msg;
+      throw new Error(msg);
+    }
+
     const h = this._health.get(name)!;
 
     // Stop first if running
@@ -166,6 +244,9 @@ export class ServiceManager {
 
     h.status = "starting";
     h.error  = undefined;
+
+    // Record attempt BEFORE starting so a sync throw still counts
+    this._recordRestart(name);
 
     try {
       await def.start(this._ctx, this._reg);

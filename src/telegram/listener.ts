@@ -30,11 +30,14 @@ import {
   WHISPER_NO_KEY_MSG,
 } from "../voice/transcriber.js";
 
-const TELEGRAM_API      = "https://api.telegram.org/bot";
-const LONG_POLL_TIMEOUT = 30;     // seconds — Telegram's recommended value
-const RETRY_DELAY_MS    = 5_000;  // wait 5s on network errors before re-polling
-const MAX_MSG_LEN       = 4_000;  // Telegram hard limit is 4096; stay under it
-const LIVE_EDIT_INTERVAL = 1_500; // ms between live edits (stay under rate limit)
+const TELEGRAM_API       = "https://api.telegram.org/bot";
+const LONG_POLL_TIMEOUT  = 30;     // seconds — Telegram's recommended value
+const RETRY_DELAY_MS     = 5_000;  // wait 5s on network errors before re-polling
+const MAX_MSG_LEN        = 4_000;  // Telegram hard limit is 4096; stay under it
+const LIVE_EDIT_INTERVAL = 1_500;  // ms between live edits (stay under rate limit)
+// Hermes-inspired adaptive fast-path: short replies with no tool use skip the
+// streaming placeholder entirely — one sendMessage instead of send+edit+edit.
+const FAST_PATH_MAX_CHARS = 200;
 
 // ---------------------------------------------------------------------------
 // Per-chat session state
@@ -117,7 +120,7 @@ export async function startTelegramListener(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         url: hookEndpoint,
-        allowed_updates: ["message"],
+        allowed_updates: ["message", "callback_query"],
         drop_pending_updates: true,
         secret_token: _webhookSecret,
       }),
@@ -153,7 +156,7 @@ export async function startTelegramListener(
         const params = new URLSearchParams({
           timeout:         String(LONG_POLL_TIMEOUT),
           offset:          String(updateOffset),
-          allowed_updates: JSON.stringify(["message"]),
+          allowed_updates: JSON.stringify(["message", "callback_query"]),
         });
 
         const res = await fetch(`${TELEGRAM_API}${token}/getUpdates?${params}`, {
@@ -221,6 +224,34 @@ async function dispatchUpdate(
   baseCtx:  AgentContext,
   registry: ToolRegistry
 ): Promise<void> {
+  // ── callback_query — inline keyboard button tap ───────────────────────────
+  // Hermes-inspired: when the agent presents numbered options as inline buttons
+  // and the user taps one, route the button label as a regular text message.
+  const cbq = update.callback_query;
+  if (cbq) {
+    const chatId   = cbq.message?.chat?.id as number | undefined;
+    const fromName = [cbq.from?.first_name, cbq.from?.last_name]
+      .filter(Boolean).join(" ") || "User";
+    const data = cbq.data as string | undefined;
+
+    // Acknowledge immediately — dismisses Telegram's button loading spinner
+    await fetch(`${TELEGRAM_API}${token}/answerCallbackQuery`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ callback_query_id: cbq.id }),
+    }).catch(() => {});
+
+    if (chatId && data) {
+      console.log(chalk.gray(
+        `  [Telegram] ${fromName} (${chatId}): [button] ${data.slice(0, 80)}`
+      ));
+      handleMessage(token, chatId, fromName, data, baseCtx, registry).catch((err) => {
+        console.error(chalk.red(`  [Telegram] callback_query error for ${chatId}:`, err));
+      });
+    }
+    return;
+  }
+
   const msg = update.message;
   if (!msg) return;
 
@@ -349,68 +380,94 @@ async function processMessage(
   isVoice   = false
 ): Promise<void> {
   try {
-    await sendTyping(token, chatId);
-
     const chatCtx    = getOrCreateChatContext(chatId, baseCtx);
     const agentInput = isVoice
       ? `🎙️ [Voice message from ${fromName}]: "${text}"`
       : `[Message from ${fromName} via Telegram]: ${text}`;
 
-    // Send a placeholder message and grab its message_id for live edits
-    const initRes  = await fetch(`${TELEGRAM_API}${token}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text: "⏳ Thinking…" }),
-    });
-    const initData = await initRes.json() as any;
-    const liveId: number | null = initData.ok ? initData.result.message_id : null;
+    // ── Hermes-inspired adaptive fast-path ────────────────────────────────
+    // We lazily commit to the streaming (placeholder → edit) approach.
+    // If the agent responds quickly with a short reply and no tool calls,
+    // we skip the placeholder entirely and send one direct message — snappier
+    // on mobile, one fewer API round-trip.
 
-    let fullText   = "";
-    let lastEditMs = 0;
-    let lastTool   = "";
+    let fullText        = "";
+    let lastEditMs      = 0;
+    let lastTool        = "";
+    let usedTools       = false;      // set true on first tool_start
+    let placeholderSent = false;      // true once "⏳ Thinking…" is live
+    let liveId: number | null = null;
 
-    // Edit the live message — rate-limited to LIVE_EDIT_INTERVAL ms
+    // Commit to the streaming path: send the "⏳ Thinking…" placeholder
+    // if we haven't already (idempotent).
+    const ensurePlaceholder = async () => {
+      if (placeholderSent) return;
+      placeholderSent = true;
+      await sendTyping(token, chatId);
+      const initRes  = await fetch(`${TELEGRAM_API}${token}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text: "⏳ Thinking…" }),
+      });
+      const initData = await initRes.json() as any;
+      liveId = initData.ok ? initData.result.message_id : null;
+    };
+
+    // Edit the live placeholder — rate-limited to LIVE_EDIT_INTERVAL ms.
+    // On the final call, also attaches an inline keyboard when the response
+    // contains a numbered choice list (Hermes-inspired inline buttons).
     const editNow = async (final = false) => {
       if (!liveId) return;
       const now = Date.now();
       if (!final && now - lastEditMs < LIVE_EDIT_INTERVAL) return;
       lastEditMs = now;
 
-      // What to show: response text > active tool > thinking spinner
       const body    = fullText.trim() || (lastTool ? `🔧 Using ${lastTool}…` : "⏳ Thinking…");
       const display = (body + (final ? "" : " ⏳")).slice(0, 4096);
+      const keyboard = final ? buildInlineKeyboard(fullText) : undefined;
 
-      // Try Markdown, fall back to plain text
+      // Try Markdown, fall back to plain text on parse error
       const mdRes = await fetch(`${TELEGRAM_API}${token}/editMessageText`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          chat_id: chatId, message_id: liveId,
-          text: display, parse_mode: "Markdown",
+          chat_id:      chatId,
+          message_id:   liveId,
+          text:         display,
+          parse_mode:   "Markdown",
+          ...(keyboard ? { reply_markup: keyboard } : {}),
         }),
       }).catch(() => null);
 
       const mdData = await mdRes?.json().catch(() => null) as any;
       if (mdData && !mdData.ok && mdData.error_code === 400) {
-        // Markdown parse error — retry plain
         await fetch(`${TELEGRAM_API}${token}/editMessageText`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ chat_id: chatId, message_id: liveId, text: display }),
+          body: JSON.stringify({
+            chat_id:    chatId,
+            message_id: liveId,
+            text:       display,
+            ...(keyboard ? { reply_markup: keyboard } : {}),
+          }),
         }).catch(() => {});
       }
     };
 
-    // Run the agent loop
+    // ── Agent loop ─────────────────────────────────────────────────────────
     for await (const ev of agentLoop(agentInput, chatCtx, registry)) {
       if (ev.type === "text_delta") {
         fullText += ev.text;
         lastTool  = "";
-        await editNow();
+        // Only stream intermediate edits if we're already in streaming mode
+        if (placeholderSent) await editNow();
       }
       if (ev.type === "tool_start") {
-        lastTool = ev.toolName;
-        await sendTyping(token, chatId); // keep typing indicator alive during tools
+        lastTool  = ev.toolName;
+        usedTools = true;
+        // Commit to streaming — we have tool work to show
+        await ensurePlaceholder();
+        await sendTyping(token, chatId);
         await editNow();
       }
       if (ev.type === "tool_result") {
@@ -421,12 +478,24 @@ async function processMessage(
       }
     }
 
-    // Final edit — complete answer, no spinner
+    const finalText = fullText.trim();
+
+    // ── Fast-path: short reply, no tool use ───────────────────────────────
+    // Never sent a placeholder → one direct sendMessage call, done.
+    if (!placeholderSent) {
+      if (finalText) {
+        const keyboard = buildInlineKeyboard(finalText);
+        await sendDirectReply(token, chatId, finalText, keyboard);
+      }
+      return;
+    }
+
+    // ── Streaming path: final edit, no spinner ────────────────────────────
     await editNow(true);
 
-    // Fallback: if we couldn't get a liveId, send a fresh reply
-    if (!liveId && fullText.trim()) {
-      await sendReply(token, chatId, fullText.trim());
+    // Fallback: couldn't obtain a message_id earlier
+    if (!liveId && finalText) {
+      await sendReply(token, chatId, finalText);
     }
 
   } catch (err) {
@@ -438,6 +507,82 @@ async function processMessage(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Detect a numbered choice list in the agent's response and build a Telegram
+ * inline keyboard so users can tap instead of type "1", "2", etc.
+ *
+ * Matches lines like:
+ *   "1. Yes"  "1) Yes"  "2. No"  "3. Maybe later"
+ *
+ * Only activates when 2–5 numbered options are found (avoids false positives
+ * on numbered lists that aren't actually choices).
+ *
+ * Hermes-inspired: "show real Telegram buttons instead of asking users to type
+ * a number — huge UX win on mobile."
+ */
+function buildInlineKeyboard(
+  text: string
+): { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } | undefined {
+  const lines = text.split("\n");
+  const buttons: Array<{ text: string; callback_data: string }> = [];
+
+  for (const line of lines) {
+    const m = line.match(/^\s*(\d+)[.)]\s+(.+)$/);
+    if (!m) continue;
+    const label = m[2].replace(/[*_`[\]]/g, "").trim(); // strip Markdown
+    if (!label) continue;
+    buttons.push({
+      text:          label.slice(0, 64),
+      callback_data: label.slice(0, 64),
+    });
+  }
+
+  // 2–5 sequential options starting from 1 — strong signal it's a choice list
+  if (buttons.length < 2 || buttons.length > 5) return undefined;
+
+  // One button per row for readability
+  return { inline_keyboard: buttons.map((b) => [b]) };
+}
+
+/**
+ * Send a single message with optional inline keyboard.
+ * Used by the adaptive fast-path for short, tool-free replies.
+ */
+async function sendDirectReply(
+  token:    string,
+  chatId:   number,
+  text:     string,
+  keyboard?: { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> }
+): Promise<void> {
+  const body: Record<string, unknown> = {
+    chat_id:    chatId,
+    text:       text.slice(0, 4096),
+    parse_mode: "Markdown",
+    ...(keyboard ? { reply_markup: keyboard } : {}),
+  };
+
+  const res  = await fetch(`${TELEGRAM_API}${token}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json() as any;
+
+  // Markdown parse error — retry plain text
+  if (!data.ok && data.error_code === 400) {
+    const plainBody: Record<string, unknown> = {
+      chat_id: chatId,
+      text:    text.slice(0, 4096),
+      ...(keyboard ? { reply_markup: keyboard } : {}),
+    };
+    await fetch(`${TELEGRAM_API}${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(plainBody),
+    }).catch(() => {});
+  }
+}
 
 function getOrCreateChatContext(chatId: number, baseCtx: AgentContext): AgentContext {
   if (!chatContexts.has(chatId)) {

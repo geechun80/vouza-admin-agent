@@ -376,11 +376,24 @@ export async function* agentLoop(
 
       if (isAnthropic && client) {
         // Native Anthropic SDK — 60 s timeout matches our AbortController budget
+        //
+        // Prompt caching (inspired by Hermes v0.14.0 cross-session prefix cache):
+        // Adding cache_control: { type: "ephemeral" } to the system prompt tells
+        // Anthropic to cache the prompt prefix for 5 minutes. On repeat turns and
+        // new sessions within that window, the cached prefix is reused — reducing
+        // latency and cutting input token costs by ~90% for the system block.
+        // Works on Anthropic direct + OpenRouter (pass-through supported).
         const response = await client.messages.create(
           {
             model: activeModel,
             max_tokens: 4096,
-            system: fullSystemPrompt,
+            system: [
+              {
+                type: "text" as const,
+                text: fullSystemPrompt,
+                cache_control: { type: "ephemeral" as const },
+              },
+            ],
             messages: apiMessages as Anthropic.MessageParam[],
             tools: registry.toAPISchemas() as Anthropic.Tool[],
           },

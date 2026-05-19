@@ -5,7 +5,8 @@
 //   1. Tavily   — tavily.com (1,000 free searches/month, designed for AI agents)
 //   2. Serper   — serper.dev (2,500 free searches/month, Google results)
 //   3. Brave    — brave.com/search/api (2,000 free/month, privacy-first)
-//   4. No key   — helpful message telling user how to configure one
+//   4. DDGS     — DuckDuckGo HTML scrape (no key required, always available)
+//                 Inspired by Hermes v0.14.0 "DDGS as web-search provider"
 //
 // Configuration:
 //   Set any one of these in your .env or start.bat:
@@ -93,10 +94,63 @@ async function braveSearch(query: string, apiKey: string, maxResults: number): P
   })).slice(0, maxResults);
 }
 
+// ─── DuckDuckGo free fallback ──────────────────────────────────────────────────
+// No API key required. Scrapes html.duckduckgo.com — suitable as a last resort
+// when no paid key is configured. Rate-limited by DDG to ~60 req/min.
+// Inspired by Hermes v0.14.0: "DuckDuckGo (DDGS) as web-search provider".
+
+async function ddgsSearch(query: string, maxResults: number): Promise<SearchResult[]> {
+  const res = await fetch("https://html.duckduckgo.com/html/", {
+    method:  "POST",
+    headers: {
+      "Content-Type":  "application/x-www-form-urlencoded",
+      "User-Agent":    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      "Accept":        "text/html",
+      "Accept-Language": "en-US,en;q=0.9",
+    },
+    body: new URLSearchParams({ q: query, b: "" }).toString(),
+  });
+  if (!res.ok) throw new Error(`DuckDuckGo returned HTTP ${res.status}`);
+
+  const html = await res.text();
+  const results: SearchResult[] = [];
+
+  // Parse result links (<a class="result__a">) and snippets (<a class="result__snippet">)
+  // We use simple regex rather than a DOM parser to avoid a dependency.
+  const linkRx    = /<a[^>]+class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/g;
+  const snippetRx = /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
+
+  const links:    Array<{ url: string; title: string }> = [];
+  const snippets: string[] = [];
+
+  let m: RegExpExecArray | null;
+
+  while ((m = linkRx.exec(html)) !== null && links.length < maxResults) {
+    // DDG wraps external URLs — extract the real URL from uddg param
+    let url = m[1];
+    try {
+      const parsed = new URL("https://duckduckgo.com" + url);
+      url = parsed.searchParams.get("uddg") ?? url;
+      url = decodeURIComponent(url);
+    } catch { /* keep original */ }
+    const title = m[2].replace(/<[^>]*>/g, "").trim();
+    if (url.startsWith("http") && title) links.push({ url, title });
+  }
+
+  while ((m = snippetRx.exec(html)) !== null && snippets.length < maxResults) {
+    snippets.push(m[1].replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim());
+  }
+
+  for (let i = 0; i < Math.min(links.length, maxResults); i++) {
+    results.push({ title: links[i].title, url: links[i].url, snippet: snippets[i] ?? "" });
+  }
+  return results;
+}
+
 // ─── Key resolution ────────────────────────────────────────────────────────────
 
 interface SearchConfig {
-  provider: "tavily" | "serper" | "brave" | "none";
+  provider: "tavily" | "serper" | "brave" | "ddgs" | "none";
   apiKey:   string;
 }
 
@@ -110,7 +164,8 @@ function resolveSearchConfig(context: any): SearchConfig {
   if (tavilyKey)  return { provider: "tavily", apiKey: tavilyKey };
   if (serperKey)  return { provider: "serper", apiKey: serperKey };
   if (braveKey)   return { provider: "brave",  apiKey: braveKey  };
-  return           { provider: "none",   apiKey: ""           };
+  // DuckDuckGo — always available, no key needed
+  return           { provider: "ddgs",  apiKey: ""           };
 }
 
 // ─── Tool definition ───────────────────────────────────────────────────────────
@@ -145,19 +200,6 @@ export const webSearchTool = buildTool({
     const { provider, apiKey } = resolveSearchConfig(context);
     const maxResults = input.max_results ?? 5;
 
-    if (provider === "none") {
-      return {
-        success: false,
-        data:
-          "⚠️ Web search is not configured. To enable it, add one of these to your .env or start.bat:\n\n" +
-          "• TAVILY_API_KEY=tvly-xxx   (recommended — 1,000 free searches/month at tavily.com)\n" +
-          "• SERPER_API_KEY=xxx        (2,500 free/month at serper.dev)\n" +
-          "• BRAVE_SEARCH_KEY=BSA-xxx  (2,000 free/month at brave.com/search/api)\n\n" +
-          "All three offer a free tier — Tavily is the best choice for AI agents.",
-        error: "No search API key configured",
-      };
-    }
-
     try {
       let results: SearchResult[];
 
@@ -165,6 +207,7 @@ export const webSearchTool = buildTool({
         case "tavily": results = await tavilySearch(input.query, apiKey, maxResults); break;
         case "serper": results = await serperSearch(input.query, apiKey, maxResults); break;
         case "brave":  results = await braveSearch(input.query, apiKey, maxResults);  break;
+        case "ddgs":   results = await ddgsSearch(input.query, maxResults);           break;
         default:       results = [];
       }
 
@@ -182,10 +225,11 @@ export const webSearchTool = buildTool({
         })
         .join("\n\n");
 
+      const providerLabel = provider === "ddgs" ? "DuckDuckGo" : provider;
       return {
         success: true,
         data:
-          `Search results for: "${input.query}" (via ${provider})\n\n` +
+          `Search results for: "${input.query}" (via ${providerLabel})\n\n` +
           formatted,
       };
     } catch (err) {
