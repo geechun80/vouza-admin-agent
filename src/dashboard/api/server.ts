@@ -13,6 +13,7 @@ import os from "os";
 
 const execAsync = promisify(exec);
 import { getModelCatalogForUI } from "../../config/models.js";
+import { getBudgetSnapshot } from "../../agent/budget.js";
 import { launchAgent, getAgentStatus, type AgentInstance } from "../../bridge/launcher.js";
 import { setAgentInstance } from "../../bridge/agentBridge.js";
 import { streamChat, clearSession } from "./chat.js";
@@ -204,6 +205,27 @@ export async function startDashboard(port = 3456): Promise<void> {
       defaultModel:    process.env.VOUZA_API_MODEL    || "google/gemini-2.5-flash-lite",
       brandName:       process.env.VOUZA_BRAND_NAME   || "Vouza",
     });
+  });
+
+  // --- Budget Status API ---
+  // Returns today's spend against the Vouza fallback-key daily cap. Only
+  // meaningful when the Guide Bot is running on Vouza's shared key — when
+  // the user has their own key, spend is always reported as $0 because
+  // we don't track it (user controls their own platform limits).
+  app.get("/api/budget-status", async (_req, res) => {
+    try {
+      const snapshot = await getBudgetSnapshot();
+      res.json({
+        date:      snapshot.date,
+        spentUsd:  Number(snapshot.totalUsd.toFixed(4)),
+        capUsd:    snapshot.cap,
+        remaining: Math.max(0, Number((snapshot.cap - snapshot.totalUsd).toFixed(4))),
+        pctUsed:   Math.min(100, Math.round((snapshot.totalUsd / snapshot.cap) * 100)),
+        byProvider: snapshot.byProvider,
+      });
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
   });
 
   // --- Config API ---

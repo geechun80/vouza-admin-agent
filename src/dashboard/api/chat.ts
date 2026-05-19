@@ -18,6 +18,7 @@ import { agentLoop } from "../../agent/loop.js";
 import type { AgentContext, AgentConfig } from "../../types/index.js";
 import type { AIProvider } from "../../config/models.js";
 import { DEFAULT_OPENROUTER_TIERS } from "../../agent/router.js";
+import { checkBudget, recordSpend, isVouzaFallbackKey } from "../../agent/budget.js";
 
 // Tools
 import { readEmailsTool, sendEmailTool, draftEmailTool, triageEmailsTool } from "../../tools/email.js";
@@ -391,9 +392,44 @@ export async function* streamChat(
   const session = getOrCreateSession(sessionId, savedConfig, apiKeyOverride);
   session.lastActive = Date.now();
 
+  // ── Budget guard — only when on Vouza's fallback key ─────────────────────
+  // The user's own key is never capped here; they control their limits at
+  // their LLM platform. We only enforce a daily cap when the Guide Bot is
+  // running on Vouza's shared key (VOUZA_API_KEY env var).
+  const activeProvider = session.context.config.provider;
+  const activeKey      = session.context.config.apiKeys[activeProvider];
+  const onVouzaKey     = isVouzaFallbackKey(activeKey);
+
+  if (onVouzaKey) {
+    const status = await checkBudget();
+    if (status.blocked) {
+      yield {
+        type: "text_delta",
+        text:
+          `\n\n🚫 ${status.message}\n\n` +
+          `To keep chatting now, add your own AI API key in **Step 2 — Connect Apps** ` +
+          `of the setup wizard. With your own key, this cap doesn't apply.\n`,
+      };
+      yield { type: "error", error: "budget_cap_reached" };
+      return;
+    }
+    if (status.warn && status.message) {
+      yield { type: "text_delta", text: `\n_${status.message}_\n\n` };
+    }
+  }
+
   const systemPrompt = buildSystemPrompt(wizardStep, userName);
 
   for await (const event of agentLoop(message, session.context, session.registry, systemPrompt)) {
+    // ── Cost tracking — only when on Vouza's fallback key ────────────────
+    if (onVouzaKey && event.type === "usage") {
+      const u = event as { type: "usage"; model: string; inputTokens: number; outputTokens: number };
+      // recordSpend is fail-open — never throws even if the file is locked.
+      recordSpend(activeProvider, u.model, u.inputTokens, u.outputTokens).catch(() => {});
+      // Don't surface raw usage events to the browser — they're internal.
+      continue;
+    }
+
     yield event;
 
     // ── Wizard badge refresh ─────────────────────────────────────────────────

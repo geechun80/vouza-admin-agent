@@ -88,7 +88,10 @@ export type StreamEvent =
   | { type: "tool_start"; toolName: string; input: unknown }
   | { type: "tool_result"; toolName: string; result: ToolResult }
   | { type: "turn_complete"; turnCount: number }
-  | { type: "error"; error: string };
+  | { type: "error"; error: string }
+  // Emitted after every LLM API call. Consumers (e.g. the Guide Bot's
+  // budget tracker) may ignore this — main REPL passes through silently.
+  | { type: "usage"; model: string; inputTokens: number; outputTokens: number };
 
 export interface AgentState {
   messages: ConversationMessage[];

@@ -142,7 +142,11 @@ async function callOpenAICompatible(
   systemPrompt: string,
   messages: Array<{ role: string; content: any }>,
   tools: Array<{ name: string; description: string; input_schema: Record<string, unknown> }>
-): Promise<{ content: Array<{ type: string; text?: string; id?: string; name?: string; input?: unknown }>; stop_reason: string }> {
+): Promise<{
+  content: Array<{ type: string; text?: string; id?: string; name?: string; input?: unknown }>;
+  stop_reason: string;
+  usage?: { inputTokens: number; outputTokens: number };
+}> {
   const { baseURL, apiKey: key, extraHeaders } = getOpenAICompatibleConfig(provider, apiKey);
 
   // Convert tools to OpenAI function format
@@ -269,7 +273,16 @@ async function callOpenAICompatible(
 
   const stopReason = choice.finish_reason === "tool_calls" ? "tool_use" : "end_turn";
 
-  return { content, stop_reason: stopReason };
+  // Extract usage if the provider returned it (Anthropic, OpenAI, OpenRouter all do).
+  // Missing usage is non-fatal — budget tracker simply won't record this call.
+  const usage = data.usage
+    ? {
+        inputTokens:  Number(data.usage.prompt_tokens ?? data.usage.input_tokens ?? 0),
+        outputTokens: Number(data.usage.completion_tokens ?? data.usage.output_tokens ?? 0),
+      }
+    : undefined;
+
+  return { content, stop_reason: stopReason, usage };
 }
 
 /**
@@ -373,6 +386,7 @@ export async function* agentLoop(
     try {
       let responseContent: Array<{ type: string; text?: string; id?: string; name?: string; input?: unknown }>;
       let stopReason: string;
+      let callUsage: { inputTokens: number; outputTokens: number } | undefined;
 
       if (isAnthropic && client) {
         // Native Anthropic SDK — 60 s timeout matches our AbortController budget
@@ -401,6 +415,12 @@ export async function* agentLoop(
         );
         responseContent = response.content as any;
         stopReason = response.stop_reason || "end_turn";
+        if (response.usage) {
+          callUsage = {
+            inputTokens:  response.usage.input_tokens  ?? 0,
+            outputTokens: response.usage.output_tokens ?? 0,
+          };
+        }
       } else {
         // OpenAI-compatible providers (includes OpenRouter)
         const result = await callOpenAICompatible(
@@ -413,6 +433,18 @@ export async function* agentLoop(
         );
         responseContent = result.content;
         stopReason = result.stop_reason;
+        callUsage = result.usage;
+      }
+
+      // Yield usage so cost-tracking consumers (Guide Bot budget guard) can
+      // record spend. Other consumers (main REPL, Telegram listener) ignore.
+      if (callUsage) {
+        yield {
+          type:         "usage",
+          model:        activeModel,
+          inputTokens:  callUsage.inputTokens,
+          outputTokens: callUsage.outputTokens,
+        };
       }
 
       // Process response content blocks
