@@ -95,21 +95,51 @@ function isSensitiveField(key: string): boolean {
  * CSRF guard for all mutating endpoints.
  * Allows requests that originate from the dashboard itself (localhost) and blocks
  * cross-origin requests from other browser pages.
+ *
+ * Security notes:
+ *   • Distinguishes `origin === undefined` (header absent — safe) from
+ *     `origin === ""` (empty-string header, sent by data: URIs / sandboxed iframes
+ *     — treated as cross-origin and blocked).  The old `origin ?? referer ?? ""`
+ *     pattern collapsed both into "" and incorrectly passed the empty-string case.
+ *   • When Origin is absent, the Host header is checked as a secondary layer so
+ *     that a reverse proxy stripping Origin from an external caller can't sneak
+ *     through (non-localhost Host → 403).
+ *   • Referer is NOT used as a standalone trust signal — it can be stripped by
+ *     Referrer-Policy and is weaker than Origin.
  */
 function requireLocalOrigin(
   req: express.Request,
   res: express.Response,
   next: express.NextFunction
 ): void {
-  const origin  = req.headers["origin"]  as string | undefined;
-  const referer = req.headers["referer"] as string | undefined;
-  const source  = origin ?? referer ?? "";
-  // Allow: no origin (direct / curl / same-origin fetch), or localhost
-  if (source === "" ||
-      source.startsWith("http://localhost:") ||
-      source.startsWith("http://127.0.0.1:")) {
+  const origin = req.headers["origin"] as string | undefined;
+  const host   = (req.headers["host"]  as string | undefined) ?? "";
+
+  // ① No Origin header → direct / curl / same-origin programmatic request.
+  //   Validate Host as a second layer to block reverse-proxy stripping of Origin.
+  if (origin === undefined) {
+    if (
+      host === ""                    ||   // non-HTTP/1.1, no Host (safe)
+      host.startsWith("localhost:")  ||
+      host.startsWith("127.0.0.1:")
+    ) {
+      return next();
+    }
+    // Non-localhost Host with no Origin — likely a proxied external request. Block.
+    res.status(403).json({ error: "Forbidden: cross-origin request rejected" });
+    return;
+  }
+
+  // ② Explicit localhost Origin → allow.
+  if (
+    origin.startsWith("http://localhost:") ||
+    origin.startsWith("http://127.0.0.1:")
+  ) {
     return next();
   }
+
+  // ③ Empty-string Origin ("Origin: "), "null" origin (sandboxed iframe), or any
+  //   non-localhost origin → block.
   res.status(403).json({ error: "Forbidden: cross-origin request rejected" });
 }
 

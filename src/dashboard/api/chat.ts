@@ -289,11 +289,11 @@ export function getOrCreateSession(
     return s;
   }
 
-  // Build AgentConfig from saved config + optional override
+  // Build AgentConfig from saved config + optional override.
+  // buildAgentConfig → buildToolsConfig embeds all integration credentials
+  // directly into agentConfig.tools.* so every tool reads from context.config,
+  // not from process.env.  No runtime process.env mutation needed or wanted.
   const agentConfig = buildAgentConfig(savedConfig, apiKeyOverride);
-
-  // Apply credentials to process.env so existing tools can read them
-  applyCredentialsToEnv(savedConfig);
 
   // Build tool registry (all 24 tools — they fail gracefully if unconfigured)
   const registry = buildRegistry();
@@ -546,30 +546,6 @@ function buildToolsConfig(saved: any): AgentConfig["tools"] {
   return tools;
 }
 
-function applyCredentialsToEnv(saved: any): void {
-  const creds    = saved?.credentials || {};
-  const channels = saved?.channels    || {};
-
-  const mapping: Record<string, string | undefined> = {
-    GMAIL_USER:              creds.gmailUser || channels.email?.config?.gmailUser,
-    GMAIL_APP_PASSWORD:      creds.gmailPass || creds.gmailAppPassword,
-    TELEGRAM_BOT_TOKEN:      creds.telegramToken || creds.telegramBotToken,
-    SLACK_BOT_TOKEN:         creds.slackToken || creds.slackBotToken,
-    GOOGLE_SERVICE_ACCOUNT_KEY: creds.googleSaKey,
-    TWILIO_ACCOUNT_SID:      creds.twilioSid,
-    TWILIO_AUTH_TOKEN:       creds.twilioToken,
-    TWILIO_WHATSAPP_NUMBER:  creds.twilioNum,
-    META_WHATSAPP_ACCESS_TOKEN:    creds.metaToken,
-    META_WHATSAPP_PHONE_NUMBER_ID: creds.metaPhoneId,
-    WAHA_SERVER_URL:         creds.wahaUrl,
-    WAHA_API_KEY:            creds.wahaKey,
-    WHATSAPP_WEB_SERVER:     creds.waWebServer,
-  };
-
-  for (const [envVar, value] of Object.entries(mapping)) {
-    if (value) process.env[envVar] = value;
-  }
-}
 
 function buildRegistry(): ToolRegistry {
   const registry = new ToolRegistry();
