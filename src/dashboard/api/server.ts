@@ -145,6 +145,51 @@ function requireLocalOrigin(
   res.status(403).json({ error: "Forbidden: cross-origin request rejected" });
 }
 
+// ── Bearer-token auth (LAN/remote-access mode only) ──────────────────────────
+//
+// When the dashboard binds to anything other than 127.0.0.1 (e.g. 0.0.0.0 for
+// Docker or Tailscale exposure), we REQUIRE a password set via env:
+//   DASHBOARD_PASSWORD=somesecret
+// Clients send it as:  Authorization: Bearer <password>
+//                  or  ?token=<password>  (for SSE/EventSource which can't set headers)
+//
+// In localhost-only mode this middleware is a no-op — the OS firewall already
+// blocks remote access, so the password requirement is pure friction.
+const DASHBOARD_PASSWORD = (process.env.DASHBOARD_PASSWORD || "").trim();
+const DASHBOARD_BIND     = (process.env.DASHBOARD_BIND     || "127.0.0.1").trim();
+const REQUIRE_AUTH       = DASHBOARD_BIND !== "127.0.0.1" && DASHBOARD_BIND !== "localhost";
+
+// Constant-time string compare to avoid timing oracles on the password.
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+function requireDashboardAuth(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+): void {
+  // Localhost-only mode → no auth required (loopback can't be reached remotely)
+  if (!REQUIRE_AUTH) return next();
+
+  // Otherwise require either Authorization: Bearer <pw> or ?token=<pw>
+  const header = req.headers["authorization"] as string | undefined;
+  const tokenFromHeader = header?.startsWith("Bearer ")
+    ? header.slice(7).trim()
+    : undefined;
+  const tokenFromQuery = typeof req.query.token === "string" ? req.query.token : undefined;
+  const provided = tokenFromHeader || tokenFromQuery || "";
+
+  if (!provided || !timingSafeEqual(provided, DASHBOARD_PASSWORD)) {
+    res.status(401).json({ error: "Unauthorized: dashboard password required" });
+    return;
+  }
+  next();
+}
+
 /**
  * Safely resolve a conversation ID to an absolute file path.
  *
@@ -186,6 +231,37 @@ export async function startDashboard(port = 3456): Promise<void> {
   const app = express();
   app.use(express.json({ limit: "30mb" })); // 30 MB to accommodate base64 audio uploads
   app.use(express.static(PUBLIC_DIR));
+
+  // ── Dashboard auth (active only in remote-access mode) ─────────────────────
+  // Localhost-only mode (default): middleware is a no-op — OS already isolates loopback.
+  // Remote mode (DASHBOARD_BIND=0.0.0.0 etc.): every /api/* route except the
+  // public webhooks below requires Authorization: Bearer <DASHBOARD_PASSWORD>.
+  // Webhooks (/api/whatsapp/webhook, /api/telegram/webhook) are exempt because
+  // they're called by external services with their own signed payloads.
+  app.use("/api", (req, res, next) => {
+    // Public webhook paths — Telegram/WAHA need to reach these without our password.
+    if (
+      req.path === "/whatsapp/webhook" ||
+      req.path === "/telegram/webhook" ||
+      req.path === "/operator-defaults" || // tells the UI whether to show "use Vouza key" CTA
+      req.path === "/models"               // public model catalog (no secrets)
+    ) {
+      return next();
+    }
+    return requireDashboardAuth(req, res, next);
+  });
+
+  // ── Startup-time safety: refuse to bind to a non-loopback interface
+  //    without a password set. Prevents an accidental "DASHBOARD_BIND=0.0.0.0"
+  //    deploy that exposes the agent to the whole LAN/internet with no auth.
+  if (REQUIRE_AUTH && !DASHBOARD_PASSWORD) {
+    console.error(
+      "\n❌ DASHBOARD_BIND is set to a non-localhost address but DASHBOARD_PASSWORD is empty.\n" +
+      "   Refusing to start — this would expose the dashboard to your network with no auth.\n" +
+      "   Fix: set DASHBOARD_PASSWORD=<a-long-random-string> in your env, OR remove DASHBOARD_BIND.\n"
+    );
+    process.exit(1);
+  }
 
   // --- Model Catalog API ---
   app.get("/api/models", (_req, res) => {
@@ -913,8 +989,17 @@ export async function startDashboard(port = 3456): Promise<void> {
     res.sendFile(join(PUBLIC_DIR, "index.html"));
   });
 
-  app.listen(port, async () => {
-    console.log(`\n  Setup Dashboard: http://localhost:${port}\n`);
+  // Bind to localhost by default — eliminates LAN exposure entirely.
+  // Operators wanting remote access set DASHBOARD_BIND=0.0.0.0 + DASHBOARD_PASSWORD.
+  app.listen(port, DASHBOARD_BIND, async () => {
+    const displayHost = DASHBOARD_BIND === "0.0.0.0" ? "<your-ip>" : DASHBOARD_BIND;
+    console.log(`\n  Setup Dashboard: http://${displayHost}:${port}`);
+    if (REQUIRE_AUTH) {
+      console.log(`  🔒 Authentication required — clients must send DASHBOARD_PASSWORD as Bearer token.`);
+    } else {
+      console.log(`  🛡  Bound to loopback only — not reachable from your network.`);
+    }
+    console.log("");
     const operatorKey = (process.env.VOUZA_API_KEY || "").trim();
     try {
       const config = await loadSetupConfig();
