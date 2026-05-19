@@ -170,7 +170,7 @@ export async function startDashboard(port = 3456): Promise<void> {
     res.json({
       hasDefaultKey,
       defaultProvider: process.env.VOUZA_API_PROVIDER || "openrouter",
-      defaultModel:    process.env.VOUZA_API_MODEL    || "deepseek/deepseek-v4-flash:free",
+      defaultModel:    process.env.VOUZA_API_MODEL    || "google/gemini-2.5-flash-lite",
       brandName:       process.env.VOUZA_BRAND_NAME   || "Vouza",
     });
   });

@@ -11,10 +11,10 @@
 // flagship │ Analysis, reports, image processing,        │ google/gemini-2.5-flash
 //          │ multi-step agentic workflows                │
 //
-// WHY NOT DeepSeek :free?
-// DeepSeek free-tier models on OpenRouter have 5–20 min queue times at peak because
-// they are the most in-demand free models on the platform. Gemini 2.5 Flash variants
-// ($0.07–$0.15/1M tokens) are near-instant and cost < $0.01 for a typical agent task.
+// Model selection rationale:
+// Gemini 2.5 Flash variants ($0.07–$0.15/1M tokens) are near-instant and cost
+// < $0.01 for a typical agent task. Llama 3.1 8B :free is used for the fast tier
+// as it has the shortest queue times among free OpenRouter models.
 // =============================================================================
 
 export type TaskComplexity = "fast" | "balanced" | "flagship";
