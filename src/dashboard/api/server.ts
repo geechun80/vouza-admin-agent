@@ -14,6 +14,7 @@ import os from "os";
 const execAsync = promisify(exec);
 import { getModelCatalogForUI } from "../../config/models.js";
 import { launchAgent, getAgentStatus, type AgentInstance } from "../../bridge/launcher.js";
+import { setAgentInstance } from "../../bridge/agentBridge.js";
 import { streamChat, clearSession } from "./chat.js";
 import { createMemoryStore } from "../../memory/store.js";
 import { handleWAHAEvent } from "../../whatsapp/wahaListener.js";
@@ -309,6 +310,7 @@ export async function startDashboard(port = 3456): Promise<void> {
       launching = true;
       try {
         agentInstance = await launchAgent();
+        setAgentInstance(agentInstance);
       } finally {
         launching = false;
       }
@@ -324,6 +326,7 @@ export async function startDashboard(port = 3456): Promise<void> {
       if (agentInstance) {
         await agentInstance.stop();
         agentInstance = null;
+        setAgentInstance(null);
       }
       res.json({ success: true });
     } catch (err) {
@@ -872,6 +875,7 @@ export async function startDashboard(port = 3456): Promise<void> {
       if (agentInstance) {
         await agentInstance.stop().catch(() => {});
         agentInstance = null;
+        setAgentInstance(null);
       }
       // Delete config file — catch ENOENT (already gone is fine)
       const { unlink: removeFile } = await import("fs/promises");
@@ -905,6 +909,7 @@ export async function startDashboard(port = 3456): Promise<void> {
         launching = true;
         try {
           agentInstance = await launchAgent();
+          setAgentInstance(agentInstance);
           console.log(`  ✓ Agent is live — ready to handle tasks.\n`);
         } catch (launchErr) {
           // One automatic retry after 3 seconds (covers race conditions on slow machines)
@@ -912,6 +917,7 @@ export async function startDashboard(port = 3456): Promise<void> {
           setTimeout(async () => {
             try {
               agentInstance = await launchAgent();
+              setAgentInstance(agentInstance);
               console.log(`  ✓ Agent launched on retry — ready.\n`);
             } catch (retryErr) {
               console.error(`  ✗ Agent failed to launch after retry: ${retryErr}`);

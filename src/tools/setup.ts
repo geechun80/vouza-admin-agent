@@ -681,13 +681,96 @@ export const getSetupStatusTool = buildTool({
 // save_integration_credentials
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── Credential format validators ──────────────────────────────────────────────
+// Return an error string on bad format, null on pass.
+// Checked before any write so users get immediate feedback rather than a
+// silent save that fails on first use.
+const VALIDATORS: Partial<Record<string, (v: string) => string | null>> = {
+  telegramToken: v =>
+    /^\d{7,12}:[A-Za-z0-9_-]{35,}$/.test(v.trim()) ? null
+    : `Token format looks wrong — expected something like 123456789:ABCdefGhIJKlmNoPQRstuVWXyz (digits, colon, 35+ chars). Got "${v.slice(0, 40)}"`,
+  slackToken:    v =>
+    v.trim().startsWith("xoxb-") ? null
+    : "Slack Bot Token must start with xoxb-",
+  groqApiKey:    v =>
+    v.trim().startsWith("gsk_") ? null
+    : "Groq API key must start with gsk_",
+  gmailUser:     v =>
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()) ? null
+    : "Please enter a valid Gmail address (e.g. yourname@gmail.com)",
+  gmailPass:     v =>
+    v.replace(/\s/g, "").length === 16 ? null
+    : `Gmail App Password must be exactly 16 characters — got ${v.replace(/\s/g, "").length}. ` +
+      "Copy it from Google Account → Security → App passwords (spaces are OK).",
+};
+
+function validateCredentials(c: Record<string, string>): string | null {
+  for (const [key, value] of Object.entries(c)) {
+    const check = VALIDATORS[key as keyof typeof VALIDATORS];
+    if (check) {
+      const err = check(String(value));
+      if (err) return `${key}: ${err}`;
+    }
+  }
+  return null;
+}
+
+// ── Service-to-listener mapping — which ServiceManager service to restart ─────
+// Only listener-based services need a restart; tool-only integrations (email,
+// calendar, sheets) are immediately usable via context.config patching.
+const SERVICE_RESTART_MAP: Partial<Record<string, string>> = {
+  telegram:        "telegram",
+  whatsapp_waha:   "whatsapp",    // Baileys listener (waha uses webhooks — no restart needed)
+};
+
+// ── Live agent patcher — applies credential changes to the running agent ──────
+async function hotPatchAgent(
+  integration: string,
+  tools: Record<string, any>,
+  credentials: Record<string, any>,
+): Promise<{ restarted: boolean; restartError?: string }> {
+  const { getAgentInstance } = await import("../bridge/agentBridge.js");
+  const ai = getAgentInstance();
+  if (!ai) return { restarted: false };
+
+  // Patch context.config.tools in-memory so the running agent picks up the
+  // new credentials without needing a full restart (email / calendar / sheets).
+  if (tools.gmail)    ai.context.config.tools.gmail    = tools.gmail;
+  if (tools.google)   ai.context.config.tools.google   = tools.google;
+  if (tools.telegram) ai.context.config.tools.telegram = tools.telegram;
+  if (tools.slack)    ai.context.config.tools.slack     = tools.slack;
+  if (tools.whatsapp) ai.context.config.tools.whatsapp = tools.whatsapp;
+  if (tools.smtp)     ai.context.config.tools.smtp      = tools.smtp;
+  if (tools.outlook)  ai.context.config.tools.outlook   = tools.outlook;
+
+  // Patch AI provider keys
+  if (credentials.aiProvider && credentials.aiApiKey) {
+    ai.context.config.apiKeys[credentials.aiProvider] = credentials.aiApiKey;
+    ai.context.config.provider = credentials.aiProvider;
+  }
+
+  // For listener-based services, try a hot-restart of the service.
+  const svcName = SERVICE_RESTART_MAP[integration];
+  if (svcName && ai.serviceManager.list().includes(svcName)) {
+    try {
+      await ai.serviceManager.restart(svcName);
+      return { restarted: true };
+    } catch (e) {
+      return { restarted: false, restartError: String(e) };
+    }
+  }
+
+  return { restarted: false };
+}
+
 export const saveIntegrationCredentialsTool = buildTool({
   name: "save_integration_credentials",
   description:
-    "Save credentials for an integration to config.json and activate it immediately — no restart needed. " +
+    "Save credentials for an integration to config.json and hot-patch the running agent immediately. " +
     "Call this AFTER the user provides their credentials during onboarding. " +
-    "Supported: gmail, outlook, smtp, google_calendar, telegram, slack, whatsapp_waha, whatsapp_twilio, voice_groq, voice_openai. " +
-    "After saving, IMMEDIATELY test with the relevant read tool to confirm it works.",
+    "Supported integrations: gmail, outlook, smtp, google_calendar, telegram, slack, " +
+    "whatsapp_waha, whatsapp_twilio, voice_groq, voice_openai, ai_provider. " +
+    "After saving, IMMEDIATELY test with the relevant read/info tool to confirm it works.",
   category: "system",
   isReadOnly: false,
   isConcurrencySafe: false,
@@ -699,22 +782,24 @@ export const saveIntegrationCredentialsTool = buildTool({
         "telegram", "slack",
         "whatsapp_waha", "whatsapp_twilio",
         "voice_groq", "voice_openai",
+        "ai_provider",
       ])
       .describe("Which integration to configure"),
     credentials: z
       .record(z.string())
       .describe(
-        "Key-value credential pairs for the chosen integration. " +
+        "Key-value credential pairs. " +
         "gmail: {gmailUser, gmailPass} | " +
         "outlook: {outlookClientId, outlookSecret, outlookTenant, outlookEmail?} | " +
-        "smtp: {smtpHost, smtpPort, smtpUser, smtpPass} | " +
+        "smtp: {smtpHost, smtpPort?, smtpUser, smtpPass} | " +
         "google_calendar: {googleSaKey} | " +
         "telegram: {telegramToken} | " +
         "slack: {slackToken} | " +
         "whatsapp_waha: {wahaUrl, wahaKey?} | " +
         "whatsapp_twilio: {twilioSid, twilioToken, twilioNum} | " +
         "voice_groq: {groqApiKey} | " +
-        "voice_openai: {openaiVoiceKey}"
+        "voice_openai: {openaiVoiceKey} | " +
+        "ai_provider: {provider, apiKey}  — provider = openrouter|anthropic|openai|google|xai|deepseek|groq"
       ),
   }),
   async call(input, ctx): Promise<any> {
@@ -725,14 +810,24 @@ export const saveIntegrationCredentialsTool = buildTool({
 
       const { credentials: c, integration } = input;
 
+      // ── Format validation (before any write) ────────────────────────────────
+      const validationError = validateCredentials(c);
+      if (validationError) return { success: false, error: validationError };
+
+      // ── Per-integration save logic ───────────────────────────────────────────
+      const hotTools: Record<string, any>  = {};
+      const hotCreds: Record<string, any>  = {};
+
       switch (integration) {
 
         case "gmail": {
           if (!c.gmailUser || !c.gmailPass)
             return { success: false, error: "gmailUser and gmailPass are both required." };
-          cfg.credentials.gmailUser     = c.gmailUser;
-          cfg.credentials.gmailPass     = c.gmailPass;
+          cfg.credentials.gmailUser = c.gmailUser;
+          cfg.credentials.gmailPass = c.gmailPass;
           cfg.tools.gmail = { user: c.gmailUser, appPassword: c.gmailPass, emailAddress: c.gmailUser };
+          hotTools.gmail = cfg.tools.gmail;
+          // Also patch the chat session's context so the test works immediately
           if (ctx?.config?.tools) ctx.config.tools.gmail = cfg.tools.gmail;
           break;
         }
@@ -745,11 +840,10 @@ export const saveIntegrationCredentialsTool = buildTool({
           cfg.credentials.outlookTenant   = c.outlookTenant;
           if (c.outlookEmail) cfg.credentials.outlookEmail = c.outlookEmail;
           cfg.tools.outlook = {
-            clientId: c.outlookClientId,
-            clientSecret: c.outlookSecret,
-            tenantId: c.outlookTenant,
-            email: c.outlookEmail || "",
+            clientId: c.outlookClientId, clientSecret: c.outlookSecret,
+            tenantId: c.outlookTenant,  email: c.outlookEmail || "",
           };
+          hotTools.outlook = cfg.tools.outlook;
           if (ctx?.config?.tools) ctx.config.tools.outlook = cfg.tools.outlook;
           break;
         }
@@ -762,13 +856,15 @@ export const saveIntegrationCredentialsTool = buildTool({
           cfg.credentials.smtpUser = c.smtpUser;
           cfg.credentials.smtpPass = c.smtpPass;
           cfg.tools.smtp = { host: c.smtpHost, port: c.smtpPort || "587", user: c.smtpUser, pass: c.smtpPass };
+          hotTools.smtp = cfg.tools.smtp;
           break;
         }
 
         case "google_calendar": {
-          if (!c.googleSaKey) return { success: false, error: "googleSaKey (full JSON string) is required." };
+          if (!c.googleSaKey)
+            return { success: false, error: "googleSaKey (full JSON string) is required." };
           try { JSON.parse(c.googleSaKey); } catch {
-            return { success: false, error: "That does not look like valid JSON. Please paste the full service account key file contents." };
+            return { success: false, error: "That doesn't look like valid JSON. Please paste the full contents of the service account key file." };
           }
           cfg.credentials.googleSaKey = c.googleSaKey;
           cfg.tools.google = {
@@ -780,32 +876,40 @@ export const saveIntegrationCredentialsTool = buildTool({
               "https://www.googleapis.com/auth/drive",
             ],
           };
+          hotTools.google = cfg.tools.google;
           if (ctx?.config?.tools) ctx.config.tools.google = cfg.tools.google;
           break;
         }
 
         case "telegram": {
-          if (!c.telegramToken) return { success: false, error: "telegramToken is required." };
+          if (!c.telegramToken)
+            return { success: false, error: "telegramToken is required." };
           cfg.credentials.telegramToken = c.telegramToken;
           cfg.tools.telegram = { botToken: c.telegramToken };
+          hotTools.telegram = cfg.tools.telegram;
           if (ctx?.config?.tools)  ctx.config.tools.telegram = cfg.tools.telegram;
           if (ctx?.config)        (ctx.config as any).telegramToken = c.telegramToken;
           break;
         }
 
         case "slack": {
-          if (!c.slackToken) return { success: false, error: "slackToken is required." };
+          if (!c.slackToken)
+            return { success: false, error: "slackToken is required." };
           cfg.credentials.slackToken = c.slackToken;
           cfg.tools.slack = { botToken: c.slackToken };
+          hotTools.slack = cfg.tools.slack;
           if (ctx?.config?.tools) ctx.config.tools.slack = cfg.tools.slack;
           break;
         }
 
         case "whatsapp_waha": {
-          if (!c.wahaUrl) return { success: false, error: "wahaUrl is required." };
+          if (!c.wahaUrl)
+            return { success: false, error: "wahaUrl is required." };
           cfg.credentials.wahaUrl = c.wahaUrl;
           if (c.wahaKey) cfg.credentials.wahaKey = c.wahaKey;
+          // WAHA uses webhooks — no listener restart needed; just save the URL.
           cfg.tools.whatsapp = { provider: "waha", config: { serverUrl: c.wahaUrl, apiKey: c.wahaKey || "" } };
+          hotTools.whatsapp = cfg.tools.whatsapp;
           if (ctx?.config?.tools) ctx.config.tools.whatsapp = cfg.tools.whatsapp;
           break;
         }
@@ -817,23 +921,51 @@ export const saveIntegrationCredentialsTool = buildTool({
           cfg.credentials.twilioToken = c.twilioToken;
           cfg.credentials.twilioNum   = c.twilioNum;
           cfg.tools.whatsapp = { provider: "twilio", config: { accountSid: c.twilioSid, authToken: c.twilioToken, fromNumber: c.twilioNum } };
+          hotTools.whatsapp = cfg.tools.whatsapp;
           if (ctx?.config?.tools) ctx.config.tools.whatsapp = cfg.tools.whatsapp;
           break;
         }
 
         case "voice_groq": {
-          if (!c.groqApiKey) return { success: false, error: "groqApiKey is required." };
+          if (!c.groqApiKey)
+            return { success: false, error: "groqApiKey is required." };
           cfg.credentials.groqApiKey = c.groqApiKey;
-          if (ctx?.config) (ctx.config as any).whisperApiKey = c.groqApiKey;
-          if (ctx?.config) (ctx.config as any).whisperProvider = "groq";
+          if (ctx?.config) { (ctx.config as any).whisperApiKey = c.groqApiKey; (ctx.config as any).whisperProvider = "groq"; }
+          hotCreds.whisperApiKey    = c.groqApiKey;
+          hotCreds.whisperProvider  = "groq";
           break;
         }
 
         case "voice_openai": {
-          if (!c.openaiVoiceKey) return { success: false, error: "openaiVoiceKey is required." };
+          if (!c.openaiVoiceKey)
+            return { success: false, error: "openaiVoiceKey is required." };
           cfg.credentials.openaiVoiceKey = c.openaiVoiceKey;
-          if (ctx?.config) (ctx.config as any).whisperApiKey = c.openaiVoiceKey;
-          if (ctx?.config) (ctx.config as any).whisperProvider = "openai";
+          if (ctx?.config) { (ctx.config as any).whisperApiKey = c.openaiVoiceKey; (ctx.config as any).whisperProvider = "openai"; }
+          hotCreds.whisperApiKey    = c.openaiVoiceKey;
+          hotCreds.whisperProvider  = "openai";
+          break;
+        }
+
+        case "ai_provider": {
+          // Saves the user's own AI API key — replaces the Vouza operator key for this user.
+          const provider = (c.provider || "").toLowerCase().trim();
+          const apiKey   = (c.apiKey   || "").trim();
+          if (!provider || !apiKey)
+            return { success: false, error: "provider and apiKey are both required. provider = openrouter | anthropic | openai | google | xai | deepseek | groq" };
+          const KNOWN = ["openrouter","anthropic","openai","google","xai","deepseek","alibaba","moonshot","groq"];
+          if (!KNOWN.includes(provider))
+            return { success: false, error: `Unknown provider "${provider}". Choose one of: ${KNOWN.join(", ")}` };
+
+          const keyField = `${provider}ApiKey`;
+          cfg.credentials[keyField] = apiKey;
+          if (!cfg.agent) cfg.agent = {};
+          cfg.agent.provider = provider;
+          // Patch chat session immediately
+          if (ctx?.config?.apiKeys) (ctx.config.apiKeys as Record<string, string>)[provider] = apiKey;
+          if (ctx?.config) ctx.config.provider = provider as any;
+          // Patch live agent
+          hotCreds.aiProvider = provider;
+          hotCreds.aiApiKey   = apiKey;
           break;
         }
 
@@ -841,18 +973,47 @@ export const saveIntegrationCredentialsTool = buildTool({
           return { success: false, error: `Unknown integration: ${integration}` };
       }
 
+      // ── Write to disk ─────────────────────────────────────────────────────────
       await writeConfig(cfg);
 
+      // ── Hot-patch the running main agent ──────────────────────────────────────
+      // This propagates the new credentials into the live agent's in-memory context
+      // AND restarts listener-based services (Telegram, Baileys WhatsApp) so messages
+      // start flowing immediately without a full agent restart.
+      const patch = await hotPatchAgent(integration, hotTools, hotCreds);
+
+      // ── Build response ────────────────────────────────────────────────────────
       const guide = INTEGRATION_GUIDES[integration];
+      const name  = guide?.name ?? integration;
+
+      // Honest messaging: distinguish "works now" from "needs agent restart"
+      let activationNote = "";
+      if (integration === "telegram") {
+        activationNote = patch.restarted
+          ? "✅ Telegram listener restarted — your bot is now live and receiving messages."
+          : patch.restartError
+            ? `⚠️ Saved to disk, but the Telegram listener couldn't restart automatically (${patch.restartError}). Click "Restart Agent" in the dashboard or restart the server.`
+            : "💾 Saved. The agent needs to be launched (or restarted) before Telegram messages will flow.";
+      } else if (integration === "whatsapp_waha") {
+        activationNote = "💾 Saved. WAHA uses webhooks — make sure the webhook URL (http://localhost:3456/api/whatsapp/webhook) is set in WAHA's dashboard.";
+      } else if (integration === "ai_provider") {
+        activationNote = "✅ AI provider updated — your key is now active for this chat session and saved for future sessions.";
+      } else {
+        activationNote = "✅ Active immediately — credentials are live in the current session.";
+      }
+
       return {
         success: true,
         data: {
-          integration: guide?.name ?? integration,
-          message:     `✅ ${guide?.name ?? integration} credentials saved and activated (no restart needed).`,
-          nextStep:    guide?.testTip ?? "Test the connection using the relevant read tool.",
-          savedFields: Object.keys(c),
+          integration:    name,
+          message:        `✅ ${name} credentials saved successfully.`,
+          activationNote,
+          nextStep:       guide?.testTip ?? "Test the connection using the relevant read tool.",
+          savedFields:    Object.keys(c),
+          agentPatched:   !!Object.keys(hotTools).length || !!Object.keys(hotCreds).length,
         },
       };
+
     } catch (err) {
       return { success: false, error: `Failed to save credentials: ${err}` };
     }

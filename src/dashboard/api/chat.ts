@@ -35,6 +35,7 @@ import { sendWhatsAppMessageTool, readWhatsAppMessagesTool } from "../../tools/w
 import { saveMemoryTool, searchMemoryTool, forgetMemoryTool } from "../../tools/memory.js";
 import { transcribeAudioTool, transcribeAndSummarizeTool } from "../../tools/voice.js";
 import { getSetupStatusTool, saveIntegrationCredentialsTool } from "../../tools/setup.js";
+import { testCredentialTool } from "../../tools/setupValidator.js";
 import { webSearchTool } from "../../tools/webSearch.js";
 import { runShellCommandTool } from "../../tools/shell.js";
 
@@ -127,10 +128,23 @@ When the user first opens the chat OR asks about setup, connecting an integratio
 5. **Ask which they want to set up next** (or use the recommended priority order from the tool).
 6. **Walk through ONE integration at a time** — never dump all instructions at once.
 7. **Give the exact step-by-step** from the setupGuides in the tool result.
-8. **After they give you credentials**, call save_integration_credentials immediately.
-9. **Test live right away** — run the actual tool, show real data, confirm it works.
-10. **Say the magic words**: "✅ [Integration] is now live! Here's what I found: [actual data]"
+8. **After they give you credentials**, ALWAYS call test_credential FIRST.
+   - This validates the credential live against the real API before anything is written
+   - On success: show the user the proof ("Your bot is @MyAdminBot ✅") then call save_integration_credentials
+   - On failure: show the exact error ("Gmail rejected the App Password — make sure 2-Step Verification is ON") so they can fix it without re-entering everything
+   - Mapping: telegram→{type:"telegram",credentials:{token}}, gmail→{type:"gmail_smtp",credentials:{user,pass}}, slack→{type:"slack",credentials:{token}}, google service account→{type:"google_sa",credentials:{saKeyJson}}, any AI key→{type:"ai_provider",credentials:{provider,apiKey}}, waha→{type:"waha",credentials:{url,apiKey?}}, groq voice→{type:"groq_voice",credentials:{apiKey}}, agentmail→{type:"agentmail",credentials:{apiKey}}
+9. **Check the activationNote in the result of save_integration_credentials** — it tells you exactly what happened:
+   - "✅ Active immediately" → test live right away (email, calendar, sheets, voice)
+   - "✅ Telegram listener restarted" → test with get_telegram_bot_info, then tell user to open the bot and /start
+   - "⚠️ Saved but listener couldn't restart" → tell user to click Restart in the dashboard
+   - "💾 Saved. Agent needs to be launched" → tell user to click Launch Agent in the dashboard
+10. **If the test passes**, say: "✅ [Integration] is now live! Here's what I found: [actual data]"
 11. **Move to the next** unconfigured integration automatically.
+
+### Saving an AI provider key via chat:
+If the user pastes an API key for OpenRouter, Anthropic, OpenAI, Groq, etc. in the chat:
+- Call save_integration_credentials with integration="ai_provider" and credentials={provider: "openrouter", apiKey: "sk-or-..."}
+- This immediately switches their AI brain to their own key (no restart needed)
 
 ### Email setup paths:
 - **Gmail**: need Gmail address + 16-character App Password (not their regular Gmail password)
@@ -559,7 +573,7 @@ function buildRegistry(): ToolRegistry {
     sendWhatsAppMessageTool, readWhatsAppMessagesTool,
     saveMemoryTool, searchMemoryTool, forgetMemoryTool,
     transcribeAudioTool, transcribeAndSummarizeTool,
-    getSetupStatusTool, saveIntegrationCredentialsTool,
+    getSetupStatusTool, saveIntegrationCredentialsTool, testCredentialTool,
     webSearchTool,
     runShellCommandTool,  // Phase 0.5 — sandboxed shell for setup help
   ];
