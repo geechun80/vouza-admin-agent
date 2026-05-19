@@ -24,6 +24,20 @@ const MAX_INDEX_BYTES = 25_000;
 export function createMemoryStore(memoryDir: string): MemoryStore {
   const entries = new Map<string, MemoryEntry>();
 
+  // ── Phase 0: debounce index rebuilds ────────────────────────────────────────
+  // Previously every add/update/remove triggered an immediate full index rewrite.
+  // With many rapid writes (perf log + autoReflect + autoWriteSkill in one turn)
+  // that meant 5-6 synchronous disk write cycles. Now they all collapse into one
+  // rebuild 500 ms after the last write settles.
+  let _rebuildTimer: ReturnType<typeof setTimeout> | null = null;
+  function scheduleRebuild() {
+    if (_rebuildTimer) clearTimeout(_rebuildTimer);
+    _rebuildTimer = setTimeout(() => {
+      _rebuildTimer = null;
+      rebuildIndex(memoryDir, entries).catch(() => {});
+    }, 500);
+  }
+
   return {
     entries,
 
@@ -50,6 +64,8 @@ export function createMemoryStore(memoryDir: string): MemoryStore {
     },
 
     async save() {
+      // Flush any pending scheduled rebuild before doing the full save
+      if (_rebuildTimer) { clearTimeout(_rebuildTimer); _rebuildTimer = null; }
       await mkdir(memoryDir, { recursive: true });
 
       // Save individual entries
@@ -58,7 +74,7 @@ export function createMemoryStore(memoryDir: string): MemoryStore {
         await writeFile(filePath, JSON.stringify(entry, null, 2), "utf-8");
       }
 
-      // Rebuild index
+      // Rebuild index synchronously (intentional full flush on shutdown)
       await rebuildIndex(memoryDir, entries);
     },
 
@@ -79,11 +95,11 @@ export function createMemoryStore(memoryDir: string): MemoryStore {
 
       entries.set(id, entry);
 
-      // Persist immediately
+      // Persist immediately; index will be rebuilt after debounce settles
       const filePath = join(memoryDir, `${id}.json`);
       await mkdir(memoryDir, { recursive: true });
       await writeFile(filePath, JSON.stringify(entry, null, 2), "utf-8");
-      await rebuildIndex(memoryDir, entries);
+      scheduleRebuild();
 
       return id;
     },
@@ -141,7 +157,7 @@ export function createMemoryStore(memoryDir: string): MemoryStore {
 
       const filePath = join(memoryDir, `${id}.json`);
       await writeFile(filePath, JSON.stringify(entry, null, 2), "utf-8");
-      await rebuildIndex(memoryDir, entries);
+      scheduleRebuild();
     },
 
     async remove(id: string) {
@@ -151,7 +167,7 @@ export function createMemoryStore(memoryDir: string): MemoryStore {
       } catch {
         // Already gone
       }
-      await rebuildIndex(memoryDir, entries);
+      scheduleRebuild();
     },
   };
 }

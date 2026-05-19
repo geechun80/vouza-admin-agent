@@ -57,41 +57,77 @@ export async function launchAgent(): Promise<AgentInstance> {
   console.log(chalk.bold.cyan(`\n  Starting ${config.name}...`));
   console.log(chalk.gray(`  Model: ${config.model} (${config.provider})`));
 
-  // --- Register Tools ---
+  // --- Register Tools (lazy — only tools with valid credentials) ---
+  // Phase 0 fix: injecting 27 tool schemas into every AI call when most are
+  // unconfigured bloats the system prompt and slows inference. Only load what
+  // the user actually has set up.
   const registry = new ToolRegistry();
+  const tools   = config.tools ?? {};
 
-  // Email tools
-  registry.register(readEmailsTool as any);
-  registry.register(sendEmailTool as any);
-  registry.register(draftEmailTool as any);
-  registry.register(triageEmailsTool as any);
-  registry.register(getEmailThreadTool as any);
-  registry.register(replyEmailTool as any);
-  registry.register(deleteEmailTool as any);
+  const hasEmail      = !!(tools.gmail?.user || tools.gmail?.appPassword);
+  const hasGoogle     = !!(tools.google?.credentialsJson);
+  const hasTelegram   = !!(tools.telegram?.botToken);
+  const hasWhatsApp   = !!(tools.whatsapp?.provider);
+  const hasAgentMail  = !!(tools.agentmail?.apiKey);
+  const hasVoice      = !!(config.whisperApiKey);
 
-  // Calendar tools
-  registry.register(listEventsTool as any);
-  registry.register(createEventTool as any);
-  registry.register(updateEventTool as any);
-  registry.register(findFreeSlotsTool as any);
-  registry.register(deleteEventTool as any);
+  // Email tools — only when Gmail is configured
+  if (hasEmail) {
+    registry.register(readEmailsTool as any);
+    registry.register(sendEmailTool as any);
+    registry.register(draftEmailTool as any);
+    registry.register(triageEmailsTool as any);
+    registry.register(getEmailThreadTool as any);
+    registry.register(replyEmailTool as any);
+    registry.register(deleteEmailTool as any);
+  }
 
-  // Spreadsheet tools
-  registry.register(readSpreadsheetTool as any);
-  registry.register(writeSpreadsheetTool as any);
-  registry.register(searchSpreadsheetTool as any);
+  // Calendar tools — only when Google service account is present
+  if (hasGoogle) {
+    registry.register(listEventsTool as any);
+    registry.register(createEventTool as any);
+    registry.register(updateEventTool as any);
+    registry.register(findFreeSlotsTool as any);
+    registry.register(deleteEventTool as any);
+  }
 
-  // Messaging tools — Telegram
-  registry.register(sendTelegramMessageTool as any);
-  registry.register(readTelegramUpdatesTool as any);
-  registry.register(getTelegramBotInfoTool as any);
-  registry.register(forwardTelegramMessageTool as any);
+  // Spreadsheet tools — shares the same Google service account
+  if (hasGoogle) {
+    registry.register(readSpreadsheetTool as any);
+    registry.register(writeSpreadsheetTool as any);
+    registry.register(searchSpreadsheetTool as any);
+  }
 
-  // Messaging tools — WhatsApp
-  registry.register(sendWhatsAppMessageTool as any);
-  registry.register(readWhatsAppMessagesTool as any);
+  // Telegram tools — only when a bot token is saved
+  if (hasTelegram) {
+    registry.register(sendTelegramMessageTool as any);
+    registry.register(readTelegramUpdatesTool as any);
+    registry.register(getTelegramBotInfoTool as any);
+    registry.register(forwardTelegramMessageTool as any);
+  }
 
-  // File tools
+  // WhatsApp tools — only when a provider is configured
+  if (hasWhatsApp) {
+    registry.register(sendWhatsAppMessageTool as any);
+    registry.register(readWhatsAppMessagesTool as any);
+  }
+
+  // AgentMail tools — only when an API key is saved
+  if (hasAgentMail) {
+    registry.register(agentMailListThreadsTool as any);
+    registry.register(agentMailGetThreadTool as any);
+    registry.register(agentMailSendEmailTool as any);
+    registry.register(agentMailCreateInboxTool as any);
+  }
+
+  // Voice / Whisper tools — only when a Groq or OpenAI key is available
+  if (hasVoice) {
+    registry.register(transcribeAudioTool as any);
+    registry.register(transcribeAndSummarizeTool as any);
+  }
+
+  // ── Always-on tools (no credentials needed) ───────────────────────────────
+  // File tools — sandboxed to workspace/
   registry.register(listFilesTool as any);
   registry.register(readFileTool as any);
   registry.register(readExcelFileTool as any);
@@ -101,31 +137,31 @@ export async function launchAgent(): Promise<AgentInstance> {
   registry.register(copyFileTool as any);
   registry.register(renameFileTool as any);
 
-  // Memory tools
+  // Memory tools — local file store
   registry.register(saveMemoryTool as any);
   registry.register(searchMemoryTool as any);
   registry.register(forgetMemoryTool as any);
   registry.register(updateMemoryTool as any);
   registry.register(listAllMemoriesTool as any);
 
-  // Voice tools
-  registry.register(transcribeAudioTool as any);
-  registry.register(transcribeAndSummarizeTool as any);
+  // Web search — falls back to free providers if no API key
+  registry.register(webSearchTool as any);
 
-  // Setup & onboarding tools
+  // Setup & onboarding — always needed for wizard flow
   registry.register(getSetupStatusTool as any);
   registry.register(saveIntegrationCredentialsTool as any);
 
-  // Web search
-  registry.register(webSearchTool as any);
-
-  // AgentMail tools
-  registry.register(agentMailListThreadsTool as any);
-  registry.register(agentMailGetThreadTool as any);
-  registry.register(agentMailSendEmailTool as any);
-  registry.register(agentMailCreateInboxTool as any);
+  const activeModules = [
+    hasEmail     && "email",
+    hasGoogle    && "calendar+sheets",
+    hasTelegram  && "telegram",
+    hasWhatsApp  && "whatsapp",
+    hasAgentMail && "agentmail",
+    hasVoice     && "voice",
+  ].filter(Boolean).join(", ") || "none yet";
 
   console.log(chalk.green(`  ${registry.getAll().length} tools registered`));
+  console.log(chalk.gray(`  Active integrations: ${activeModules}`));
 
   // --- Load Memory ---
   const memory = createMemoryStore(config.memoryDir);

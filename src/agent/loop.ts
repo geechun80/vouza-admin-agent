@@ -94,7 +94,12 @@ Always consider the full picture of what you've done and learned so far.
 If a tool fails, do NOT give up — analyze the error, adjust, and try a different approach.`;
 
 
-// formatApiError replaced by classifyError() from errorClassifier.ts
+// ── Phase 0: performance guards ───────────────────────────────────────────────
+const AI_TIMEOUT_MS = 60_000;          // abort any AI call that takes > 60 s
+const PERF_LOG_FREQUENCY = 5;          // write perf log every N sessions (not every one)
+let _perfLogCounter  = 0;              // session counter (module-level, shared across calls)
+let _activeReflect   = false;          // prevents overlapping autoReflect calls
+let _activeSkillWrite = false;         // prevents overlapping autoWriteSkill calls
 
 /**
  * Build an OpenAI-compatible client for non-Anthropic providers.
@@ -202,20 +207,38 @@ async function callOpenAICompatible(
     }
   }
 
-  const res = await fetch(`${baseURL}/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-      ...extraHeaders,
-    },
-    body: JSON.stringify({
-      model,
-      messages: openaiMessages,
-      tools: openaiTools.length > 0 ? openaiTools : undefined,
-      max_tokens: 4096,
-    }),
-  });
+  // 60-second hard timeout — prevents hanging forever on free-tier queues
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), AI_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetch(`${baseURL}/chat/completions`, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+        ...extraHeaders,
+      },
+      body: JSON.stringify({
+        model,
+        messages: openaiMessages,
+        tools: openaiTools.length > 0 ? openaiTools : undefined,
+        max_tokens: 4096,
+      }),
+    });
+  } catch (err: any) {
+    if (err?.name === "AbortError" || err?.code === "ABORT_ERR") {
+      throw new Error(
+        `AI_QUEUE_TIMEOUT: ${provider} model did not respond within ${AI_TIMEOUT_MS / 1000}s. ` +
+        `The free-tier queue is backed up. Try again or switch AI provider.`
+      );
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!res.ok) {
     const err = await res.text();
@@ -352,14 +375,17 @@ export async function* agentLoop(
       let stopReason: string;
 
       if (isAnthropic && client) {
-        // Native Anthropic SDK
-        const response = await client.messages.create({
-          model: activeModel,
-          max_tokens: 4096,
-          system: fullSystemPrompt,
-          messages: apiMessages as Anthropic.MessageParam[],
-          tools: registry.toAPISchemas() as Anthropic.Tool[],
-        });
+        // Native Anthropic SDK — 60 s timeout matches our AbortController budget
+        const response = await client.messages.create(
+          {
+            model: activeModel,
+            max_tokens: 4096,
+            system: fullSystemPrompt,
+            messages: apiMessages as Anthropic.MessageParam[],
+            tools: registry.toAPISchemas() as Anthropic.Tool[],
+          },
+          { timeout: AI_TIMEOUT_MS }
+        );
         responseContent = response.content as any;
         stopReason = response.stop_reason || "end_turn";
       } else {
@@ -557,35 +583,42 @@ export async function* agentLoop(
   context.messages = newMessages;
   context.turnCount = state.turnCount;
 
-  // Log performance for self-improvement
-  // Redact task name before persisting — user may have typed secrets in the chat
-  const rawTaskName = (typeof userMessage === "string" ? userMessage : searchQuery).slice(0, 100);
-  const perfLog: PerformanceLog = {
-    sessionId: context.sessionId,
-    taskName:  redact(rawTaskName),
-    toolsUsed: [...new Set(toolsUsed)],
-    success:   true,
-    duration:  Date.now() - startTime,
-    timestamp: Date.now(),
-  };
-
-  await context.memory.add({
-    type:    "pattern",
-    title:   `perf_log:${context.sessionId}:${state.turnCount}`,
-    content: JSON.stringify(perfLog),
-    tags:    ["performance", ...toolsUsed],
-  });
-
-  // Auto-reflect: extract memorable user facts (contacts, preferences, patterns)
-  if (state.turnCount >= 2) {
-    autoReflect(state.messages, context).catch(() => {});
+  // ── Phase 0: throttled perf log ───────────────────────────────────────────
+  // Only write every PERF_LOG_FREQUENCY sessions — each write + index rebuild
+  // is a disk hit; accumulating logs every single turn bloats memory quickly.
+  _perfLogCounter++;
+  if (_perfLogCounter % PERF_LOG_FREQUENCY === 0) {
+    const rawTaskName = (typeof userMessage === "string" ? userMessage : searchQuery).slice(0, 100);
+    const perfLog: PerformanceLog = {
+      sessionId: context.sessionId,
+      taskName:  redact(rawTaskName),
+      toolsUsed: [...new Set(toolsUsed)],
+      success:   true,
+      duration:  Date.now() - startTime,
+      timestamp: Date.now(),
+    };
+    context.memory.add({
+      type:    "pattern",
+      title:   `perf_log:${context.sessionId}:${state.turnCount}`,
+      content: JSON.stringify(perfLog),
+      tags:    ["performance", ...toolsUsed],
+    }).catch(() => {});
   }
 
-  // ── Phase 2: auto-write skill ─────────────────────────────────────────────
-  // If this was a complex multi-tool session, document the procedure as a
-  // reusable SKILL.md so the agent can follow it automatically next time.
-  if (toolsUsed.length >= 3) {
-    autoWriteSkill(state.messages, toolsUsed, context).catch(() => {});
+  // ── Phase 0: guarded autoReflect — never run two at once ──────────────────
+  if (state.turnCount >= 2 && !_activeReflect) {
+    _activeReflect = true;
+    autoReflect(state.messages, context)
+      .catch(() => {})
+      .finally(() => { _activeReflect = false; });
+  }
+
+  // ── Phase 0: guarded autoWriteSkill — never run two at once ───────────────
+  if (toolsUsed.length >= 3 && !_activeSkillWrite) {
+    _activeSkillWrite = true;
+    autoWriteSkill(state.messages, toolsUsed, context)
+      .catch(() => {})
+      .finally(() => { _activeSkillWrite = false; });
   }
 }
 

@@ -119,6 +119,20 @@ export function classifyError(raw: string, isOpenRouter = false): ErrorInfo {
     };
   }
 
+  // ── Request queue timeout (our own 60s AbortController sentinel) ─────────
+  // Do NOT retry — we already waited 60s. Tell the user and let them decide.
+  if (msg.includes("ai_queue_timeout")) {
+    return {
+      type:        "permanent",
+      shouldRetry: false,
+      maxRetries:  0,
+      waitMs:      () => 0,
+      userMessage: isOpenRouter
+        ? "⏱️ The model took over 60 seconds — the free tier queue is backed up.\n\n**Fastest fix:** open the setup wizard and switch to Anthropic or Google AI for instant responses. Or top up at openrouter.ai/credits to skip the free queue."
+        : "⏱️ The AI model took too long to respond (60 s timeout). Please try again in a moment.",
+    };
+  }
+
   // ── Transient / server overload ────────────────────────────────────────────
   // Retry up to 2×: 3s → 6s
   if (
