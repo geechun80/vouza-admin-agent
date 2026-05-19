@@ -16,7 +16,7 @@ import { TaskScheduler } from "../tasks/scheduler.js";
 
 // Import all tools
 import { startTelegramListener, stopTelegramListener } from "../telegram/listener.js";
-import { startBaileysListener, stopBaileysListener, isBaileysConnected } from "../whatsapp/baileysListener.js";
+import { startBaileysListener, stopBaileysListener, isBaileysConnected } from "../whatsapp/baileysManager.js";
 import { startAgentMailListener, stopAgentMailListener } from "../email/agentMailListener.js";
 import { readEmailsTool, sendEmailTool, draftEmailTool, triageEmailsTool, getEmailThreadTool, replyEmailTool, deleteEmailTool } from "../tools/email.js";
 import { listEventsTool, createEventTool, updateEventTool, findFreeSlotsTool, deleteEventTool } from "../tools/calendar.js";

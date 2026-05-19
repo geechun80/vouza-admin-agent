@@ -25,7 +25,7 @@ import {
   onBaileysStatus,
   sendBaileysMessage,
   type BaileysStatus,
-} from "../../whatsapp/baileysListener.js";
+} from "../../whatsapp/baileysManager.js";
 import { toDataURL as qrToDataURL } from "qrcode";
 import { handleTelegramWebhookUpdate, getWebhookSecret } from "../../telegram/listener.js";
 import {
