@@ -15,6 +15,11 @@ const execAsync = promisify(exec);
 import { getModelCatalogForUI } from "../../config/models.js";
 import { getBudgetSnapshot } from "../../agent/budget.js";
 import { getHealthSnapshot as getProviderHealth } from "../../agent/providerFailover.js";
+import {
+  loadTranscript    as loadChatHistory,
+  listSessions      as listChatSessions,
+  deleteSession     as deleteChatSession,
+} from "../../agent/conversationStore.js";
 import { launchAgent, getAgentStatus, type AgentInstance } from "../../bridge/launcher.js";
 import { setAgentInstance } from "../../bridge/agentBridge.js";
 import { streamChat, clearSession } from "./chat.js";
@@ -290,6 +295,41 @@ export async function startDashboard(port = 3456): Promise<void> {
   // object means everything is healthy (no failures recorded).
   app.get("/api/provider-health", (_req, res) => {
     res.json(getProviderHealth());
+  });
+
+  // --- Chat History (PDPA compliance: access + erasure) ─────────────────────
+  // Server-side append-only audit log of every turn that flowed through the
+  // agent. Distinct from /api/conversations which is client-driven.
+  //
+  // GET    /api/chat-history             — list session summaries (newest first)
+  // GET    /api/chat-history/:sessionId  — full transcript (PDPA right of access)
+  // DELETE /api/chat-history/:sessionId  — wipe transcript (PDPA right to erasure)
+  app.get("/api/chat-history", requireLocalOrigin, async (req, res) => {
+    try {
+      const limit = Math.min(parseInt(String(req.query.limit ?? "50"), 10) || 50, 500);
+      const sessions = await listChatSessions(limit);
+      res.json(sessions);
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  app.get("/api/chat-history/:sessionId", requireLocalOrigin, async (req, res) => {
+    try {
+      const turns = await loadChatHistory(String(req.params.sessionId));
+      res.json({ sessionId: req.params.sessionId, turnCount: turns.length, turns });
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  app.delete("/api/chat-history/:sessionId", requireLocalOrigin, async (req, res) => {
+    try {
+      const result = await deleteChatSession(String(req.params.sessionId));
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
   });
 
   // --- Budget Status API ---

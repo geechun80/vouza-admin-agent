@@ -32,6 +32,7 @@ import {
   getDefaultModelFor,
   isCircuitOpen,
 } from "./providerFailover.js";
+import { appendTurn } from "./conversationStore.js";
 
 const DEFAULT_SYSTEM_PROMPT = `You are an AI-powered office administrator and executive assistant named Vouza.
 
@@ -359,6 +360,20 @@ export async function* agentLoop(
   // Providers we've already failed on in this turn — prevents bouncing.
   const triedProviders: AIProvider[] = [];
 
+  // ── Audit log: capture the user's incoming message ─────────────────────────
+  // Fire-and-forget — append goes to data/chat-history/<sessionId>.jsonl with
+  // secrets redacted. Used for PDPA compliance and crash forensics. Errors
+  // are silently swallowed so disk issues never block the agent.
+  const channelTag = (context.config as any).channel || "agent";
+  appendTurn({
+    sessionId: context.sessionId,
+    channel:   channelTag,
+    role:      "user",
+    content:   typeof userMessage === "string"
+                ? userMessage
+                : JSON.stringify(userMessage).slice(0, 4000),
+  });
+
   // Initialize state
   const state: AgentState = {
     messages: [
@@ -538,6 +553,21 @@ export async function* agentLoop(
         content: responseContent as any,
         timestamp: Date.now(),
         uuid: randomUUID(),
+      });
+
+      // ── Audit log: capture the assistant's response ──────────────────────
+      // Strip <think> blocks before persisting (they're scratchpad, not output).
+      // Tool call NAMES are logged but not their inputs/outputs — those can
+      // contain the largest blast radius (file paths, email bodies) and are
+      // already covered by per-tool audit if needed.
+      appendTurn({
+        sessionId: context.sessionId,
+        channel:   channelTag,
+        role:      "assistant",
+        content:   scrubThinkBlocks(assistantText).slice(0, 8000),
+        model:     activeModel,
+        provider:  effectiveProvider,
+        tools:     toolCalls.length > 0 ? toolCalls.map((t) => t.name) : undefined,
       });
 
       // If no tool calls, we're done
