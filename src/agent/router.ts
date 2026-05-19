@@ -4,12 +4,17 @@
 // Classifies every user message into one of three tiers and picks the
 // matching model, keeping costs low without sacrificing quality.
 //
-// Tier | Best for                                    | Default model
-// ─────┼─────────────────────────────────────────────┼──────────────────────────────────────
-// fast │ Short queries, status checks, yes/no        │ deepseek/deepseek-v4-flash:free
-// balanced │ Email drafting, scheduling, file ops     │ deepseek/deepseek-chat-v3-0324:free
-// flagship │ Analysis, reports, image processing,    │ deepseek/deepseek-r1:free
-//          │ multi-step agentic workflows             │
+// Tier     | Best for                                    | Default model
+// ─────────┼─────────────────────────────────────────────┼──────────────────────────────────────────
+// fast     │ Short queries, status checks, yes/no        │ meta-llama/llama-3.1-8b-instruct:free
+// balanced │ Email drafting, scheduling, file ops        │ google/gemini-2.5-flash-lite
+// flagship │ Analysis, reports, image processing,        │ google/gemini-2.5-flash
+//          │ multi-step agentic workflows                │
+//
+// WHY NOT DeepSeek :free?
+// DeepSeek free-tier models on OpenRouter have 5–20 min queue times at peak because
+// they are the most in-demand free models on the platform. Gemini 2.5 Flash variants
+// ($0.07–$0.15/1M tokens) are near-instant and cost < $0.01 for a typical agent task.
 // =============================================================================
 
 export type TaskComplexity = "fast" | "balanced" | "flagship";
@@ -21,15 +26,15 @@ export interface OpenRouterTiers {
 }
 
 export const DEFAULT_OPENROUTER_TIERS: OpenRouterTiers = {
-  fast:     "deepseek/deepseek-v4-flash:free",         // Free — fast responses, simple tasks
-  balanced: "deepseek/deepseek-chat-v3-0324:free",     // Free — solid for email, scheduling, files
-  flagship: "deepseek/deepseek-r1:free",               // Free — best reasoning, complex workflows
+  fast:     "meta-llama/llama-3.1-8b-instruct:free",   // Free — fast 8B model, simple queries
+  balanced: "google/gemini-2.5-flash-lite",             // $0.07/1M — near-instant, 1M ctx, multimodal
+  flagship: "google/gemini-2.5-flash",                  // $0.15/1M — fast, full capability, vision
 };
 
 export const TIER_LABELS: Record<TaskComplexity, string> = {
-  fast:     "⚡ Fast model (simple task)",
-  balanced: "⚖️ Balanced model (standard task)",
-  flagship: "🚀 Flagship model (complex task)",
+  fast:     "⚡ Fast model (simple task) — Llama 8B",
+  balanced: "⚖️ Balanced model (standard task) — Gemini Flash Lite",
+  flagship: "🚀 Flagship model (complex task) — Gemini Flash",
 };
 
 // ─── Classification signals ──────────────────────────────────────────────────
