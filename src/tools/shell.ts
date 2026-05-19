@@ -22,6 +22,8 @@
 
 import { exec }        from "child_process";
 import { promisify }   from "util";
+import { appendFile, mkdir }  from "fs/promises";
+import { dirname }            from "path";
 import { z }           from "zod";
 import { buildTool }   from "./registry.js";
 
@@ -32,6 +34,21 @@ const TIMEOUT_MS      = 30_000;   // hard abort after 30 s
 const MAX_OUTPUT      = 4_000;    // chars kept from stdout / stderr
 const MAX_CMD_LEN     = 250;      // reject suspiciously long commands
 const PROJECT_DIR     = process.cwd();
+const AUDIT_LOG_PATH  = "./data/shell-audit.log";
+
+// Restrict pm2 start/stop/restart targets. Prompt-injected text could otherwise
+// ask the agent to "pm2 start /path/to/anything.js" which PM2 will happily run.
+// Set PM2_ALLOWED_SERVICES=admin-agent,foo,bar to broaden if needed.
+const PM2_ALLOWED_SERVICES = new Set(
+  (process.env.PM2_ALLOWED_SERVICES || "admin-agent")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+);
+
+// Global kill switch for the shell tool. Set SHELL_TOOL_ENABLED=false to
+// completely disable shell access (e.g. for high-security customer deployments).
+const SHELL_ENABLED = (process.env.SHELL_TOOL_ENABLED || "true").toLowerCase() !== "false";
 
 // ── 1. Base-command whitelist ──────────────────────────────────────────────────
 const ALLOWED_CMDS = new Set([
@@ -103,7 +120,12 @@ const BLOCKED: RegExp[] = [
 ];
 
 // ── Validation helper ──────────────────────────────────────────────────────────
-function validate(cmd: string): string | null {
+/**
+ * Validate a shell command against all defense layers.
+ * Exported for unit tests; runtime always reaches it through the tool's call().
+ * Returns null when the command is allowed, or a user-facing error string.
+ */
+export function validateShellCommand(cmd: string): string | null {
   if (cmd.length > MAX_CMD_LEN) {
     return `Command too long (${cmd.length} chars, max ${MAX_CMD_LEN}).`;
   }
@@ -129,6 +151,55 @@ function validate(cmd: string): string | null {
     );
   }
 
+  // ── Hardening 1: block npm install <package> (supply-chain risk) ──────────
+  // Allow:  "npm install"           (re-install all deps from package.json)
+  //         "npm ci"                (clean install — preferred for production)
+  //         "npm run build" / "npm run test" / etc.
+  // Block:  "npm install lodash"    (could install arbitrary attacker-published pkg)
+  if (base === "npm") {
+    const npmFirstArg = parts[1]?.toLowerCase();
+    if ((npmFirstArg === "install" || npmFirstArg === "i") && parts.length > 2) {
+      // Permit known-safe flags only (no package names)
+      const rest = parts.slice(2);
+      const allFlags = rest.every((p) => p.startsWith("-"));
+      if (!allFlags) {
+        return (
+          `"npm install <package>" is blocked to prevent supply-chain attacks. ` +
+          `"npm install" (no args) and "npm ci" are still allowed. ` +
+          `If you genuinely need a new package, the user should add it manually.`
+        );
+      }
+    }
+  }
+
+  // ── Hardening 2: restrict pm2 start/stop/restart targets ──────────────────
+  // Allow:  "pm2 start admin-agent" / "pm2 restart admin-agent"
+  //         "pm2 list" / "pm2 logs admin-agent" (read-only)
+  // Block:  "pm2 start /some/other/script.js"
+  if (base === "pm2") {
+    const sub = parts[1]?.toLowerCase();
+    if (sub === "start" || sub === "stop" || sub === "restart" || sub === "reload") {
+      const target = parts[2]?.toLowerCase();
+      if (!target) {
+        return `"pm2 ${sub}" requires a service name. Try "pm2 ${sub} admin-agent".`;
+      }
+      // Strip any path separator — only bare service names allowed
+      if (target.includes("/") || target.includes("\\")) {
+        return (
+          `"pm2 ${sub}" only accepts a service name, not a file path. ` +
+          `Allowed services: ${Array.from(PM2_ALLOWED_SERVICES).join(", ")}.`
+        );
+      }
+      if (!PM2_ALLOWED_SERVICES.has(target)) {
+        return (
+          `"pm2 ${sub} ${target}" — "${target}" is not in the allowed PM2 service list. ` +
+          `Allowed: ${Array.from(PM2_ALLOWED_SERVICES).join(", ")}. ` +
+          `(Configurable via PM2_ALLOWED_SERVICES env var.)`
+        );
+      }
+    }
+  }
+
   for (const pattern of BLOCKED) {
     if (pattern.test(cmd)) {
       return (
@@ -139,6 +210,34 @@ function validate(cmd: string): string | null {
   }
 
   return null; // all clear
+}
+
+// ── Audit logging ──────────────────────────────────────────────────────────────
+/**
+ * Append an entry to data/shell-audit.log. Best-effort — failure to write
+ * audit log does NOT block the command. Designed for compliance/forensics
+ * and to make abuse detectable after the fact.
+ */
+async function auditLog(entry: {
+  cmd:      string;
+  outcome:  "allowed" | "blocked" | "error" | "disabled";
+  reason?:  string;
+  exitCode?: number | null;
+}): Promise<void> {
+  try {
+    await mkdir(dirname(AUDIT_LOG_PATH), { recursive: true });
+    const line = JSON.stringify({
+      ts:      new Date().toISOString(),
+      cmd:     entry.cmd.slice(0, MAX_CMD_LEN),
+      outcome: entry.outcome,
+      reason:  entry.reason?.slice(0, 200),
+      exitCode: entry.exitCode,
+      pid:     process.pid,
+    }) + "\n";
+    await appendFile(AUDIT_LOG_PATH, line, "utf-8");
+  } catch {
+    // Audit failure must never break the command path.
+  }
 }
 
 // ── Tool definition ────────────────────────────────────────────────────────────
@@ -178,9 +277,21 @@ Output is capped at ${MAX_OUTPUT} characters. Timeout: ${TIMEOUT_MS / 1000}s.`,
   async call(input, _context) {
     const cmd = (input.command || "").trim();
 
+    // ── Global kill switch ───────────────────────────────────────────────────
+    if (!SHELL_ENABLED) {
+      const reason = "Shell tool is disabled (SHELL_TOOL_ENABLED=false).";
+      auditLog({ cmd, outcome: "disabled", reason }).catch(() => {});
+      return {
+        success: false,
+        error: reason + " The user has disabled shell access for security. " +
+               "Suggest running the command manually instead.",
+      };
+    }
+
     // Validate before touching the shell
-    const err = validate(cmd);
+    const err = validateShellCommand(cmd);
     if (err) {
+      auditLog({ cmd, outcome: "blocked", reason: err }).catch(() => {});
       return { success: false, error: err };
     }
 
@@ -194,6 +305,8 @@ Output is capped at ${MAX_OUTPUT} characters. Timeout: ${TIMEOUT_MS / 1000}s.`,
 
       const out = (stdout || "").trim().slice(0, MAX_OUTPUT);
       const err2 = (stderr || "").trim().slice(0, 1_000);
+
+      auditLog({ cmd, outcome: "allowed", exitCode: 0 }).catch(() => {});
 
       return {
         success: true,
@@ -210,6 +323,7 @@ Output is capped at ${MAX_OUTPUT} characters. Timeout: ${TIMEOUT_MS / 1000}s.`,
 
       // Timeout
       if (msg.includes("ETIMEDOUT") || msg.includes("timed out") || e?.killed) {
+        auditLog({ cmd, outcome: "error", reason: "timeout", exitCode: null }).catch(() => {});
         return {
           success: false,
           error: `Command timed out after ${TIMEOUT_MS / 1000}s. ` +
@@ -222,6 +336,7 @@ Output is capped at ${MAX_OUTPUT} characters. Timeout: ${TIMEOUT_MS / 1000}s.`,
       const out  = (e?.stdout || "").trim().slice(0, MAX_OUTPUT);
       const serr = (e?.stderr || "").trim().slice(0, 1_000);
       const detail = [msg.slice(0, 400), out, serr].filter(Boolean).join("\n");
+      auditLog({ cmd, outcome: "error", reason: msg.slice(0, 200), exitCode: e?.code ?? null }).catch(() => {});
       return {
         success: false,
         error: `Exit code ${e?.code ?? "?"}: ${detail}`,
