@@ -14,6 +14,7 @@ import os from "os";
 const execAsync = promisify(exec);
 import { getModelCatalogForUI } from "../../config/models.js";
 import { getBudgetSnapshot } from "../../agent/budget.js";
+import { getHealthSnapshot as getProviderHealth } from "../../agent/providerFailover.js";
 import { launchAgent, getAgentStatus, type AgentInstance } from "../../bridge/launcher.js";
 import { setAgentInstance } from "../../bridge/agentBridge.js";
 import { streamChat, clearSession } from "./chat.js";
@@ -281,6 +282,14 @@ export async function startDashboard(port = 3456): Promise<void> {
       defaultModel:    process.env.VOUZA_API_MODEL    || "google/gemini-2.5-flash-lite",
       brandName:       process.env.VOUZA_BRAND_NAME   || "Vouza",
     });
+  });
+
+  // --- Provider Health API ---
+  // Returns per-provider circuit-breaker state so the dashboard can show
+  // "Anthropic temporarily failed over to OpenAI" if applicable. Empty
+  // object means everything is healthy (no failures recorded).
+  app.get("/api/provider-health", (_req, res) => {
+    res.json(getProviderHealth());
   });
 
   // --- Budget Status API ---

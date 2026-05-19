@@ -25,6 +25,13 @@ import { scrubThinkBlocks, hasThinkBlock } from "./thinkScrubber.js";
 import { redact } from "./redactor.js";
 import { classifyError } from "./errorClassifier.js";
 import { buildProfileContext } from "./userProfile.js";
+import {
+  pickHealthyProvider,
+  recordFailure,
+  recordSuccess,
+  getDefaultModelFor,
+  isCircuitOpen,
+} from "./providerFailover.js";
 
 const DEFAULT_SYSTEM_PROMPT = `You are an AI-powered office administrator and executive assistant named Vouza.
 
@@ -296,14 +303,14 @@ export async function* agentLoop(
   systemPromptOverride?: string
 ): AsyncGenerator<StreamEvent> {
   const startTime = Date.now();
-  const isAnthropic = context.config.provider === "anthropic";
-  const isOpenRouter = context.config.provider === "openrouter";
-  const apiKey = context.config.apiKeys[context.config.provider];
+  const primaryProvider = context.config.provider;
   const systemPrompt = systemPromptOverride || DEFAULT_SYSTEM_PROMPT;
 
   // ── OpenRouter: classify task complexity and pick the right model tier ──
+  // Done once per session against the PRIMARY provider, because failover
+  // targets non-OpenRouter providers with their own model lineups.
   let activeModel = context.config.model;
-  if (isOpenRouter) {
+  if (primaryProvider === "openrouter") {
     const hasImage = Array.isArray(userMessage) && (userMessage as any[]).some((b: any) => b?.type === "image");
     const tiers = context.config.openrouterTiers ?? DEFAULT_OPENROUTER_TIERS;
     const complexity = classifyTask(userMessage, hasImage);
@@ -312,10 +319,45 @@ export async function* agentLoop(
     yield { type: "text_delta", text: `${TIER_LABELS[complexity]} — routing to ${activeModel}\n\n` };
   }
 
-  let client: Anthropic | null = null;
-  if (isAnthropic) {
-    client = new Anthropic({ apiKey });
+  // ── Provider failover: pick the healthiest provider for this session ──
+  // If the primary is in cooldown (recent outage), we transparently start on
+  // a fallback. Users with only one configured key always get their primary.
+  let effectiveProvider: AIProvider = pickHealthyProvider(
+    primaryProvider,
+    context.config.apiKeys,
+    []
+  );
+  let isAnthropic  = effectiveProvider === "anthropic";
+  let isOpenRouter = effectiveProvider === "openrouter";
+  let apiKey       = context.config.apiKeys[effectiveProvider] || "";
+
+  // If we swapped providers at startup (primary was already in cooldown),
+  // override the user's chosen model with a sensible default for the fallback,
+  // since their model ID may not exist on the new provider.
+  if (effectiveProvider !== primaryProvider) {
+    activeModel = getDefaultModelFor(effectiveProvider);
+    yield {
+      type: "text_delta",
+      text: `_⚡ ${primaryProvider} is recovering — using ${effectiveProvider} for this conversation._\n\n`,
+    };
   }
+
+  // Cache Anthropic SDK clients across iterations (cheap to create, but
+  // pointless to reinstantiate on every retry).
+  const clientCache = new Map<string, Anthropic>();
+  const getClient = (): Anthropic | null => {
+    if (!isAnthropic) return null;
+    let c = clientCache.get(apiKey);
+    if (!c) {
+      c = new Anthropic({ apiKey });
+      clientCache.set(apiKey, c);
+    }
+    return c;
+  };
+  let client: Anthropic | null = getClient();
+
+  // Providers we've already failed on in this turn — prevents bouncing.
+  const triedProviders: AIProvider[] = [];
 
   // Initialize state
   const state: AgentState = {
@@ -372,7 +414,7 @@ export async function* agentLoop(
       const { messages: compressed } = await compressContext(
         state.messages,
         apiKey,
-        context.config.provider,
+        effectiveProvider,
         activeModel
       ).catch(() => ({ messages: state.messages, savedTokens: 0, compressed: false }));
       state.messages = compressed;
@@ -424,7 +466,7 @@ export async function* agentLoop(
       } else {
         // OpenAI-compatible providers (includes OpenRouter)
         const result = await callOpenAICompatible(
-          context.config.provider,
+          effectiveProvider,
           apiKey,
           activeModel,
           fullSystemPrompt,
@@ -435,6 +477,11 @@ export async function* agentLoop(
         stopReason = result.stop_reason;
         callUsage = result.usage;
       }
+
+      // ── Successful API call — clear this provider's failure history ──────
+      // Done before yielding any content events so circuit state reflects
+      // reality even if a downstream consumer throws while consuming events.
+      recordSuccess(effectiveProvider);
 
       // Yield usage so cost-tracking consumers (Guide Bot budget guard) can
       // record spend. Other consumers (main REPL, Telegram listener) ignore.
@@ -596,14 +643,52 @@ export async function* agentLoop(
         yield { type: "text_delta", text: `\n_${errInfo.userMessage}_\n` };
         // Force compress regardless of token threshold
         const { messages: compressed } = await compressContext(
-          state.messages, apiKey, context.config.provider, activeModel, 128_000, 0.99
+          state.messages, apiKey, effectiveProvider, activeModel, 128_000, 0.99
         ).catch(() => ({ messages: state.messages }));
         state.messages = compressed;
         state.turnCount--;
         continue;
       }
 
-      // ── No retry — surface a clear, actionable message ────────────────────
+      // ── Provider failover — try a different LLM provider if available ────
+      // After retries are exhausted, if this looks like a provider-health
+      // issue (transient/auth/quota/permanent) AND the user has another
+      // provider key configured AND we haven't already failed on it,
+      // transparently switch and retry the same turn on the fallback.
+      recordFailure(effectiveProvider, errInfo.type);
+      triedProviders.push(effectiveProvider);
+
+      const fallback = pickHealthyProvider(
+        primaryProvider,
+        context.config.apiKeys,
+        triedProviders
+      );
+      const canFailover =
+        fallback !== effectiveProvider &&
+        !triedProviders.includes(fallback) &&
+        (errInfo.type === "transient" ||
+         errInfo.type === "auth"      ||
+         errInfo.type === "quota"     ||
+         errInfo.type === "rate_limit"||
+         errInfo.type === "permanent");
+
+      if (canFailover) {
+        yield {
+          type: "text_delta",
+          text: `\n_⚡ ${effectiveProvider} is unavailable — switching to ${fallback} and retrying..._\n`,
+        };
+        effectiveProvider = fallback;
+        isAnthropic  = effectiveProvider === "anthropic";
+        isOpenRouter = effectiveProvider === "openrouter";
+        apiKey       = context.config.apiKeys[effectiveProvider] || "";
+        activeModel  = getDefaultModelFor(effectiveProvider);
+        client       = getClient();
+        retryCount   = 0;          // reset retry budget for the new provider
+        state.turnCount--;         // don't charge this attempt against the turn budget
+        continue;
+      }
+
+      // ── No retry, no failover — surface a clear, actionable message ──────
       yield { type: "error", error: raw };
       yield { type: "text_delta", text: `\n\n⚠️ ${errInfo.userMessage}` };
       state.shouldContinue = false;
