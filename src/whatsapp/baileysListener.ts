@@ -29,6 +29,7 @@ import chalk from "chalk";
 import type { AgentContext } from "../types/index.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { agentLoop } from "../agent/loop.js";
+import { ChannelQueues } from "../agent/queue.js";
 import {
   transcribeAudioBuffer,
   resolveWhisperConfig,
@@ -68,8 +69,8 @@ interface ChatSession {
   context:    AgentContext;
   lastActive: number;
 }
-const chatSessions:   Map<string, ChatSession> = new Map();
-const processingChats: Set<string>             = new Set();
+const chatSessions: Map<string, ChatSession> = new Map();
+const chatQueues    = new ChannelQueues();   // Phase 1: queue instead of drop
 
 // Prune idle sessions every 30 min
 const pruneTimer = setInterval(() => {
@@ -271,17 +272,37 @@ interface MsgJob {
   sock:     WASocket;
 }
 
-async function handleMessage(job: MsgJob): Promise<void> {
-  const { chatId, fromName, textBody, isVoice, msg, sock } = job;
+// ---------------------------------------------------------------------------
+// handleMessage — queue gate (Phase 1)
+// Enqueues the actual work; returns immediately.
+// ---------------------------------------------------------------------------
 
-  if (processingChats.has(chatId)) {
-    await sock.sendMessage(chatId, { text: "⏳ Still working on your previous message — hang on!" });
-    return;
-  }
+async function handleMessage(job: MsgJob): Promise<void> {
+  const { chatId, sock } = job;
 
   if (!_baseCtx || !_registry) return;
 
-  processingChats.add(chatId);
+  const q      = chatQueues.getOrCreate(chatId);
+  const result = q.enqueue(
+    () => processMessage(job),
+    `wa:${chatId.split("@")[0]}:${(job.isVoice ? "[voice]" : job.textBody).slice(0, 30)}`
+  );
+
+  if (result === "full") {
+    await sock.sendMessage(chatId, {
+      text: "⏳ You have too many messages queued — please wait for the current ones to finish.",
+    }).catch(() => {});
+  }
+}
+
+// ---------------------------------------------------------------------------
+// processMessage — actual AI work (serialised by the queue)
+// ---------------------------------------------------------------------------
+
+async function processMessage(job: MsgJob): Promise<void> {
+  const { chatId, fromName, textBody, isVoice, msg, sock } = job;
+
+  if (!_baseCtx || !_registry) return;
 
   try {
     // Show typing indicator
@@ -332,7 +353,6 @@ async function handleMessage(job: MsgJob): Promise<void> {
       text: "⚠️ Sorry, I ran into an error. Please try again in a moment.",
     }).catch(() => {});
   } finally {
-    processingChats.delete(chatId);
     await sock.sendPresenceUpdate("paused", chatId).catch(() => {});
   }
 }
@@ -434,4 +454,9 @@ function emit(type: string, data: any): void {
 /** How many active Baileys chat sessions are open. */
 export function activeBaileysSessionCount(): number {
   return chatSessions.size;
+}
+
+/** Queue depth snapshot for the dashboard status endpoint. */
+export function getBaileysQueueSnapshot(): Record<string, { depth: number; processing: boolean }> {
+  return chatQueues.snapshot();
 }

@@ -21,6 +21,7 @@ import chalk from "chalk";
 import type { AgentContext } from "../types/index.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { agentLoop } from "../agent/loop.js";
+import { ChannelQueues } from "../agent/queue.js";
 import { transcribeAudioBuffer, mimeFromFilename, resolveWhisperConfig, WHISPER_NO_KEY_MSG } from "../voice/transcriber.js";
 
 const MAX_MSG_LEN = 3800; // WhatsApp practical limit
@@ -32,8 +33,8 @@ interface WASession {
 }
 const chatSessions = new Map<string, WASession>();
 
-// Per-chat processing lock — prevents overlapping agent calls
-const processingChats = new Set<string>();
+// Per-chat FIFO queue — Phase 1: queue instead of drop
+const chatQueues = new ChannelQueues();
 
 // Prune sessions idle for > 2 hours, checked every 30 min
 const pruneInterval = setInterval(() => {
@@ -100,16 +101,37 @@ interface WAMessageJob {
   registry: ToolRegistry;
 }
 
+// ---------------------------------------------------------------------------
+// processWAMessage — queue gate (Phase 1)
+// Enqueues the actual work; returns immediately.
+// ---------------------------------------------------------------------------
+
 async function processWAMessage(job: WAMessageJob): Promise<void> {
-  const { chatId, fromName, isVoice, isText, payload, baseCtx, registry } = job;
+  const { chatId, isVoice, payload, baseCtx } = job;
 
-  if (processingChats.has(chatId)) {
-    // Already processing a message for this chat — send a polite notice
-    await sendWAHAText(chatId, "⏳ Still working on your previous message — hang on!", baseCtx);
-    return;
+  const q      = chatQueues.getOrCreate(chatId);
+  const label  = isVoice
+    ? "[voice]"
+    : ((payload.body as string | undefined) || "").slice(0, 30);
+
+  const result = q.enqueue(
+    () => executeWAMessage(job),
+    `waha:${chatId}:${label}`
+  );
+
+  if (result === "full") {
+    await sendWAHAText(chatId,
+      "⏳ You have too many messages queued — please wait for the current ones to finish.",
+      baseCtx);
   }
+}
 
-  processingChats.add(chatId);
+// ---------------------------------------------------------------------------
+// executeWAMessage — actual AI work (serialised by the queue)
+// ---------------------------------------------------------------------------
+
+async function executeWAMessage(job: WAMessageJob): Promise<void> {
+  const { chatId, fromName, isVoice, isText, payload, baseCtx, registry } = job;
 
   try {
     // ── Resolve the text to send to the agent ──────────────────────────────
@@ -127,6 +149,7 @@ async function processWAMessage(job: WAMessageJob): Promise<void> {
     // ── /reset command ─────────────────────────────────────────────────────
     if (userText === "/reset" || userText === "/start") {
       chatSessions.delete(chatId);
+      chatQueues.clear(chatId);
       await sendWAHAText(chatId, "✅ Conversation reset! Starting fresh — how can I help you?", baseCtx);
       return;
     }
@@ -156,8 +179,6 @@ async function processWAMessage(job: WAMessageJob): Promise<void> {
   } catch (err) {
     console.error(chalk.red(`  [WhatsApp] Processing error for chat ${chatId}:`, err));
     await sendWAHAText(chatId, "⚠️ Sorry, I ran into an error. Please try again in a moment.", baseCtx);
-  } finally {
-    processingChats.delete(chatId);
   }
 }
 
@@ -322,4 +343,9 @@ function getOrCreateSession(chatId: string, baseCtx: AgentContext): WASession {
 /** How many active WhatsApp chat sessions are open. */
 export function activeWASessionCount(): number {
   return chatSessions.size;
+}
+
+/** Queue depth snapshot for the dashboard status endpoint. */
+export function getWAHAQueueSnapshot(): Record<string, { depth: number; processing: boolean }> {
+  return chatQueues.snapshot();
 }

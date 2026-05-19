@@ -79,13 +79,14 @@ interface ThreadSession {
 // Module-level singleton state
 // ---------------------------------------------------------------------------
 
-let _pollTimer: ReturnType<typeof setInterval> | null = null;
-let _inbox:     AgentMailInboxInfo | null = null;
-let _baseCtx:   AgentContext | null = null;
-let _registry:  ToolRegistry | null = null;
-let _apiKey:    string = "";
-let _seenIds:   Set<string> = new Set();
-let _starting   = false;
+let _pollTimer:       ReturnType<typeof setInterval> | null = null;
+let _pollInProgress:  boolean = false;   // Phase 1: guard against overlapping polls
+let _inbox:           AgentMailInboxInfo | null = null;
+let _baseCtx:         AgentContext | null = null;
+let _registry:        ToolRegistry | null = null;
+let _apiKey:          string = "";
+let _seenIds:         Set<string> = new Set();
+let _starting:        boolean = false;
 
 const threadSessions: Map<string, ThreadSession> = new Map();
 
@@ -227,23 +228,33 @@ function startPollLoop(): void {
 }
 
 async function pollOnce(): Promise<void> {
-  if (!_inbox || !_baseCtx || !_registry) return;
-
-  const inboxPath = encodeURIComponent(_inbox.inbox_id);
-
-  let threads: AgentMailThread[];
-  try {
-    const res = await amFetch("GET", `/inboxes/${inboxPath}/threads?limit=50`);
-    threads = res.threads ?? [];
-  } catch (err) {
-    console.error(chalk.red("  [AgentMail] Failed to fetch threads:", err));
+  // Guard: skip if the previous poll hasn't finished yet (slow mailbox / many threads)
+  if (_pollInProgress) {
+    console.log(chalk.gray("  [AgentMail] Poll skipped — previous poll still running"));
     return;
   }
+  if (!_inbox || !_baseCtx || !_registry) return;
 
-  for (const thread of threads) {
-    await processThread(thread, inboxPath).catch((err) => {
-      console.error(chalk.red(`  [AgentMail] Error processing thread ${thread.id}:`, err));
-    });
+  _pollInProgress = true;
+  const inboxPath = encodeURIComponent(_inbox.inbox_id);
+
+  try {
+    let threads: AgentMailThread[];
+    try {
+      const res = await amFetch("GET", `/inboxes/${inboxPath}/threads?limit=50`);
+      threads = res.threads ?? [];
+    } catch (err) {
+      console.error(chalk.red("  [AgentMail] Failed to fetch threads:", err));
+      return;
+    }
+
+    for (const thread of threads) {
+      await processThread(thread, inboxPath).catch((err) => {
+        console.error(chalk.red(`  [AgentMail] Error processing thread ${thread.id}:`, err));
+      });
+    }
+  } finally {
+    _pollInProgress = false;
   }
 }
 
@@ -455,4 +466,9 @@ function stripHtml(html: string): string {
 /** Active thread session count (for status/metrics). */
 export function activeAgentMailSessionCount(): number {
   return threadSessions.size;
+}
+
+/** True if a poll is currently in progress (Phase 1 guard). */
+export function isAgentMailPolling(): boolean {
+  return _pollInProgress;
 }

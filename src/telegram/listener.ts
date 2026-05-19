@@ -22,6 +22,7 @@ import chalk from "chalk";
 import type { AgentContext } from "../types/index.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { agentLoop } from "../agent/loop.js";
+import { ChannelQueues } from "../agent/queue.js";
 import {
   transcribeAudioBuffer,
   mimeFromFilename,
@@ -43,8 +44,8 @@ interface ChatSession {
   context:    AgentContext;
   lastActive: number;
 }
-const chatContexts:    Map<number, ChatSession> = new Map();
-const processingChats: Set<number>              = new Set();
+const chatContexts: Map<number, ChatSession> = new Map();
+const chatQueues    = new ChannelQueues();    // Phase 1: queue instead of drop
 
 // Prune sessions idle > 2h every 30 min
 const pruneInterval = setInterval(() => {
@@ -308,6 +309,11 @@ async function dispatchUpdate(
 // Message handler — with live streaming (editMessageText)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// handleMessage — queue gate (Phase 1)
+// Enqueues the actual work; returns immediately.
+// ---------------------------------------------------------------------------
+
 async function handleMessage(
   token:    string,
   chatId:   number,
@@ -317,16 +323,35 @@ async function handleMessage(
   registry: ToolRegistry,
   isVoice   = false
 ): Promise<void> {
-  if (processingChats.has(chatId)) {
-    await sendReply(token, chatId, "⏳ Still working on your previous message — hold on!");
-    return;
-  }
-  processingChats.add(chatId);
+  const q      = chatQueues.getOrCreate(String(chatId));
+  const result = q.enqueue(
+    () => processMessage(token, chatId, fromName, text, baseCtx, registry, isVoice),
+    `tg:${chatId}:${text.slice(0, 30)}`
+  );
 
+  if (result === "full") {
+    await sendReply(token, chatId,
+      "⏳ You have too many messages queued — please wait for the current ones to finish.");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// processMessage — actual AI work (serialised by the queue)
+// ---------------------------------------------------------------------------
+
+async function processMessage(
+  token:    string,
+  chatId:   number,
+  fromName: string,
+  text:     string,
+  baseCtx:  AgentContext,
+  registry: ToolRegistry,
+  isVoice   = false
+): Promise<void> {
   try {
     await sendTyping(token, chatId);
 
-    const chatCtx   = getOrCreateChatContext(chatId, baseCtx);
+    const chatCtx    = getOrCreateChatContext(chatId, baseCtx);
     const agentInput = isVoice
       ? `🎙️ [Voice message from ${fromName}]: "${text}"`
       : `[Message from ${fromName} via Telegram]: ${text}`;
@@ -340,9 +365,9 @@ async function handleMessage(
     const initData = await initRes.json() as any;
     const liveId: number | null = initData.ok ? initData.result.message_id : null;
 
-    let   fullText   = "";
-    let   lastEditMs = 0;
-    let   lastTool   = "";
+    let fullText   = "";
+    let lastEditMs = 0;
+    let lastTool   = "";
 
     // Edit the live message — rate-limited to LIVE_EDIT_INTERVAL ms
     const editNow = async (final = false) => {
@@ -352,8 +377,7 @@ async function handleMessage(
       lastEditMs = now;
 
       // What to show: response text > active tool > thinking spinner
-      const body = fullText.trim()
-        || (lastTool ? `🔧 Using ${lastTool}…` : "⏳ Thinking…");
+      const body    = fullText.trim() || (lastTool ? `🔧 Using ${lastTool}…` : "⏳ Thinking…");
       const display = (body + (final ? "" : " ⏳")).slice(0, 4096);
 
       // Try Markdown, fall back to plain text
@@ -408,8 +432,6 @@ async function handleMessage(
   } catch (err) {
     console.error(chalk.red(`  [Telegram] Error for chat ${chatId}:`, err));
     await sendError(token, chatId);
-  } finally {
-    processingChats.delete(chatId);
   }
 }
 
@@ -503,4 +525,9 @@ async function setMyCommands(token: string): Promise<void> {
 
 async function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Queue depth snapshot for the dashboard status endpoint. */
+export function getTelegramQueueSnapshot(): Record<string, { depth: number; processing: boolean }> {
+  return chatQueues.snapshot();
 }
