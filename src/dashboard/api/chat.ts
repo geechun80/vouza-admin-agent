@@ -370,7 +370,12 @@ function buildSystemPrompt(wizardStep?: number, userName?: string): string {
 
 /**
  * Stream a chat message through the agent loop.
- * Yields the same StreamEvent objects as agentLoop.
+ * Yields the same StreamEvent objects as agentLoop, plus one extra:
+ *
+ *   { type: "credential_saved", slug: "telegram", integration: "Telegram" }
+ *
+ * This synthetic event is emitted whenever save_integration_credentials
+ * succeeds, allowing the wizard UI to update card badges without polling.
  *
  * @param wizardStep  Current wizard step (1-4) passed from the browser
  * @param userName    User's name from the Step 1 form (for personalisation)
@@ -387,7 +392,34 @@ export async function* streamChat(
   session.lastActive = Date.now();
 
   const systemPrompt = buildSystemPrompt(wizardStep, userName);
-  yield* agentLoop(message, session.context, session.registry, systemPrompt);
+
+  for await (const event of agentLoop(message, session.context, session.registry, systemPrompt)) {
+    yield event;
+
+    // ── Wizard badge refresh ─────────────────────────────────────────────────
+    // When save_integration_credentials succeeds, emit a synthetic SSE event
+    // so the frontend can update the card badge (Not Connected → ✓ Connected)
+    // without requiring a page reload or polling.
+    if (
+      event.type === "tool_result" &&
+      (event as any).toolName === "save_integration_credentials"
+    ) {
+      const result = (event as any).result;
+      if (result?.success) {
+        // result.data is the JSON-stringified tool output from the registry
+        let parsed: any = {};
+        try { parsed = JSON.parse(result.data ?? "{}"); } catch { /* ignore */ }
+
+        if (parsed.slug) {
+          yield {
+            type:        "credential_saved",
+            slug:        parsed.slug,         // raw enum: "telegram", "gmail", …
+            integration: parsed.integration,  // pretty name: "Telegram", "Gmail", …
+          };
+        }
+      }
+    }
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

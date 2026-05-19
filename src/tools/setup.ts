@@ -1006,6 +1006,7 @@ export const saveIntegrationCredentialsTool = buildTool({
         success: true,
         data: {
           integration:    name,
+          slug:           integration,   // ← raw enum value — used by the wizard UI to update badges
           message:        `✅ ${name} credentials saved successfully.`,
           activationNote,
           nextStep:       guide?.testTip ?? "Test the connection using the relevant read tool.",

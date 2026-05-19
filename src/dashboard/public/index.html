@@ -3788,6 +3788,12 @@ async function callLiveAgent(text, image) {
           case 'error':
             bubble.innerHTML = toolCards + `<span style="color:var(--error)">⚠️ ${escHtml(event.error)}</span>`;
             break;
+
+          case 'credential_saved':
+            // Wizard card badge live-update: when the agent saves credentials,
+            // flip the relevant card badge to "✓ Connected" without a page reload.
+            markWizardCardConnected(event.slug, event.integration);
+            break;
         }
       }
     }
@@ -3836,6 +3842,50 @@ const TOOL_LABELS = {
   get_setup_status:'🔍 Checking setup status',
   save_integration_credentials:'💾 Saving credentials',
 };
+
+// ── Wizard card live badge update ────────────────────────────────────────────
+// Called when the agent emits a `credential_saved` SSE event.
+// Flips the integration's badge from "Not Connected" → "✓ Connected"
+// without requiring a page reload or polling.
+
+const INTEGRATION_BADGE_MAP = {
+  telegram:        'telegram',
+  gmail:           'email',
+  outlook:         'email',
+  smtp:            'email',
+  google_calendar: 'google',
+  google_sa:       'google',
+  slack:           'slack',
+  whatsapp_waha:   'whatsapp',
+  whatsapp_twilio: 'whatsapp',
+  voice_groq:      'voice-groq',
+  voice_openai:    'voice-openai',
+  // ai_provider → derived from provider name in the event
+};
+
+function markWizardCardConnected(slug, integrationName) {
+  // Determine badge element ID
+  let badgeId = INTEGRATION_BADGE_MAP[slug] || slug;
+
+  const badge = document.getElementById(`status-${badgeId}`);
+  if (badge) {
+    badge.className = 'glass-card-badge badge-connected';
+    badge.textContent = '✓ Connected';
+  }
+
+  // Also update in-memory state so re-renders preserve the connected status
+  if (state && state.connStatus) {
+    state.connStatus[slug] = true;
+    // Map compound keys
+    if (slug === 'gmail' || slug === 'outlook' || slug === 'smtp') state.connStatus['email'] = true;
+    if (slug === 'whatsapp_waha' || slug === 'whatsapp_twilio')     state.connStatus['whatsapp'] = true;
+    if (slug === 'google_calendar' || slug === 'google_sa')         state.connStatus['google'] = true;
+  }
+
+  // Show a brief toast so the user notices the update even if they're scrolled
+  const name = integrationName || slug;
+  toast(`✅ ${name} connected!`, 'success');
+}
 
 function buildToolCard(toolName, status, input) {
   const label = TOOL_LABELS[toolName] || `⚙️ ${toolName.replace(/_/g,' ')}`;

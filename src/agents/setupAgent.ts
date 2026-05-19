@@ -45,25 +45,22 @@ import { saveIntegrationCredentialsTool, getSetupStatusTool } from "../tools/set
 import { webSearchTool }  from "../tools/webSearch.js";
 import { saveMemoryTool, searchMemoryTool } from "../tools/memory.js";
 
-// ── Browser tool stubs ────────────────────────────────────────────────────────
-// These become real Playwright implementations in Phase 3.
-// Importing them here wires them into the agent registry automatically.
-//
-// import {
-//   browserNavigateTool,
-//   browserClickTool,
-//   browserFillTool,
-//   browserExtractTextTool,
-//   browserScreenshotTool,
-//   browserWaitForTool,
-//   oauthFlowTool,
-// } from "../tools/browser/index.js";
+// ── Browser tools (Phase 3 — Playwright) ─────────────────────────────────────
+// Active when SETUP_AGENT_ENABLED=true and playwright + chromium are installed.
+// Activate: npm install playwright && npx playwright install chromium
+import {
+  browserNavigateTool,
+  browserClickTool,
+  browserFillTool,
+  browserExtractTextTool,
+  browserScreenshotTool,
+  browserWaitForTool,
+} from "../tools/browser/index.js";
 
-// ── OAuth handler stub ────────────────────────────────────────────────────────
-// Opens a local redirect server on :3457/oauth/callback, launches the browser
-// to the provider consent URL, catches the code, exchanges for tokens.
-//
-// import { oauthHandlerTool } from "../tools/oauth/handler.js";
+// ── OAuth handler (Phase 4) ───────────────────────────────────────────────────
+// Opens a local redirect server on :3457/oauth/callback, launches a headed
+// browser to the provider consent URL, catches the code, exchanges for tokens.
+import { oauthFlowTool } from "../tools/oauth/handler.js";
 
 // ── Setup Agent system prompt ─────────────────────────────────────────────────
 
@@ -147,14 +144,16 @@ function buildSetupRegistry(): ToolRegistry {
   reg.register(saveMemoryTool as any);
   reg.register(searchMemoryTool as any);
 
-  // Phase 3 browser tools — uncomment when Playwright is installed
-  // reg.register(browserNavigateTool as any);
-  // reg.register(browserClickTool as any);
-  // reg.register(browserFillTool as any);
-  // reg.register(browserExtractTextTool as any);
-  // reg.register(browserScreenshotTool as any);
-  // reg.register(browserWaitForTool as any);
-  // reg.register(oauthFlowTool as any);
+  // Phase 3 — browser tools (Playwright, now active)
+  reg.register(browserNavigateTool as any);
+  reg.register(browserClickTool as any);
+  reg.register(browserFillTool as any);
+  reg.register(browserExtractTextTool as any);
+  reg.register(browserScreenshotTool as any);
+  reg.register(browserWaitForTool as any);
+
+  // Phase 4 — OAuth handler (headed browser + token exchange)
+  reg.register(oauthFlowTool as any);
 
   return reg;
 }
@@ -238,53 +237,8 @@ export async function spawnSetupAgent(task: SetupTask): Promise<SetupResult> {
   };
 }
 
-// ── Future: Browser tool stubs (Phase 3) ─────────────────────────────────────
-//
-// These will live in src/tools/browser/ once Playwright is added.
-//
-// src/tools/browser/
-//   ├── index.ts           — re-exports all browser tools
-//   ├── navigate.ts        — browser_navigate: go to a URL, return page title + URL
-//   ├── click.ts           — browser_click: click element by CSS selector or text
-//   ├── fill.ts            — browser_fill: type text into a form field
-//   ├── extractText.ts     — browser_extract_text: get text from an element
-//   ├── screenshot.ts      — browser_screenshot: capture PNG, return base64
-//   ├── waitFor.ts         — browser_wait_for: wait for selector or network idle
-//   └── oauthFlow.ts       — oauth_flow: open consent URL, start redirect server,
-//                            catch code, exchange for tokens, return credentials
-//
-// Each tool follows the same interface:
-//   buildTool({ name, description, category: "browser", inputSchema, call })
-//
-// Playwright setup (run once):
-//   npm install playwright
-//   npx playwright install chromium
-//   Set PLAYWRIGHT_BROWSER=chromium in .env
-//
-// Security model:
-//   • Browser runs headless by default; headed mode for OAuth consent flows
-//   • Never stores cookies across sessions (fresh context per task)
-//   • Never captures screenshots outside of explicitly requested flows
-//   • All navigation blocked to localhost/127.0.0.1 (SSRF prevention)
-//   • Allowlisted domains only: google.com, slack.com, telegram.org, t.me,
-//     groq.com, openai.com, anthropic.com, api.slack.com, console.cloud.google.com
-//
-// ── Future: OAuth Handler (Phase 4) ──────────────────────────────────────────
-//
-// src/tools/oauth/handler.ts
-//
-//   oauth_flow tool:
-//   1. Start local Express server on :3457/oauth/callback
-//   2. Build consent URL for the provider (Google, Slack, GitHub, etc.)
-//   3. Open browser (headed) to consent URL via Playwright
-//   4. User sees the normal consent screen and clicks Allow
-//   5. Provider redirects to localhost:3457/oauth/callback?code=...
-//   6. Handler exchanges code for access_token + refresh_token
-//   7. Returns { accessToken, refreshToken, expiresIn, scope }
-//   8. Guide bot saves tokens via save_integration_credentials
-//
-//   Providers to support:
-//   • Google (Calendar, Gmail, Drive, Sheets) — OAuth 2.0 PKCE
-//   • Slack — OAuth 2.0 with bot scope
-//   • Microsoft 365 — Azure AD OAuth 2.0
-//   • GitHub — OAuth app flow (for future GitHub integration)
+// ── Implementation status ─────────────────────────────────────────────────────
+// Phase 3 ✅  Browser tools: src/tools/browser/ (navigate, click, fill,
+//              extractText, screenshot, waitFor) — live with Playwright
+// Phase 4 ✅  OAuth handler: src/tools/oauth/handler.ts (google, slack,
+//              microsoft, github) — headed browser + PKCE + token exchange
