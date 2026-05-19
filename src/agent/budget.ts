@@ -28,6 +28,7 @@
 import { promises as fs } from "fs";
 import { dirname } from "path";
 import { findModel } from "../config/models.js";
+import { logger } from "../util/logger.js";
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
@@ -143,8 +144,33 @@ export async function recordSpend(
     state.totalUsd += cost;
     state.byProvider[provider] = (state.byProvider[provider] || 0) + cost;
     await writeBudgetState(state);
-  } catch {
-    // Fail-open — no throw.
+
+    // Log the spend event for forensic review. Includes today's cumulative
+    // spend so a single grep over the log file shows the burn-down.
+    const cap = getDailyCapUsd();
+    logger.info(
+      {
+        event: "budget_spend",
+        provider,
+        model: modelId,
+        inputTokens,
+        outputTokens,
+        costUsd: Number(cost.toFixed(6)),
+        cumulativeTodayUsd: Number(state.totalUsd.toFixed(4)),
+        capUsd: cap,
+        pctUsed: Math.round((state.totalUsd / cap) * 100),
+      },
+      "Vouza-key API spend recorded"
+    );
+    if (state.totalUsd >= cap) {
+      logger.warn(
+        { event: "budget_cap_reached", provider, totalUsd: state.totalUsd, capUsd: cap },
+        "Daily spend cap reached — further Guide Bot calls on Vouza key will be blocked"
+      );
+    }
+  } catch (err) {
+    // Fail-open — no throw. Log for ops visibility though.
+    logger.error({ event: "budget_record_failed", err: String(err) }, "Failed to record spend");
   }
 }
 

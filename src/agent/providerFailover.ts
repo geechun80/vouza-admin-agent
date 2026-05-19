@@ -31,6 +31,7 @@
 
 import type { AIProvider } from "../config/models.js";
 import type { ErrorType } from "./errorClassifier.js";
+import { logger } from "../util/logger.js";
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
@@ -121,14 +122,22 @@ export function recordFailure(provider: AIProvider, errType: ErrorType): void {
   h.failures.push(now);
   if (h.failures.length >= FAILURE_THRESHOLD && h.openedAt === null) {
     h.openedAt = now;
+    logger.warn(
+      { event: "circuit_open", provider, errType, failures: h.failures.length, cooldownMs: COOLDOWN_MS },
+      `Provider circuit opened: ${provider}`
+    );
   }
 }
 
 /** Clear failure history after a successful call. */
 export function recordSuccess(provider: AIProvider): void {
   const h = getHealth(provider);
+  const wasOpen = h.openedAt !== null;
   h.failures = [];
   h.openedAt = null;
+  if (wasOpen) {
+    logger.info({ event: "circuit_closed", provider }, `Provider recovered: ${provider}`);
+  }
 }
 
 /**

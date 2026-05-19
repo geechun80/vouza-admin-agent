@@ -26,6 +26,7 @@ import { appendFile, mkdir }  from "fs/promises";
 import { dirname }            from "path";
 import { z }           from "zod";
 import { buildTool }   from "./registry.js";
+import { logger }      from "../util/logger.js";
 
 const execAsync = promisify(exec);
 
@@ -224,6 +225,25 @@ async function auditLog(entry: {
   reason?:  string;
   exitCode?: number | null;
 }): Promise<void> {
+  // Mirror to the structured logger so ops can grep across all events from
+  // one place. Blocked/disabled events are warnings; errors are errors;
+  // allowed-and-completed is info.
+  const logFn =
+    entry.outcome === "blocked" || entry.outcome === "disabled" ? logger.warn :
+    entry.outcome === "error"                                    ? logger.error :
+    logger.info;
+  logFn.call(
+    logger,
+    {
+      event: "shell_command",
+      cmd:    entry.cmd.slice(0, MAX_CMD_LEN),
+      outcome: entry.outcome,
+      reason:  entry.reason?.slice(0, 200),
+      exitCode: entry.exitCode,
+    },
+    `shell:${entry.outcome}`
+  );
+
   try {
     await mkdir(dirname(AUDIT_LOG_PATH), { recursive: true });
     const line = JSON.stringify({
