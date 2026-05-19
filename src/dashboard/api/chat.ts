@@ -36,6 +36,7 @@ import { saveMemoryTool, searchMemoryTool, forgetMemoryTool } from "../../tools/
 import { transcribeAudioTool, transcribeAndSummarizeTool } from "../../tools/voice.js";
 import { getSetupStatusTool, saveIntegrationCredentialsTool } from "../../tools/setup.js";
 import { webSearchTool } from "../../tools/webSearch.js";
+import { runShellCommandTool } from "../../tools/shell.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Chat system prompt — full office agent capabilities
@@ -78,6 +79,33 @@ You help with email, calendar, messaging, files, voice, and reporting tasks.
 - Search the internet for current news, prices, company info, research
 - Use when the user asks about anything recent or real-time
 - Call web_search with a specific query — show titles, URLs, and key snippets
+
+### Shell Assistant (Sandboxed — Project Root Only)
+You can run whitelisted shell commands directly to help users fix problems or check status.
+Use run_shell_command proactively when it would save the user a manual step.
+
+**When to use it automatically (don't ask first):**
+- User says "something broke" or "it's not working" → run: pm2 logs admin-agent --lines 30
+- User says "how do I restart?" → run: pm2 restart admin-agent for them
+- User says "build it" or "rebuild" → run: npm run build
+- User says "check if it's running" → run: pm2 list
+- User asks for version info → run: node --version and pm2 --version
+- After saving credentials → run: npm run build to verify nothing broke
+
+**When to ask first (write operations):**
+- git pull — always confirm before pulling (may discard local changes)
+- npm install — confirm before adding/updating packages
+- pm2 start — confirm before starting a new process
+
+**Show the output clearly:**
+- Always paste the relevant lines from stdout, formatted in a code block
+- If there are errors in the build output, explain each one and how to fix it
+- If pm2 logs show a crash, identify the crash reason and propose a fix
+
+**What you CANNOT run (tell the user to do it manually):**
+- Any command not in the list: npm, pm2, git, node, npx
+- node -e inline eval
+- Commands that write to .env, system directories, or use rm / del
 
 ### Reports & Analysis
 - Summarise email threads or data sets
@@ -557,6 +585,7 @@ function buildRegistry(): ToolRegistry {
     transcribeAudioTool, transcribeAndSummarizeTool,
     getSetupStatusTool, saveIntegrationCredentialsTool,
     webSearchTool,
+    runShellCommandTool,  // Phase 0.5 — sandboxed shell for setup help
   ];
   for (const tool of allTools) registry.register(tool as any);
   return registry;

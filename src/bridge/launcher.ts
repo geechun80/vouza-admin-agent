@@ -36,6 +36,7 @@ import { saveMemoryTool, searchMemoryTool, forgetMemoryTool, updateMemoryTool, l
 import { transcribeAudioTool, transcribeAndSummarizeTool } from "../tools/voice.js";
 import { getSetupStatusTool, saveIntegrationCredentialsTool } from "../tools/setup.js";
 import { webSearchTool } from "../tools/webSearch.js";
+import { runShellCommandTool } from "../tools/shell.js";
 
 export interface AgentInstance {
   context: AgentContext;
@@ -150,6 +151,9 @@ export async function launchAgent(): Promise<AgentInstance> {
   // Setup & onboarding — always needed for wizard flow
   registry.register(getSetupStatusTool as any);
   registry.register(saveIntegrationCredentialsTool as any);
+
+  // Shell — sandboxed whitelisted commands (npm, pm2, git, node)
+  registry.register(runShellCommandTool as any);
 
   const activeModules = [
     hasEmail     && "email",
