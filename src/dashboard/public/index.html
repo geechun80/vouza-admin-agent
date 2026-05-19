@@ -3365,7 +3365,7 @@ function guideBotScripted(text) {
     el.className = 'guide-msg bot';
     el.innerHTML = `<div class="msg-bubble">${renderMd(text)}</div><div class="msg-time">${timeNow()}</div>`;
     box.insertBefore(el, typingEl);
-    box.scrollTop = box.scrollHeight;
+    pinChatToBottom();
   }, Math.min(text.length * 10, 1000));
 }
 
@@ -3556,7 +3556,7 @@ async function openConversation(id) {
       if (m.role === 'user')      appendHistoryMsg(m.content, 'user');
       else                        appendHistoryMsg(m.content, 'bot');
     });
-    if (box) box.scrollTop = box.scrollHeight;
+    pinChatToBottom();
     // Highlight active item
     document.querySelectorAll('.conv-item').forEach(el =>
       el.classList.toggle('active', el.dataset.id === id));
@@ -3658,6 +3658,22 @@ function sendGuideMsg() {
   clearImagePreview();
 }
 
+// ── Chat scroll helper ──────────────────────────────────────────────────────
+// Reliably pin the chat panel to the bottom across desktop and mobile browsers.
+// requestAnimationFrame waits for the next paint so the container's scrollHeight
+// reflects the actual rendered content (matters on mobile where the keyboard
+// or new content can shift layout between insert and scroll).
+// Double-rAF protects against the rare case where a layout pass happens between
+// the first frame and the next text_delta arriving.
+function pinChatToBottom() {
+  const box = document.getElementById('guideMessages');
+  if (!box) return;
+  requestAnimationFrame(() => {
+    box.scrollTop = box.scrollHeight;
+    requestAnimationFrame(() => { box.scrollTop = box.scrollHeight; });
+  });
+}
+
 function appendUserMsg(text, image) {
   const box      = document.getElementById('guideMessages');
   const typingEl = document.getElementById('guideTyping');
@@ -3672,7 +3688,7 @@ function appendUserMsg(text, image) {
 
   el.innerHTML = `<div class="msg-bubble">${content}</div><div class="msg-time">${timeNow()}</div>`;
   box.insertBefore(el, typingEl);
-  box.scrollTop = box.scrollHeight;
+  pinChatToBottom();
 }
 
 // ── Live agent call with SSE streaming ─────────────────────────────────────
@@ -3756,13 +3772,13 @@ async function callLiveAgent(text, image) {
           case 'text_delta':
             fullText += event.text;
             bubble.innerHTML = toolCards + renderMd(fullText) + '<span class="t-blink">▌</span>';
-            box.scrollTop = box.scrollHeight;
+            pinChatToBottom();
             break;
 
           case 'tool_start':
             toolCards += buildToolCard(event.toolName, 'running', event.input);
             bubble.innerHTML = toolCards + (fullText ? renderMd(fullText) : '') + '<span class="t-blink">▌</span>';
-            box.scrollTop = box.scrollHeight;
+            pinChatToBottom();
             break;
 
           case 'tool_result': {
@@ -3772,7 +3788,7 @@ async function callLiveAgent(text, image) {
               toolCards = toolCards.slice(0, last) + toolCards.slice(last).replace('tool-card running', `tool-card ${ok ? 'done' : 'fail'}`);
             }
             bubble.innerHTML = toolCards + (fullText ? renderMd(fullText) : '') + '<span class="t-blink">▌</span>';
-            box.scrollTop = box.scrollHeight;
+            pinChatToBottom();
             break;
           }
 
@@ -3780,7 +3796,7 @@ async function callLiveAgent(text, image) {
           case 'done':
             // Remove blinking cursor
             bubble.innerHTML = toolCards + (fullText ? renderMd(fullText) : '(Done)');
-            box.scrollTop = box.scrollHeight;
+            pinChatToBottom();
             // Persist bot reply to conversation history
             if (fullText) convTrackBot(fullText);
             break;

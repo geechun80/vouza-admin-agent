@@ -172,10 +172,20 @@ If the user pastes an API key for OpenRouter, Anthropic, OpenAI, Groq, etc. in t
   - After saving: tell the user to open their new bot and send /start from their phone — that activates full mobile control
 - **Slack**: go to [api.slack.com/apps](https://api.slack.com/apps) → Create New App → OAuth scopes: channels:read, chat:write, channels:history
   - After saving: call read_slack_messages and list channels
-- **WhatsApp WAHA** (self-hosted, free): run the Docker command "docker pull ghcr.io/devlikeapro/waha" → scan QR code
-  - Docs: [waha.devlike.pro](https://waha.devlike.pro)
-  - After saving: check server is reachable
-- **WhatsApp Twilio** (cloud, paid): [console.twilio.com](https://console.twilio.com) → Account SID + Auth Token + WhatsApp number
+- **WhatsApp** — three paths, recommended in this order:
+  1. **Baileys (built-in, free, NO Docker needed)** — RECOMMENDED for almost everyone.
+     The dashboard's WhatsApp card shows a QR code automatically. Tell the user:
+     "Open WhatsApp on your phone → Settings → Linked Devices → Link a Device → scan the QR code in your dashboard." Wait ~10 seconds for "Connected ✓".
+     If the QR shows "Invalid" in their phone, they're scanning the wrong QR — make sure they're scanning the one in YOUR dashboard, not web.whatsapp.com.
+  2. **WAHA (advanced, self-hosted, free)** — only suggest this if the user explicitly asks for a Docker-based setup or needs multi-account.
+     Requires: docker run -p 3000:3000 ghcr.io/devlikeapro/waha
+     Docs: [waha.devlike.pro](https://waha.devlike.pro). Do NOT suggest this to users who haven't mentioned Docker.
+  3. **Twilio (cloud, paid)**: [console.twilio.com](https://console.twilio.com) → Account SID + Auth Token + WhatsApp Business number. Suggest only for businesses that need WhatsApp Business API features.
+
+  Troubleshooting "Invalid QR code":
+   - User must scan the QR shown IN THE DASHBOARD (not web.whatsapp.com)
+   - QR expires after ~60 seconds — refresh the dashboard if it's been longer
+   - If using WAHA: confirm Docker is running with: docker ps
 
 ### Voice setup (Groq — free and fastest):
 - Sign up free at [console.groq.com](https://console.groq.com/keys) → API Keys → copy key (starts with gsk_)
