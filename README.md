@@ -104,18 +104,130 @@ The setup wizard will guide you through:
 
 ---
 
-## Running in the background (recommended)
+## Running in the background (production setup)
 
-Install PM2 to keep the agent running 24/7:
+To keep the agent running 24/7 — even after reboot, crashes, or you closing the terminal — you have **two options**. Pick the one that fits your OS and comfort level.
 
-```bash
-npm install -g pm2
-pm2 start ecosystem.config.cjs
-pm2 save
-pm2 startup
+### Option A — Windows users: Task Scheduler (simplest, no extra tools)
+
+Best for: Windows users who just want it to "always be running" without installing anything extra.
+
+1. Double-click **`install-autostart.bat`** in this folder
+2. When asked, answer **Y** to confirm install
+3. When asked, answer **Y** to start the agent now
+4. Done — the agent now starts automatically every time you log in to Windows
+
+To remove: double-click **`uninstall-autostart.bat`**
+
+> ℹ️ This uses Windows Task Scheduler under the hood. The agent runs silently with no terminal window. Logs go to `data/logs/admin-agent.log`.
+
+---
+
+### Option B — Any OS: PM2 (best logs, monitoring, cross-platform)
+
+Best for: Power users, Mac/Linux users, anyone who wants live log streaming + CPU/memory monitoring.
+
+PM2 is a process manager that keeps Node apps running with these benefits over Task Scheduler:
+
+- ✅ **Auto-restart on crash** with exponential backoff
+- ✅ **Live log streaming**: `pm2 logs admin-agent`
+- ✅ **Live monitoring**: `pm2 monit` (CPU + memory in real time)
+- ✅ **Memory cap**: auto-restarts if RAM exceeds 500 MB
+- ✅ **Cross-platform**: works the same on Windows, Mac, Linux
+
+#### Quick install (one command per OS)
+
+**Windows** (PowerShell or Command Prompt):
+```bat
+install-pm2.bat
 ```
 
-The agent will now auto-start on boot and stay running in the background.
+**Mac / Linux** (Terminal):
+```bash
+chmod +x install-pm2.sh
+./install-pm2.sh
+```
+
+The installer script will:
+1. Check that Node.js 18+ is installed
+2. Check if PM2 is already installed (skip if so)
+3. Install PM2 globally via `npm install -g pm2`
+4. Build the project if `dist/` is missing
+5. Start the agent with `pm2 start ecosystem.config.cjs`
+6. Persist the process list so it survives reboot
+7. Optionally configure boot-time auto-start
+
+#### Manual install (if the script doesn't work for you)
+
+```bash
+# 1. Confirm Node is installed (need v18 or newer)
+node --version
+
+# 2. Install PM2 globally
+npm install -g pm2
+#   ↑ on Mac/Linux you may need:  sudo npm install -g pm2
+
+# 3. Verify install
+pm2 --version
+
+# 4. Build the project (only if not already built)
+npm run build
+
+# 5. Start the agent under PM2
+pm2 start ecosystem.config.cjs
+
+# 6. Save the process list (so PM2 remembers it across reboots)
+pm2 save
+
+# 7. Set up auto-start on boot
+pm2 startup
+#   ↑ this prints a `sudo` command on Mac/Linux — copy and run it
+#   ↑ on Windows, `pm2 startup` does NOT work — use install-autostart.bat instead
+```
+
+#### Daily PM2 commands you'll actually use
+
+| Command | What it does |
+|---|---|
+| `pm2 list` | Show all running agents + their status / CPU / memory |
+| `pm2 logs admin-agent` | Tail live logs (Ctrl+C to exit) |
+| `pm2 logs admin-agent --lines 100` | Last 100 log lines |
+| `pm2 monit` | Real-time CPU + memory dashboard |
+| `pm2 restart admin-agent` | Restart (e.g. after `git pull`) |
+| `pm2 stop admin-agent` | Stop the agent |
+| `pm2 delete admin-agent` | Remove from PM2 (use before reinstalling) |
+| `pm2 flush admin-agent` | Clear log files |
+
+---
+
+### Which option should you pick?
+
+| Scenario | Pick |
+|---|---|
+| First-time user on Windows, just want it running | **Option A** (`install-autostart.bat`) |
+| Mac or Linux user | **Option B** (PM2 — Task Scheduler doesn't exist) |
+| Need live log streaming for debugging | **Option B** (PM2) |
+| Want to monitor CPU/memory usage | **Option B** (PM2) |
+| Running on a VPS / server | **Option B** (PM2) — industry standard |
+| Don't want any extra tools | **Option A** (Task Scheduler) |
+
+> 💡 You can switch later — both methods are reversible. Just run the uninstall script for the one you started with, then install the other.
+
+---
+
+### PM2 troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `pm2: command not found` after install | PATH not updated | Close and reopen terminal; or run `npm config get prefix` to find PM2's location and add to PATH |
+| `EACCES: permission denied` during install | Need elevated permissions | **Windows**: run terminal as Administrator. **Mac/Linux**: prefix with `sudo` |
+| `pm2 startup` on Windows says "not supported" | Correct — Windows uses a different mechanism | Use `install-autostart.bat` instead (Task Scheduler) |
+| Agent shows status `errored` in `pm2 list` | Crashed on boot | Run `pm2 logs admin-agent --lines 50` to see why |
+| Agent restarting in a loop | Crash → restart → crash | Run `pm2 logs admin-agent` to see the crash reason. Common: missing `data/config.json` — finish the setup wizard first |
+| Memory grows over time | Normal up to ~500MB | PM2 auto-restarts past 500MB (configured in `ecosystem.config.cjs`). If it happens often, see `data/logs/admin-agent.log` for leak source |
+| `npm install -g pm2` blocked by corporate proxy | Network policy | Configure npm proxy: `npm config set proxy http://your.proxy:8080` |
+| `npm install -g pm2` blocked by antivirus | Common with Windows Defender | Temporarily disable real-time protection, install, then re-enable |
+| Forgot if PM2 is installed | Check the binary | `pm2 --version` — prints version or "command not found" |
 
 ---
 

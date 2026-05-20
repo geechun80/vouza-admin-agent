@@ -1,0 +1,12 @@
+# Force Unix line endings for shell scripts — Mac/Linux bash fails on CRLF.
+*.sh text eol=lf
+
+# Force Windows line endings for batch files — cmd.exe expects CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Force LF for ecosystem.config.cjs and other config files PM2 reads from any OS.
+ecosystem.config.cjs text eol=lf
+
+# Default to platform-native everywhere else (matches current behavior).
+* text=auto
