@@ -10,10 +10,15 @@ AI-powered office automation — email, calendar, Telegram, WhatsApp, and more. 
 
 Make sure these are installed on the laptop before starting:
 
-| Tool | Download | Check if installed |
-|------|----------|--------------------|
-| **Node.js 18+** | [nodejs.org](https://nodejs.org) | `node --version` |
-| **Git** | [git-scm.com](https://git-scm.com) | `git --version` |
+| Tool | Required? | Download | Check if installed |
+|------|-----------|----------|--------------------|
+| **Node.js 18+** | ✅ Required | [nodejs.org](https://nodejs.org) | `node --version` |
+| **Git** | ✅ Required | [git-scm.com](https://git-scm.com) | `git --version` |
+| **PM2** | ⚙️ Optional (for 24/7 background running) | Installed automatically by `install-pm2.bat` / `install-pm2.sh` — see "Running in the background" below | `pm2 --version` |
+
+> **About PM2:** You do NOT need to install PM2 manually. After completing the setup wizard, just run `install-pm2.bat` (Windows) or `./install-pm2.sh` (Mac/Linux) — the script installs PM2 for you, builds the agent, and starts it in the background.
+>
+> Windows users have an even simpler alternative: `install-autostart.bat` uses Windows Task Scheduler instead, so no PM2 needed at all. See the "Running in the background" section below for the decision matrix.
 
 ---
 
