@@ -238,14 +238,57 @@ pm2 startup
 
 ## Updating to the latest version
 
+Follow these steps **in order**. Your saved config, chat history, and credentials are stored in `data/` and are **not touched** by the update — only the code changes.
+
+### Step 1 — Pull the latest code
+
 ```bash
 cd vouza-admin-agent
 git pull
-npm install
+```
+
+### Step 2 — Update dependencies
+
+```bash
+npm ci
+```
+
+> ⚠️ **Use `npm ci`, not `npm install`.** `npm ci` reads `package-lock.json` and installs the EXACT versions we tested. `npm install` could silently upgrade pinned-but-risky deps (Baileys, Playwright) and break WhatsApp or the browser tools.
+
+### Step 3 — Rebuild
+
+```bash
 npm run build
 ```
 
-Then restart the agent (or PM2 will auto-restart it).
+You should see `✓ public/ copied to dist/` at the end.
+
+### Step 4 — Restart the agent
+
+Pick the one that matches how you installed it:
+
+**If you used PM2** (ran `install-pm2.bat` / `install-pm2.sh`):
+```bash
+pm2 restart admin-agent
+pm2 logs admin-agent --lines 20   # confirm it started cleanly
+```
+
+**If you used Windows Task Scheduler** (ran `install-autostart.bat`):
+- Open Task Manager → find `wscript.exe` running → end task
+- Re-run by double-clicking **`start-background.vbs`** (or wait until next login)
+
+**If you just run `npm run setup` manually**:
+- Close the existing terminal window
+- Run `npm run setup` again
+
+### Step 5 — Verify the update worked
+
+1. Open the dashboard at **http://localhost:3456**
+2. The dashboard should load and show "🛡 Bound to loopback only" (or your configured bind) in the terminal output
+3. Check `data/logs/admin-agent.log` — fresh JSON log entries from the current minute confirm structured logging is running
+4. Test the Guide Bot by sending a message — it should reply at the bottom of the chat (not the top)
+
+> 💡 **Common gotcha:** if you ran `npm install` instead of `npm ci`, run `npm ci` once to restore exact pinned versions. Then `npm run build` again.
 
 ---
 
