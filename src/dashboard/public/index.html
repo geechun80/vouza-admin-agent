@@ -2732,6 +2732,8 @@ let _waQREventSource  = null;
 let _waCountdownTimer = null;  // setInterval handle
 let _waSecsLeft       = 20;    // current countdown value
 const WA_QR_TTL       = 20;    // WhatsApp QR code lifetime in seconds
+let _waQRCyclesShown  = 0;     // # of QR refreshes within this connect attempt
+const WA_RESET_HINT_AFTER = 2; // show "reset" hint after this many QR cycles without success
 
 function buildWhatsAppWebQRCard(isConnected) {
   return `
@@ -2763,7 +2765,12 @@ function buildWhatsAppWebQRCard(isConnected) {
                </div>
              </div>
              <div id="wa-qr-status" style="color:var(--text-dim);font-size:13px;margin-bottom:12px"></div>
-             <button id="wa-connect-btn" class="btn btn-primary" onclick="waQRConnect()">📱 Connect WhatsApp</button>`
+             <button id="wa-connect-btn" class="btn btn-primary" onclick="waQRConnect()">📱 Connect WhatsApp</button>
+             <div id="wa-reset-hint" style="display:none;margin-top:14px;padding:10px 12px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.25);border-radius:8px;font-size:12px;color:var(--text-dim);text-align:left">
+               <div style="color:#f59e0b;font-weight:600;margin-bottom:4px">⚠️ Getting "Invalid QR code"?</div>
+               This usually means stale credentials from a previous attempt. Click below to wipe them and start fresh.
+               <button class="btn btn-ghost" style="display:block;margin-top:8px;font-size:12px;width:100%" onclick="waQRReset()">🔄 Reset and start fresh</button>
+             </div>`
         }
       </div>
       <div class="hint">💡 Open WhatsApp on your phone → <strong>Settings → Linked Devices → Link a Device</strong> → scan the QR code above.</div>
@@ -2828,9 +2835,12 @@ async function waQRConnect() {
   const statusEl = document.getElementById('wa-qr-status');
   if (statusEl) statusEl.textContent = 'Launching agent connection…';
 
-  // Close any previous SSE + countdown
+  // Close any previous SSE + countdown, and reset cycle counter / hide reset hint
   if (_waQREventSource) { _waQREventSource.close(); _waQREventSource = null; }
   _waStopCountdown();
+  _waQRCyclesShown = 0;
+  const hint = document.getElementById('wa-reset-hint');
+  if (hint) hint.style.display = 'none';
 
   _waQREventSource = new EventSource('/api/whatsapp/qr-stream');
 
@@ -2853,6 +2863,14 @@ async function waQRConnect() {
     _waStartCountdown();
     if (statusEl) statusEl.textContent = '';
     if (btn) btn.textContent = '🔄 Waiting for scan…';
+
+    // After N QR refreshes without connecting, surface a "Reset & try again"
+    // hint — handles the stale-auth case that produces "Invalid QR code".
+    _waQRCyclesShown++;
+    if (_waQRCyclesShown >= WA_RESET_HINT_AFTER) {
+      const hint = document.getElementById('wa-reset-hint');
+      if (hint) hint.style.display = 'block';
+    }
   });
 
   _waQREventSource.addEventListener('status', (e) => {
@@ -2889,6 +2907,7 @@ async function waQRConnect() {
 function waQROnConnected() {
   if (_waQREventSource) { _waQREventSource.close(); _waQREventSource = null; }
   _waStopCountdown();
+  _waQRCyclesShown = 0;            // reset for any future reconnect
   state.connStatus['whatsapp'] = true;
   const badge = document.getElementById('status-whatsapp');
   if (badge) { badge.className = 'glass-card-badge badge-connected'; badge.textContent = '✅ Connected'; }
@@ -2910,6 +2929,40 @@ async function waQRLogout() {
   const channelCreds = document.getElementById('channelCredentials');
   if (channelCreds) renderChannelCredentials?.();
   toast('WhatsApp unlinked. Scan QR again to reconnect.', 'info');
+}
+
+// Reset Baileys auth — wipes data/whatsapp-auth/ so the next QR is fresh.
+// Used when the user keeps getting "Invalid QR code" because of stale
+// credentials left over from a previously interrupted pairing.
+async function waQRReset() {
+  const hint = document.getElementById('wa-reset-hint');
+  if (hint) hint.style.display = 'none';
+
+  // Close current SSE stream
+  if (_waQREventSource) { _waQREventSource.close(); _waQREventSource = null; }
+  _waStopCountdown();
+
+  const statusEl = document.getElementById('wa-qr-status');
+  if (statusEl) statusEl.textContent = '🔄 Wiping cached credentials…';
+
+  try {
+    const r = await fetch('/api/whatsapp/reset', { method: 'POST' });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.success) {
+      if (statusEl) statusEl.textContent = '⚠️ Reset failed — ' + (d.error || r.statusText);
+      return;
+    }
+  } catch (e) {
+    if (statusEl) statusEl.textContent = '⚠️ Reset failed — ' + String(e);
+    return;
+  }
+
+  // Brief pause so the worker fully exits + auth dir is wiped
+  if (statusEl) statusEl.textContent = '✅ Credentials cleared — starting fresh…';
+  await new Promise((r) => setTimeout(r, 1500));
+
+  // Now reconnect from scratch
+  waQRConnect();
 }
 
 function checkGoogleUnified() {

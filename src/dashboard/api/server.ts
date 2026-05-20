@@ -32,6 +32,7 @@ import {
   onBaileysQR,
   onBaileysStatus,
   sendBaileysMessage,
+  resetBaileysAuth,
   type BaileysStatus,
 } from "../../whatsapp/baileysManager.js";
 import { toDataURL as qrToDataURL } from "qrcode";
@@ -800,6 +801,19 @@ export async function startDashboard(port = 3456): Promise<void> {
       res.json({ success: true });
     } catch (err) {
       res.json({ success: false, error: String(err) });
+    }
+  });
+
+  // --- WhatsApp Baileys — RESET auth (fixes "Invalid QR code" errors) ---
+  // Stops the worker, deregisters with WhatsApp, and DELETES the cached
+  // auth files in data/whatsapp-auth/. Next /api/whatsapp/qr-stream call
+  // will start a fresh pairing with a clean QR.
+  app.post("/api/whatsapp/reset", requireLocalOrigin, async (_req, res) => {
+    try {
+      await resetBaileysAuth();
+      res.json({ success: true, message: "WhatsApp auth reset — open the connect flow again for a fresh QR." });
+    } catch (err) {
+      res.status(500).json({ success: false, error: String(err) });
     }
   });
 

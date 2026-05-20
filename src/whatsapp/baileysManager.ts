@@ -32,6 +32,7 @@ import { fork, type ChildProcess } from "child_process";
 import { fileURLToPath }           from "url";
 import { dirname, join }           from "path";
 import { randomUUID }              from "crypto";
+import { rm }                       from "fs/promises";
 import chalk                       from "chalk";
 import type { AgentContext }       from "../types/index.js";
 import type { ToolRegistry }       from "../tools/registry.js";
@@ -144,6 +145,37 @@ export async function logoutBaileys(): Promise<void> {
   if (_worker) _worker.send({ type: "stop" }); // worker calls sock.logout() then exits 0
   await new Promise<void>((r) => setTimeout(r, 1000)); // let it flush
   stopBaileysListener();
+}
+
+/**
+ * Full reset: stop the worker, deregister with WhatsApp, then delete the
+ * cached multi-file auth state. The next connect generates a clean QR
+ * with no stale credentials — this fixes the common "Invalid QR code"
+ * error customers hit when pairing was interrupted previously.
+ *
+ * Safe to call even if not currently connected.
+ */
+export async function resetBaileysAuth(): Promise<void> {
+  // Try a graceful logout first (best effort — doesn't matter if worker is dead).
+  try {
+    if (_worker) {
+      _worker.send({ type: "stop" });
+      await new Promise<void>((r) => setTimeout(r, 1000));
+    }
+  } catch { /* ignore */ }
+
+  // Forcibly stop the worker.
+  stopBaileysListener();
+
+  // Wipe the auth directory so the next start regenerates from scratch.
+  try {
+    await rm(AUTH_DIR, { recursive: true, force: true });
+    console.log(chalk.yellow(`  [WhatsApp] Cleared ${AUTH_DIR} — next connect will generate a fresh QR`));
+  } catch (err) {
+    // Non-fatal: if the dir didn't exist or was locked, the next start will
+    // simply create a new one and Baileys will request a fresh QR anyway.
+    console.log(chalk.gray(`  [WhatsApp] Auth dir cleanup skipped: ${err}`));
+  }
 }
 
 /**
