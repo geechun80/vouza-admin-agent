@@ -354,6 +354,107 @@ export async function startDashboard(port = 3456): Promise<void> {
     }
   });
 
+  // --- Diagnostic Bundle ---
+  // One-click "report an issue" support. Bundles:
+  //   - Agent version + Node version + platform
+  //   - Current agent status snapshot
+  //   - Provider health + budget snapshot
+  //   - Last 100 lines of structured log
+  //   - REDACTED config (all secrets masked) — never include unmasked
+  //   - Last 5 shell audit entries
+  //
+  // The user downloads this as a single JSON file they can attach to a
+  // support email or paste into a GitHub issue. Far better than asking
+  // a non-technical user to "send me the logs".
+  app.get("/api/diagnostic-bundle", requireLocalOrigin, async (_req, res) => {
+    const bundle: any = {
+      format:    "vouza-admin-agent-diagnostic",
+      version:   1,
+      generated: new Date().toISOString(),
+      runtime:   {
+        nodeVersion: process.version,
+        platform:    process.platform,
+        arch:        process.arch,
+        uptimeSec:   Math.round(process.uptime()),
+        pid:         process.pid,
+      },
+    };
+
+    // 1. Package version
+    try {
+      const pkgRaw = await readFile(join(process.cwd(), "package.json"), "utf8");
+      const pkg = JSON.parse(pkgRaw);
+      bundle.agentVersion = pkg.version;
+    } catch { /* non-fatal */ }
+
+    // 2. REDACTED config — copy the masking logic from GET /api/config
+    try {
+      const config = await loadSetupConfig();
+      const masked: any = { ...config, credentials: { ...config.credentials } };
+      for (const [k, v] of Object.entries(masked.credentials)) {
+        if (isSensitiveField(k)) masked.credentials[k] = maskKey(v as string);
+      }
+      for (const ch of Object.values(masked.channels) as any[]) {
+        ch.config = { ...ch.config };
+        for (const [k, v] of Object.entries(ch.config)) {
+          if (isSensitiveField(k)) ch.config[k] = maskKey(v as string);
+        }
+      }
+      for (const t of Object.values(masked.tools) as any[]) {
+        t.config = { ...t.config };
+        for (const [k, v] of Object.entries(t.config)) {
+          if (isSensitiveField(k)) t.config[k] = maskKey(v as string);
+        }
+      }
+      bundle.config = masked;
+    } catch (err) { bundle.configError = String(err); }
+
+    // 3. Agent status snapshot
+    try {
+      bundle.agentStatus = agentInstance ? await getAgentStatus(agentInstance) : { running: false };
+    } catch (err) { bundle.agentStatusError = String(err); }
+
+    // 4. Provider failover + budget
+    try { bundle.providerHealth = getProviderHealth(); } catch (err) { bundle.providerHealthError = String(err); }
+    try {
+      const snap = await getBudgetSnapshot();
+      bundle.budget = {
+        date:        snap.date,
+        spentUsd:    Number(snap.totalUsd.toFixed(4)),
+        capUsd:      snap.cap,
+        byProvider:  snap.byProvider,
+      };
+    } catch (err) { bundle.budgetError = String(err); }
+
+    // 5. Last 100 lines of the structured log (most recent first)
+    try {
+      const logPath = join(process.cwd(), "data", "logs", "admin-agent.log");
+      const raw = await readFile(logPath, "utf8");
+      const lines = raw.split("\n").filter((l) => l.trim().length > 0).slice(-100);
+      bundle.recentLogs = lines.map((l) => {
+        try { return JSON.parse(l); } catch { return { raw: l.slice(0, 500) }; }
+      });
+    } catch (err: any) {
+      // Log file missing is normal for very-recent installs; surface but don't fail
+      bundle.recentLogsError = err?.code === "ENOENT" ? "no log file yet" : String(err);
+    }
+
+    // 6. Last 5 shell audit entries
+    try {
+      const auditPath = join(process.cwd(), "data", "shell-audit.log");
+      const raw = await readFile(auditPath, "utf8");
+      const lines = raw.split("\n").filter((l) => l.trim().length > 0).slice(-5);
+      bundle.recentShellAudit = lines.map((l) => {
+        try { return JSON.parse(l); } catch { return { raw: l.slice(0, 300) }; }
+      });
+    } catch { /* non-fatal */ }
+
+    const filename = `vouza-diagnostic-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`;
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(JSON.stringify(bundle, null, 2));
+  });
+
   // --- Version + Changelog ---
   // Used by the frontend's "What's new" notifier — surfaces unread changes
   // since the user last dismissed the changelog modal.

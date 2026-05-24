@@ -42,6 +42,25 @@
       --shadow-card:     0 4px 24px rgba(0,0,0,0.3);
     }
 
+    /* ── Light theme — applied when <html data-theme="light"> ────────────
+       Override only the colors that need adjustment for readability on a
+       light background. Brand purple stays the same so the visual identity
+       is preserved across themes. */
+    html[data-theme="light"] {
+      --bg:              #f5f7fb;
+      --bg-glass:        rgba(0,0,0,0.025);
+      --bg-glass-hover:  rgba(0,0,0,0.05);
+      --bg-glass-card:   #ffffff;
+      --border:          rgba(15,23,42,0.10);
+      --text:            #0f172a;
+      --text-dim:        #475569;
+      --text-muted:      #94a3b8;
+      --shadow-glass:    0 4px 18px rgba(15,23,42,0.08), inset 0 1px 0 rgba(255,255,255,0.5);
+      --shadow-card:     0 2px 12px rgba(15,23,42,0.06);
+    }
+    /* Hide the dark-mode background blobs in light theme — they look muddy */
+    html[data-theme="light"] body::before { display: none; }
+
     *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 
     body {
@@ -1974,6 +1993,7 @@
             <button class="conv-memory-btn" onclick="openSettings()" title="Reconfigure agent" aria-label="Open settings to reconfigure the agent">⚙️ Settings</button>
             <button class="conv-memory-btn" onclick="toggleMemoryPanel()" title="What your agent has learned" aria-label="Open agent memories panel">🧠 Memories</button>
             <button class="conv-memory-btn" onclick="toggleHealthPanel()" title="Spend, provider health, uptime" aria-label="Open system health and operations panel">📊 Health</button>
+            <button class="conv-memory-btn" onclick="toggleTheme()" title="Switch between light and dark theme" aria-label="Toggle light/dark theme" id="themeToggleBtn">🌙</button>
           </div>
         </div>
 
@@ -4407,7 +4427,13 @@ function renderConvList(convs) {
   const list = document.getElementById('convList');
   if (!list) return;
   if (!convs || !convs.length) {
-    list.innerHTML = '<div class="conv-empty"><div class="conv-empty-icon">💬</div>No conversations yet.<br>Start chatting!</div>';
+    list.innerHTML = `<div class="conv-empty">
+      <div class="conv-empty-icon">💬</div>
+      <div style="font-weight:600;font-size:14px;color:var(--text);margin-bottom:6px">No conversations yet</div>
+      <div style="font-size:12px;color:var(--text-dim);line-height:1.6">
+        Start chatting in the panel on the right — every thread is saved here automatically so you can resume anytime.
+      </div>
+    </div>`;
     return;
   }
   const now       = Date.now();
@@ -5449,6 +5475,20 @@ function renderHealthPanel({ budget, health, agent }) {
         Restore is non-destructive — your current config is auto-saved as <code>data/config.json.before-restore-*.bak</code> in case you need to roll back manually.
       </div>
     </div>
+
+    <div class="health-section">
+      <h3>🆘 Report an issue</h3>
+      <div style="font-size:13px;color:var(--text-dim);line-height:1.6;padding:0 4px;margin-bottom:8px">
+        Something not working? Download a diagnostic bundle and send it to support. We'll know exactly what your agent's state was when the issue happened.
+      </div>
+      <div style="font-size:12px;color:#10b981;line-height:1.5;padding:8px 12px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.2);border-radius:8px;margin-bottom:10px">
+        ✅ All credentials are <strong>masked</strong> in the diagnostic bundle. Safe to share.
+      </div>
+      <div class="health-action-row">
+        <button class="health-action-btn primary" onclick="downloadDiagnostic()" aria-label="Download diagnostic bundle for support">🆘 Download diagnostic bundle</button>
+        <a class="health-action-btn" href="https://github.com/geechun80/vouza-admin-agent/issues/new" target="_blank" rel="noopener" aria-label="Open GitHub issue tracker in a new tab">📝 Open issue tracker →</a>
+      </div>
+    </div>
   `;
 
   return `
@@ -5572,6 +5612,54 @@ function showRestoreConfirm(summaryHtml) {
     window.addEventListener('keydown', onKey);
   });
 }
+
+// ── Diagnostic bundle download (support helper) ─────────────────────────
+async function downloadDiagnostic() {
+  toast('Generating diagnostic bundle…', 'info');
+  try {
+    const r = await fetch('/api/diagnostic-bundle');
+    if (!r.ok) { toast('Diagnostic generation failed — server returned ' + r.status, 'error'); return; }
+    const blob = await r.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `vouza-diagnostic-${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast('✅ Diagnostic saved. Attach it to a GitHub issue or email.', 'success');
+  } catch (e) {
+    toast('Diagnostic failed: ' + String(e), 'error');
+  }
+}
+
+// ── Light/dark theme toggle ─────────────────────────────────────────────
+const THEME_KEY = 'vouza_theme_v1';
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  const btn = document.getElementById('themeToggleBtn');
+  if (btn) {
+    btn.textContent = theme === 'light' ? '☀️' : '🌙';
+    btn.setAttribute('aria-label', theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme');
+  }
+}
+
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+  const next = current === 'light' ? 'dark' : 'light';
+  applyTheme(next);
+  try { localStorage.setItem(THEME_KEY, next); } catch {}
+}
+
+// Restore theme on page load before anything else (avoids flash of wrong theme)
+(function initTheme() {
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    if (saved === 'light' || saved === 'dark') applyTheme(saved);
+  } catch {}
+})();
 
 // Trigger the backup download. The server endpoint sends a JSON file with
 // Content-Disposition: attachment, so the browser downloads it directly.
@@ -5731,9 +5819,15 @@ function renderMemoryPanel(entries) {
   const el = document.getElementById('memoryPanelContent');
   if (!entries.length) {
     el.innerHTML = `<div class="memory-empty">
-      <div style="font-size:40px;margin-bottom:12px">🧠</div>
-      <div style="font-weight:600;margin-bottom:8px">No memories yet</div>
-      <div style="font-size:13px">As you chat with your agent and complete tasks,<br>it will automatically remember useful facts here.</div>
+      <div style="font-size:48px;margin-bottom:14px">🧠</div>
+      <div style="font-weight:600;margin-bottom:8px;font-size:15px">No memories yet — that's normal!</div>
+      <div style="font-size:13px;color:var(--text-dim);max-width:380px;margin:0 auto;line-height:1.6">
+        Your agent automatically remembers useful facts as you chat — your name, work hours, frequent contacts, project shorthand. The list will fill up here as you use it.
+      </div>
+      <div style="margin-top:18px;font-size:12px;color:var(--text-dim);max-width:380px;margin-left:auto;margin-right:auto">
+        💡 Want to teach it something explicitly? Try:<br>
+        <em style="color:var(--brand-light)">"Remember that my team's standup is every Mon/Wed/Fri at 9 AM."</em>
+      </div>
     </div>`;
     return;
   }
@@ -6098,6 +6192,8 @@ const COMMANDS = [
   { id:'open-mem',    label:'Open agent memories',          icon:'🧠', hint:'',          run: () => toggleMemoryPanel() },
   { id:'open-set',    label:'Open settings (wizard)',       icon:'⚙️', hint:'',          run: () => openSettings() },
   { id:'backup',      label:'Download a full backup',       icon:'💾', hint:'',          run: () => downloadBackup() },
+  { id:'diagnostic',  label:'Report an issue (download diagnostic)', icon:'🆘', hint:'', run: () => downloadDiagnostic() },
+  { id:'theme',       label:'Toggle light / dark theme',    icon:'🎨', hint:'',          run: () => toggleTheme() },
   { id:'docs',        label:'Open documentation on GitHub', icon:'📚', hint:'',          run: () => window.open('https://github.com/geechun80/vouza-admin-agent', '_blank') },
   { id:'add-email',   label:'Connect Email',                icon:'📧', hint:'',          run: () => onSetupItemClick('email', false, 'I want to connect my email. Walk me through it step by step.') },
   { id:'add-tel',     label:'Connect Telegram',             icon:'💬', hint:'',          run: () => onSetupItemClick('telegram', false, 'Help me set up Telegram so I can chat with the AI from my phone.') },
