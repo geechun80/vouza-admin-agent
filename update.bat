@@ -1,7 +1,7 @@
 @echo off
 title Vouza Admin Agent - Update
 color 0A
-setlocal
+setlocal enabledelayedexpansion
 
 echo.
 echo  ==================================================
@@ -70,18 +70,44 @@ echo.
 echo  [4/4] Restarting the agent...
 where pm2 >nul 2>&1
 if errorlevel 1 (
+    :: ── No PM2 — handle the start.bat path explicitly ────────────────────
+    echo    PM2 not installed - using direct start.bat flow.
     echo.
-    echo  ! PM2 is not installed — skipping auto-restart.
-    echo    If you're running the agent manually, close it and re-run start.bat
-    echo    To install PM2: run install-pm2.bat
+
+    :: Detect a running node process on port 3456 (the dashboard port).
+    :: If found, offer to kill it so the rebuild takes effect.
+    netstat -ano | findstr :3456 | findstr LISTENING >nul 2>&1
+    if not errorlevel 1 (
+        echo    ! An agent is already running on port 3456.
+        echo.
+        set /p KILL_OLD="    Stop it and re-launch with the new code? (Y/N): "
+        if /i "!KILL_OLD!"=="Y" (
+            :: Find the PID and kill it
+            for /f "tokens=5" %%P in ('netstat -ano ^| findstr :3456 ^| findstr LISTENING') do (
+                taskkill /F /PID %%P >nul 2>&1
+                echo    OK - stopped old agent (PID %%P)
+            )
+            echo.
+            echo    Starting fresh agent with new code...
+            start "" "%AGENT_DIR%\start.bat"
+            echo    OK - new agent launched in a new window
+        ) else (
+            echo    Skipped - your update is on disk but the running agent is still on OLD code.
+            echo    Close the existing terminal window and double-click start.bat to apply the update.
+        )
+    ) else (
+        echo    No running agent detected.
+        echo    Double-click start.bat to launch the freshly-built agent.
+    )
+    echo    To install PM2 for easier updates: run install-pm2.bat
 ) else (
     call pm2 restart admin-agent
     if errorlevel 1 (
         echo.
-        echo  ! PM2 restart failed — the agent may not have been running.
+        echo  ! PM2 restart failed - the agent may not have been running.
         echo    To start fresh: pm2 start ecosystem.config.cjs
     ) else (
-        echo    OK - agent restarted
+        echo    OK - agent restarted via PM2
     )
 )
 
