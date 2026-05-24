@@ -354,6 +354,151 @@ export async function startDashboard(port = 3456): Promise<void> {
     }
   });
 
+  // --- Live Connection Diagnostics ---
+  // Runs an actual API call against each configured integration's endpoint
+  // and reports per-integration pass/fail with the specific error. This is
+  // the "tell me exactly what's wrong" page Aerick asked for after seeing
+  // ✓ checkmarks but 401 errors on the bot.
+  //
+  // For each check, we report:
+  //   { name, ok, latencyMs, keySource (user/operator/env), keyPreview, error? }
+  app.get("/api/connection-test", requireLocalOrigin, async (_req, res) => {
+    const config = await loadSetupConfig();
+    const creds  = config.credentials || {};
+    const results: any[] = [];
+
+    const mask = (k: string | undefined) =>
+      !k ? "(empty)" : k.length < 10 ? "***" : `${k.slice(0, 8)}…${k.slice(-4)}`;
+
+    const time = async (label: string, fn: () => Promise<any>) => {
+      const t0 = Date.now();
+      try {
+        const r = await fn();
+        return { name: label, ok: true, latencyMs: Date.now() - t0, ...r };
+      } catch (err: any) {
+        return { name: label, ok: false, latencyMs: Date.now() - t0, error: String(err?.message || err) };
+      }
+    };
+
+    // ── AI provider — which key is actually being used? ──────────────────
+    // Mirror the resolution logic in loader.ts exactly so what we report
+    // here matches what the agent will actually use at runtime.
+    const operatorKey      = (process.env.VOUZA_API_KEY      || "").trim();
+    const operatorProvider = (process.env.VOUZA_API_PROVIDER || "openrouter");
+    let activeProvider = config.agent?.provider || "anthropic";
+    let activeKey: string | undefined = "";
+    let keySource = "missing";
+    const userKeyField = `${activeProvider}ApiKey`;
+    if (creds[userKeyField] && String(creds[userKeyField]).trim()) {
+      activeKey = String(creds[userKeyField]).trim();
+      keySource = "user (config.json)";
+    } else if (operatorKey) {
+      activeProvider = operatorProvider;
+      activeKey = operatorKey;
+      keySource = "operator (VOUZA_API_KEY env)";
+    }
+
+    results.push(await time(`AI Provider (${activeProvider})`, async () => {
+      if (!activeKey) throw new Error("No API key found — neither user nor operator key is set");
+      // Hit /models endpoint — universal across OpenRouter/OpenAI/Anthropic-compat
+      const baseUrl = activeProvider === "anthropic" ? "https://api.anthropic.com/v1/models"
+                    : activeProvider === "openrouter" ? "https://openrouter.ai/api/v1/models"
+                    : activeProvider === "google" ? `https://generativelanguage.googleapis.com/v1beta/models?key=${activeKey}`
+                    : activeProvider === "openai" ? "https://api.openai.com/v1/models"
+                    : `https://api.${activeProvider}.com/v1/models`;
+      const headers: Record<string, string> = {};
+      if (activeProvider === "anthropic") {
+        headers["x-api-key"] = activeKey;
+        headers["anthropic-version"] = "2023-06-01";
+      } else if (activeProvider !== "google") {
+        headers["Authorization"] = `Bearer ${activeKey}`;
+      }
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 8000);
+      try {
+        const r = await fetch(baseUrl, { headers, signal: ctrl.signal });
+        if (!r.ok) {
+          const body = await r.text().catch(() => "");
+          throw new Error(`HTTP ${r.status}: ${body.slice(0, 200) || r.statusText}`);
+        }
+        return { keySource, keyPreview: mask(activeKey), detail: `Reached ${baseUrl.split("/")[2]} successfully` };
+      } finally { clearTimeout(t); }
+    }));
+
+    // ── Telegram ─────────────────────────────────────────────────────────
+    const tgToken = config.channels?.telegram?.config?.telegramToken
+                 || config.channels?.telegram?.config?.telegramBotToken
+                 || config.channels?.telegram?.config?.botToken;
+    if (tgToken) {
+      results.push(await time("Telegram (getMe)", async () => {
+        const r = await fetch(`https://api.telegram.org/bot${tgToken}/getMe`);
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || !data.ok) throw new Error(`HTTP ${r.status}: ${data.description || r.statusText}`);
+        return { detail: `@${data.result?.username || "bot"} (${data.result?.first_name || ""})`, keyPreview: mask(String(tgToken)) };
+      }));
+    } else {
+      results.push({ name: "Telegram", ok: false, skipped: true, error: "Not configured" });
+    }
+
+    // ── Voice (Groq Whisper) ─────────────────────────────────────────────
+    if (creds.groqApiKey) {
+      results.push(await time("Voice (Groq Whisper)", async () => {
+        const r = await fetch("https://api.groq.com/openai/v1/models", {
+          headers: { Authorization: `Bearer ${creds.groqApiKey}` },
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+        return { detail: "Groq API key valid", keyPreview: mask(creds.groqApiKey) };
+      }));
+    }
+
+    // ── Gmail SMTP ───────────────────────────────────────────────────────
+    const gmailUser = config.channels?.email?.config?.gmailUser;
+    const gmailPass = config.channels?.email?.config?.gmailPass || config.channels?.email?.config?.gmailAppPassword;
+    if (gmailUser && gmailPass) {
+      results.push({
+        name: "Gmail SMTP", ok: true, latencyMs: 0, skipped: true,
+        detail: "Credentials present — live SMTP test runs on actual send",
+        keyPreview: mask(String(gmailPass)),
+      });
+    }
+
+    // ── Summary ──────────────────────────────────────────────────────────
+    res.json({
+      generatedAt: new Date().toISOString(),
+      summary: {
+        total:   results.length,
+        passed:  results.filter((r) => r.ok && !r.skipped).length,
+        failed:  results.filter((r) => !r.ok && !r.skipped).length,
+        skipped: results.filter((r) => r.skipped).length,
+      },
+      activeProvider,
+      activeKeySource: keySource,
+      results,
+    });
+  });
+
+  // --- Recent Logs (tail) ---
+  // Returns the last N entries from data/logs/admin-agent.log as parsed JSON.
+  // Used by the live log viewer in the Health panel so the operator can see
+  // exactly what the agent is doing without SSHing in.
+  app.get("/api/recent-logs", requireLocalOrigin, async (req, res) => {
+    try {
+      const limit = Math.max(1, Math.min(500, parseInt(String(req.query.limit ?? "50"), 10) || 50));
+      const logPath = join(process.cwd(), "data", "logs", "admin-agent.log");
+      const raw = await readFile(logPath, "utf8").catch((err: any) => {
+        if (err?.code === "ENOENT") return "";
+        throw err;
+      });
+      const lines = raw.split("\n").filter((l: string) => l.trim().length > 0).slice(-limit);
+      const entries = lines.map((l: string) => {
+        try { return JSON.parse(l); } catch { return { raw: l.slice(0, 500) }; }
+      });
+      res.json({ entries, count: entries.length });
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
   // --- Diagnostic Bundle ---
   // One-click "report an issue" support. Bundles:
   //   - Agent version + Node version + platform

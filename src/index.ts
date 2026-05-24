@@ -39,6 +39,63 @@ async function main() {
   console.log(chalk.gray(`Memory: ${config.memoryDir}`));
   console.log(chalk.gray(`Skills: ${config.skillsDir}`));
 
+  // ── Startup verification: surface which API key path is active ──────────
+  // Without this, customers see ✓ Connected in the UI but a 401 from the
+  // bot, with no way to tell whether their key was loaded at all. Loud,
+  // unambiguous startup logging makes the failure mode obvious in seconds.
+  const activeProviderKey = config.apiKeys?.[config.provider] || "";
+  const operatorEnvKey    = (process.env.VOUZA_API_KEY || "").trim();
+  if (!activeProviderKey) {
+    console.log(chalk.red.bold(`\n  ❌ AI provider "${config.provider}" has NO API key configured.`));
+    console.log(chalk.red(`     The agent will respond to messages with 401 "Missing Authentication header" until this is fixed.`));
+    if (operatorEnvKey) {
+      console.log(chalk.yellow(`     VOUZA_API_KEY is set in env but provider doesn't match. Check VOUZA_API_PROVIDER env var.`));
+    } else {
+      console.log(chalk.yellow(`     → Either paste a key in the wizard (Step 2 → AI Account Access)`));
+      console.log(chalk.yellow(`     → OR set VOUZA_API_KEY in your environment / ecosystem.config.cjs`));
+    }
+  } else {
+    const keySource = operatorEnvKey && activeProviderKey === operatorEnvKey
+      ? "operator (VOUZA_API_KEY env)"
+      : "user (saved in config.json)";
+    const keyPreview = activeProviderKey.length < 10 ? "***" : `${activeProviderKey.slice(0, 8)}…${activeProviderKey.slice(-4)}`;
+    console.log(chalk.green(`  ✓ AI key loaded: ${keyPreview}  [${keySource}]`));
+  }
+
+  // Quick liveness probe — fire a /models request against the active provider
+  // to confirm the key works at boot time, NOT only when the first user
+  // message arrives. Async / non-blocking so it doesn't slow startup.
+  (async () => {
+    if (!activeProviderKey) return;
+    try {
+      const baseUrl = config.provider === "anthropic" ? "https://api.anthropic.com/v1/models"
+                    : config.provider === "openrouter" ? "https://openrouter.ai/api/v1/models"
+                    : config.provider === "google" ? `https://generativelanguage.googleapis.com/v1beta/models?key=${activeProviderKey}`
+                    : config.provider === "openai" ? "https://api.openai.com/v1/models"
+                    : `https://api.${config.provider}.com/v1/models`;
+      const headers: Record<string, string> = {};
+      if (config.provider === "anthropic") {
+        headers["x-api-key"] = activeProviderKey;
+        headers["anthropic-version"] = "2023-06-01";
+      } else if (config.provider !== "google") {
+        headers["Authorization"] = `Bearer ${activeProviderKey}`;
+      }
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 8000);
+      const r = await fetch(baseUrl, { headers, signal: ctrl.signal });
+      clearTimeout(t);
+      if (!r.ok) {
+        const body = await r.text().catch(() => "");
+        console.log(chalk.red(`  ⚠️  AI key REJECTED by provider at startup: HTTP ${r.status} — ${body.slice(0, 150) || r.statusText}`));
+        console.log(chalk.red(`     The bot will fail with the same error on every message until the key is fixed.`));
+      } else {
+        console.log(chalk.green(`  ✓ AI key verified live against ${baseUrl.split("/")[2]}`));
+      }
+    } catch (err: any) {
+      console.log(chalk.yellow(`  ⚠️  Could not verify AI key at startup (network?): ${err?.message || err}`));
+    }
+  })();
+
   // --- Create Agent from Template ---
   const agent = await createAgentFromTemplate(ADMIN_TEMPLATE, {
     name: config.name,

@@ -5309,35 +5309,48 @@ async function toggleMemoryPanel() {
 let _healthPanelOpen = false;
 let _healthSavedStep = 1;
 let _healthRefreshTimer = null;
+// Tracks where the user CAME FROM when opening the Health panel, so back/close
+// returns them to that exact context. The earlier bug: we reused _inSettingsMode
+// which mixed signals from the Settings flow with the Health flow → back went
+// to a wizard step the user never visited → blank screen.
+let _healthOpenedFromLiveMode = false;
 
 async function toggleHealthPanel() {
-  // If user is currently in live mode, switch out so the wizard column is visible
-  const liveMode = document.getElementById('mainApp')?.classList.contains('live-mode');
-  if (liveMode && !_healthPanelOpen) {
-    document.getElementById('mainApp').classList.remove('live-mode');
-    _inSettingsMode = true; // ensures Back-to-Chat button appears
-  }
-
-  _healthPanelOpen = !_healthPanelOpen;
-  if (_healthPanelOpen) {
-    _healthSavedStep = state.step || 1;
+  // Opening flow ----------------------------------------------------------
+  if (!_healthPanelOpen) {
+    const liveMode = document.getElementById('mainApp')?.classList.contains('live-mode');
+    _healthOpenedFromLiveMode = !!liveMode;
+    if (liveMode) {
+      // Take the user out of live mode so the wizard column can show the panel.
+      // Crucially, do NOT set _inSettingsMode — that's a separate flag for the
+      // Settings wizard flow.
+      document.getElementById('mainApp').classList.remove('live-mode');
+    } else {
+      _healthSavedStep = state.step || 1;
+    }
+    _healthPanelOpen = true;
     document.querySelectorAll('.step-view').forEach((el) => (el.style.display = 'none'));
     const panel = document.getElementById('health-panel');
     panel.style.display = 'block';
     await loadHealthPanel();
-    // Refresh every 15s while the panel is open
     if (_healthRefreshTimer) clearInterval(_healthRefreshTimer);
     _healthRefreshTimer = setInterval(loadHealthPanel, 15000);
-  } else {
-    document.getElementById('health-panel').style.display = 'none';
-    if (_healthRefreshTimer) { clearInterval(_healthRefreshTimer); _healthRefreshTimer = null; }
-    // Restore where the user was
-    if (_inSettingsMode) {
-      showStep(_healthSavedStep);
-    } else {
-      activateLiveMode();
-    }
+    return;
   }
+
+  // Closing flow ----------------------------------------------------------
+  _healthPanelOpen = false;
+  document.getElementById('health-panel').style.display = 'none';
+  if (_healthRefreshTimer) { clearInterval(_healthRefreshTimer); _healthRefreshTimer = null; }
+
+  if (_healthOpenedFromLiveMode) {
+    // User clicked Health from the live dashboard → return them to live mode
+    activateLiveMode();
+  } else {
+    // User clicked Health from inside the wizard → return to that step
+    showStep(_healthSavedStep || 1);
+  }
+  _healthOpenedFromLiveMode = false;
 }
 
 async function loadHealthPanel() {
@@ -5515,13 +5528,120 @@ function renderHealthPanel({ budget, health, agent }) {
     </div>
   `;
 
+  // ── Live Connection Diagnostics block (placeholder — populated async) ──
+  const diagnostics = `
+    <div class="health-section">
+      <h3>🔧 Connection Diagnostics</h3>
+      <div style="font-size:13px;color:var(--text-dim);line-height:1.6;padding:0 4px;margin-bottom:8px">
+        Runs a live API call against every configured integration and shows
+        the exact result + which key was used. Use this when something looks
+        connected in the UI but the bot isn't actually replying.
+      </div>
+      <div class="health-action-row">
+        <button class="health-action-btn primary" onclick="runConnectionTest()" aria-label="Run live connection test">🔬 Run live test now</button>
+      </div>
+      <div id="connectionTestResults" style="margin-top:14px"></div>
+    </div>
+
+    <div class="health-section">
+      <h3>📜 Live log tail (last 50 entries)</h3>
+      <div style="font-size:13px;color:var(--text-dim);line-height:1.6;padding:0 4px;margin-bottom:8px">
+        Latest entries from <code style="background:rgba(255,255,255,0.04);padding:2px 6px;border-radius:4px">data/logs/admin-agent.log</code>. Refreshes when you click below.
+      </div>
+      <div class="health-action-row">
+        <button class="health-action-btn" onclick="refreshLogTail()" aria-label="Refresh live log tail">🔄 Refresh logs</button>
+      </div>
+      <div id="logTailContainer" style="margin-top:14px"></div>
+    </div>
+  `;
+
   return `
     <div class="health-grid">${statCards.join('')}</div>
     ${providerRows}
     ${spendRows}
+    ${diagnostics}
     ${hints}
     ${backup}
   `;
+}
+
+// ── Live connection diagnostics — hits each integration's real endpoint ──
+async function runConnectionTest() {
+  const out = document.getElementById('connectionTestResults');
+  if (!out) return;
+  out.innerHTML = '<div style="color:var(--text-dim);font-size:13px;padding:10px 4px">⏳ Testing all integrations live (up to ~10s)…</div>';
+  try {
+    const r = await fetch('/api/connection-test');
+    if (!r.ok) { out.innerHTML = `<div style="color:#ef4444;padding:10px 4px">⚠️ Test request failed: HTTP ${r.status}</div>`; return; }
+    const data = await r.json();
+
+    const summary = `
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;font-size:12px">
+        <span style="padding:4px 10px;border-radius:10px;background:rgba(16,185,129,0.12);color:#10b981;font-weight:600">${data.summary.passed} passed</span>
+        ${data.summary.failed > 0 ? `<span style="padding:4px 10px;border-radius:10px;background:rgba(239,68,68,0.12);color:#ef4444;font-weight:600">${data.summary.failed} failed</span>` : ''}
+        ${data.summary.skipped > 0 ? `<span style="padding:4px 10px;border-radius:10px;background:rgba(148,163,184,0.10);color:var(--text-dim);font-weight:600">${data.summary.skipped} skipped</span>` : ''}
+        <span style="padding:4px 10px;border-radius:10px;background:rgba(124,58,237,0.12);color:var(--brand-light);font-weight:600">Active AI: ${escHtml(data.activeProvider || 'unknown')}</span>
+        <span style="padding:4px 10px;border-radius:10px;background:rgba(124,58,237,0.08);color:var(--text-dim);font-weight:500;font-size:11px">Key source: ${escHtml(data.activeKeySource || 'unknown')}</span>
+      </div>
+    `;
+
+    const rows = data.results.map((r) => {
+      const tone = r.skipped ? 'warn' : (r.ok ? 'healthy' : 'bad');
+      const status = r.skipped
+        ? '⏭ Skipped'
+        : (r.ok ? `✓ Pass (${r.latencyMs}ms)` : '✗ Fail');
+      const detail = r.error
+        ? `<div style="font-size:11px;color:#ef4444;margin-top:3px;line-height:1.5;word-break:break-word">${escHtml(r.error)}</div>`
+        : r.detail
+          ? `<div style="font-size:11px;color:var(--text-dim);margin-top:3px">${escHtml(r.detail)}</div>`
+          : '';
+      const keyInfo = r.keyPreview ? `<div style="font-size:10px;color:var(--text-dim);opacity:0.7;margin-top:2px;font-family:monospace">${escHtml(r.keyPreview)}</div>` : '';
+      return `
+        <div class="provider-health-row ${tone}" style="align-items:flex-start;padding:12px 14px">
+          <span class="status-dot" style="margin-top:5px"></span>
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;justify-content:space-between;gap:8px"><span class="pname">${escHtml(r.name)}</span><span class="pmeta">${escHtml(status)}</span></div>
+            ${detail}
+            ${keyInfo}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    out.innerHTML = summary + rows;
+  } catch (e) {
+    out.innerHTML = `<div style="color:#ef4444;padding:10px 4px">⚠️ ${escHtml(String(e))}</div>`;
+  }
+}
+
+// ── Live log tail viewer ────────────────────────────────────────────────
+async function refreshLogTail() {
+  const out = document.getElementById('logTailContainer');
+  if (!out) return;
+  out.innerHTML = '<div style="color:var(--text-dim);font-size:13px;padding:6px 4px">Loading…</div>';
+  try {
+    const r = await fetch('/api/recent-logs?limit=50');
+    if (!r.ok) { out.innerHTML = `<div style="color:#ef4444;padding:6px 4px">⚠️ Failed to load logs</div>`; return; }
+    const { entries } = await r.json();
+    if (!entries?.length) {
+      out.innerHTML = '<div style="color:var(--text-dim);font-size:13px;padding:6px 4px">No log entries yet — the log file will populate as the agent runs.</div>';
+      return;
+    }
+    // Render as compact monospace block, newest at top
+    const rows = entries.reverse().map((e) => {
+      const level = e.level === 50 ? '🔴' : e.level === 40 ? '🟡' : e.level === 30 ? '🔵' : e.level === 20 ? '⚪' : '·';
+      const ts = e.time ? new Date(e.time).toLocaleTimeString() : '';
+      const msg = e.msg || e.raw || '';
+      const extras = Object.entries(e).filter(([k]) => !['level','time','msg','service','pid','raw','v','hostname'].includes(k));
+      const extraStr = extras.length ? ' · ' + extras.map(([k,v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`).join(' ').slice(0, 200) : '';
+      return `<div style="padding:5px 8px;border-bottom:1px solid var(--border);font-size:11px;font-family:'SF Mono','Cascadia Code',Menlo,monospace;line-height:1.55">
+        <span style="opacity:0.5">${level} ${ts}</span> ${escHtml(String(msg))}<span style="color:var(--text-dim);opacity:0.7">${escHtml(extraStr)}</span>
+      </div>`;
+    }).join('');
+    out.innerHTML = `<div style="max-height:340px;overflow-y:auto;background:var(--bg-glass-card);border:1px solid var(--border);border-radius:8px">${rows}</div>`;
+  } catch (e) {
+    out.innerHTML = `<div style="color:#ef4444;padding:6px 4px">⚠️ ${escHtml(String(e))}</div>`;
+  }
 }
 
 // Programmatically open the hidden file picker — separated so the button's
