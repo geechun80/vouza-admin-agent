@@ -647,6 +647,85 @@
     /* ============================================================
        SKILL CARDS
     ============================================================ */
+
+    /* ── Preset selector (3 horizontal cards) ─────────────────── */
+    .preset-grid {
+      display:grid; grid-template-columns:repeat(3, 1fr); gap:12px;
+      margin-bottom:24px;
+    }
+    @media (max-width: 720px) {
+      .preset-grid { grid-template-columns:1fr; }
+    }
+    .preset-card {
+      padding:16px 18px; border-radius:var(--radius);
+      background:var(--bg-glass-card); border:1px solid var(--border);
+      cursor:pointer; transition:all 0.18s; position:relative;
+    }
+    .preset-card:hover { background:var(--bg-glass-hover); transform:translateY(-1px); }
+    .preset-card.active {
+      border-color:rgba(124,58,237,0.55);
+      background:var(--brand-glow-sm);
+      box-shadow:0 0 0 1px rgba(124,58,237,0.2);
+    }
+    .preset-card-header {
+      display:flex; align-items:center; gap:10px; margin-bottom:8px;
+    }
+    .preset-icon { font-size:26px; line-height:1; }
+    .preset-name { font-weight:700; font-size:14px; color:var(--text); }
+    .preset-tag {
+      margin-left:auto; padding:2px 8px;
+      border-radius:10px; font-size:10px; font-weight:600;
+      background:rgba(124,58,237,0.15); color:var(--brand-light);
+      text-transform:uppercase; letter-spacing:0.4px;
+    }
+    .preset-card.recommended .preset-tag {
+      background:linear-gradient(135deg, rgba(16,185,129,0.18), rgba(124,58,237,0.18));
+      color:#10b981;
+    }
+    .preset-desc {
+      font-size:12px; color:var(--text-dim); line-height:1.5; margin-bottom:6px;
+    }
+    .preset-best-for {
+      font-size:11px; color:var(--text-dim); opacity:0.75;
+      padding-top:8px; margin-top:6px;
+      border-top:1px dashed var(--border);
+    }
+    .preset-best-for strong { color:var(--text); opacity:0.9; }
+
+    /* ── Skill category header ────────────────────────────────── */
+    .skill-category {
+      margin-top:20px; margin-bottom:8px;
+      display:flex; align-items:center; gap:10px;
+    }
+    .skill-category:first-child { margin-top:0; }
+    .skill-category-icon { font-size:18px; }
+    .skill-category-name {
+      font-size:12px; font-weight:700; color:var(--text);
+      letter-spacing:0.6px; text-transform:uppercase;
+    }
+    .skill-category-desc {
+      font-size:12px; color:var(--text-dim); font-weight:400; text-transform:none; letter-spacing:0;
+    }
+
+    /* ── Prereq badges on skill cards ─────────────────────────── */
+    .skill-prereq {
+      display:inline-flex; align-items:center; gap:4px;
+      padding:2px 8px; border-radius:10px;
+      font-size:10px; font-weight:600; letter-spacing:0.3px;
+      margin-top:4px;
+    }
+    .skill-prereq.ok {
+      background:rgba(16,185,129,0.12); color:#10b981;
+      border:1px solid rgba(16,185,129,0.2);
+    }
+    .skill-prereq.missing {
+      background:rgba(245,158,11,0.10); color:#f59e0b;
+      border:1px solid rgba(245,158,11,0.2);
+    }
+    .skill-card.dimmed {
+      opacity:0.65;
+    }
+
     .skill-list { display:flex; flex-direction:column; gap:10px; }
 
     .skill-card {
@@ -1705,26 +1784,36 @@
       <div class="step-view" id="step-3">
         <div class="step-eyebrow">Step 3 of 4 — Optional</div>
         <h2 class="step-title">What Your AI Can Do</h2>
-        <p class="step-subtitle">Switch on the tasks you want your AI to handle. It learns and improves over time.</p>
+        <p class="step-subtitle">Pick a starting profile — or fine-tune individual skills below. You can change any of this later.</p>
 
+        <!-- Preset selector — one click sets everything sensibly -->
+        <div style="font-size:11px;font-weight:700;letter-spacing:0.6px;color:var(--text-dim);margin-bottom:10px">
+          🎯 START WITH A PROFILE
+        </div>
+        <div class="preset-grid" id="presetGrid"></div>
+
+        <!-- Individual skill toggles, grouped by category -->
+        <div style="font-size:11px;font-weight:700;letter-spacing:0.6px;color:var(--text-dim);margin:24px 0 10px">
+          ⚙️ FINE-TUNE EACH SKILL
+        </div>
         <div class="skill-list" id="skillList"></div>
 
         <!-- Self-improve -->
-        <div class="glass-card" style="margin-top:20px">
+        <div class="glass-card" style="margin-top:24px">
           <div class="glass-card-header" style="margin-bottom:12px">
             <div style="font-size:24px">🧠</div>
             <div>
               <div class="glass-card-title">Self-Learning Engine</div>
-              <div style="font-size:12px;color:var(--text-dim)">Your AI automatically gets better over time</div>
+              <div style="font-size:12px;color:var(--text-dim)">Your AI reviews recent tasks and updates its own playbook automatically</div>
             </div>
           </div>
           <div class="form-group" style="margin-bottom:0">
             <label>Check for improvements every</label>
             <select id="selfImproveInterval" style="width:auto">
-              <option value="12">12 hours</option>
+              <option value="12">12 hours (Advanced)</option>
               <option value="24" selected>24 hours (Recommended)</option>
               <option value="48">48 hours</option>
-              <option value="168">Weekly</option>
+              <option value="168">Weekly (Beginner)</option>
             </select>
           </div>
         </div>
@@ -1980,13 +2069,80 @@ const TOOLS = [
     providers:[{v:'groq',l:'Groq Whisper (Free & Fast)'},{v:'openai',l:'OpenAI Whisper'}] },
 ];
 
+// Each skill declares the integrations it needs. Prereqs are shown in the UI
+// as ✓ Ready (green) or ⚠️ Needs setup (amber). Missing prereqs don't block
+// the user from enabling the skill — it just won't do anything until they
+// connect the required app in Step 2.
 const SKILLS = [
-  { id:'triage-email',     name:'Email Triage',        desc:'Sorts and prioritises your inbox automatically.',                icon:'📧', on:true,  schedules:[{v:'',l:'Manual only'},{v:'0 */2 * * 1-5',l:'Every 2 hours (weekdays)',sel:true},{v:'0 */1 * * 1-5',l:'Every hour'},{v:'0 9,13,17 * * 1-5',l:'3× daily'}] },
-  { id:'daily-briefing',   name:'Morning Briefing',    desc:'A daily summary of your calendar, emails, and tasks.',          icon:'☀️', on:true,  schedules:[{v:'',l:'Manual only'},{v:'30 8 * * 1-5',l:'8:30 AM weekdays',sel:true},{v:'0 9 * * 1-5',l:'9:00 AM weekdays'},{v:'0 8 * * *',l:'8:00 AM daily'}] },
-  { id:'schedule-meeting', name:'Meeting Scheduler',   desc:'Finds free slots and books meetings for you.',                   icon:'📅', on:true,  schedules:[{v:'',l:'Manual only',sel:true}] },
-  { id:'draft-reply',      name:'Email Reply Writer',  desc:'Drafts professional replies in your tone and style.',            icon:'✏️', on:true,  schedules:[{v:'',l:'Manual only',sel:true}] },
-  { id:'process-invoice',  name:'Invoice Processor',   desc:'Extracts invoice data and logs it in your spreadsheets.',        icon:'📋', on:false, schedules:[{v:'',l:'Manual only',sel:true},{v:'0 10 * * 1-5',l:'Daily 10 AM'},{v:'0 10 * * 1',l:'Weekly Monday'}] },
-  { id:'data-entry',       name:'Data Entry Assistant',desc:'Pulls data from sources and enters it into your spreadsheets.', icon:'📝', on:false, schedules:[{v:'',l:'Manual only',sel:true}] },
+  // ── Communication ────────────────────────────────────────────────────────
+  { id:'triage-email',     name:'Email Triage',        desc:'Sorts and prioritises your inbox automatically.',                icon:'📧',
+    category:'communication', requires:{channels:['email']},
+    schedules:[{v:'',l:'Manual only'},{v:'0 */2 * * 1-5',l:'Every 2 hours (weekdays)',sel:true},{v:'0 */1 * * 1-5',l:'Every hour'},{v:'0 9,13,17 * * 1-5',l:'3× daily'}] },
+  { id:'draft-reply',      name:'Email Reply Writer',  desc:'Drafts professional replies in your tone — you approve before sending.', icon:'✏️',
+    category:'communication', requires:{channels:['email']},
+    schedules:[{v:'',l:'Manual only',sel:true}] },
+
+  // ── Daily Workflow ───────────────────────────────────────────────────────
+  { id:'daily-briefing',   name:'Morning Briefing',    desc:'A daily summary of your calendar, emails, and tasks.',          icon:'☀️',
+    category:'workflow',  requires:{anyOf:{channels:['email'],tools:['calendar']}},
+    schedules:[{v:'',l:'Manual only'},{v:'30 8 * * 1-5',l:'8:30 AM weekdays',sel:true},{v:'0 9 * * 1-5',l:'9:00 AM weekdays'},{v:'0 8 * * *',l:'8:00 AM daily'}] },
+  { id:'schedule-meeting', name:'Meeting Scheduler',   desc:'Finds free slots and books meetings for you.',                   icon:'📅',
+    category:'workflow',  requires:{tools:['calendar']},
+    schedules:[{v:'',l:'Manual only',sel:true}] },
+
+  // ── Documents & Data ─────────────────────────────────────────────────────
+  { id:'process-invoice',  name:'Invoice Processor',   desc:'Extracts invoice data and logs it in your spreadsheets.',        icon:'📋',
+    category:'documents', requires:{channels:['email'],tools:['spreadsheet']},
+    schedules:[{v:'',l:'Manual only',sel:true},{v:'0 10 * * 1-5',l:'Daily 10 AM'},{v:'0 10 * * 1',l:'Weekly Monday'}] },
+  { id:'data-entry',       name:'Data Entry Assistant',desc:'Pulls data from sources and enters it into your spreadsheets.', icon:'📝',
+    category:'documents', requires:{anyOf:{tools:['spreadsheet','fileStorage']}},
+    schedules:[{v:'',l:'Manual only',sel:true}] },
+];
+
+// Visual grouping for the skill list. Order here = display order on the page.
+const SKILL_CATEGORIES = [
+  { id:'communication', name:'Communication',   icon:'💬', desc:'Email triage, replies, and threads' },
+  { id:'workflow',      name:'Daily Workflow',  icon:'📅', desc:'Morning briefings + meeting scheduling' },
+  { id:'documents',     name:'Documents & Data',icon:'📂', desc:'Invoices, spreadsheets, data entry' },
+];
+
+// Three opinionated starting points. One click sets enabled skills + cadences
+// + self-learning interval so users don't have to guess. Each preset stores
+// a {skillId: cron} map — empty string means "manual only".
+const SKILL_PRESETS = [
+  { id:'beginner', name:'Beginner', icon:'🌱', tag:'Easy start',
+    desc:'You stay in control. AI summarises and suggests — never sends without you.',
+    bestFor:'New to AI assistants. Just want a daily summary.',
+    skills:{
+      'triage-email':    '0 9,13,17 * * 1-5',   // 3× daily check
+      'daily-briefing':  '30 8 * * 1-5',         // morning summary
+    },
+    selfImproveHours: 168,                       // weekly — minimal change
+  },
+  { id:'intermediate', name:'Intermediate', icon:'⚖️', tag:'Recommended',
+    desc:'Hands-off triage and reply drafts. You approve every send. Best balance.',
+    bestFor:'Most people — comfortable with AI but want a human review on outbound messages.',
+    skills:{
+      'triage-email':    '0 */2 * * 1-5',       // every 2 hours
+      'daily-briefing':  '30 8 * * 1-5',
+      'schedule-meeting':'',                     // available when asked
+      'draft-reply':     '',                     // drafts in inbox, you send
+    },
+    selfImproveHours: 24,
+  },
+  { id:'advanced', name:'Advanced', icon:'🚀', tag:'Max automation',
+    desc:'Continuous automation across every connected tool. Best when you trust it.',
+    bestFor:'Power users with all integrations connected and review processes in place.',
+    skills:{
+      'triage-email':    '0 */1 * * 1-5',       // hourly
+      'daily-briefing':  '0 8 * * *',            // every day, not just weekdays
+      'schedule-meeting':'',
+      'draft-reply':     '',
+      'process-invoice': '0 10 * * 1-5',         // weekday morning sweep
+      'data-entry':      '',
+    },
+    selfImproveHours: 12,
+  },
 ];
 
 const CRED_CONFIGS = {
@@ -2027,6 +2183,7 @@ const state = {
   selectedChannels: new Set(),
   selectedTools: new Set(),
   enabledSkills: new Set(['triage-email','daily-briefing','schedule-meeting','draft-reply']),
+  activePresetId: 'intermediate',                 // default to Recommended preset
   connStatus: {},
   selectedModel: 'claude-sonnet-4-6',
   selectedProvider: 'anthropic',
@@ -2100,6 +2257,7 @@ async function init() {
   renderProgressRail();
   renderChannelGrid();
   renderToolGrid();
+  renderPresetGrid();
   renderSkillList();
   document.getElementById('googleIcon').innerHTML = ICONS.google;
 
@@ -2294,6 +2452,13 @@ function showStep(n) {
   if (mainCol) mainCol.scrollTop = 0;
 
   if (n === 2) { renderAIKeySection(); renderChannelCredentials(); checkGoogleUnified(); }
+  if (n === 3) {
+    // Re-render so prereq badges reflect the user's Step 2 selections.
+    // E.g. if they just toggled Calendar OFF, "Meeting Scheduler" should now
+    // show the amber "⚠️ Needs: Calendar" badge.
+    renderPresetGrid();
+    renderSkillList();
+  }
   if (n === 4) { renderReview(); }
 
   guideForStep(n);
@@ -2549,30 +2714,180 @@ function renderToolCredentials() {
 }
 
 // ============================================================
-// Skill List
+// Skill List — with prereq detection + category grouping
 // ============================================================
+
+// Map channel/tool IDs to pretty display names (for prereq badges)
+const PREREQ_DISPLAY = {
+  email: 'Email', telegram: 'Telegram', whatsapp: 'WhatsApp',
+  calendar: 'Calendar', spreadsheet: 'Spreadsheets', fileStorage: 'File Storage',
+  crm: 'CRM', voice: 'Voice',
+};
+
+/**
+ * Check whether a skill's prerequisites are satisfied by the user's current
+ * channel + tool selections from Step 2.
+ *
+ * `requires` shapes supported:
+ *   { channels:[...], tools:[...] }  → ALL listed must be selected (AND)
+ *   { anyOf: { channels:[...], tools:[...] } } → at least ONE must be selected (OR)
+ *
+ * Returns { ok: boolean, missing: string[] } — `missing` is a list of pretty
+ * names to show in the badge.
+ */
+function checkSkillPrereqs(sk) {
+  const req = sk.requires || {};
+  const haveCh   = (id) => state.selectedChannels?.has(id);
+  const haveTool = (id) => state.selectedTools?.has(id);
+
+  // anyOf branch — at least one of any listed item satisfies the prereq.
+  if (req.anyOf) {
+    const needed = [
+      ...(req.anyOf.channels || []),
+      ...(req.anyOf.tools    || []),
+    ];
+    const have = (req.anyOf.channels || []).some(haveCh)
+              || (req.anyOf.tools    || []).some(haveTool);
+    return have
+      ? { ok: true,  missing: [] }
+      : { ok: false, missing: [needed.map((n) => PREREQ_DISPLAY[n] || n).join(' or ')] };
+  }
+
+  // AND branch — every listed channel + tool required.
+  const missing = [];
+  for (const ch of (req.channels || [])) if (!haveCh(ch))   missing.push(PREREQ_DISPLAY[ch]   || ch);
+  for (const tl of (req.tools    || [])) if (!haveTool(tl)) missing.push(PREREQ_DISPLAY[tl] || tl);
+  return { ok: missing.length === 0, missing };
+}
+
 function renderSkillList() {
   const list = document.getElementById('skillList');
-  list.innerHTML = SKILLS.map(sk => `
-    <div class="skill-card ${state.enabledSkills.has(sk.id)?'enabled':''}" onclick="toggleSkill(this,'${sk.id}')">
-      <div class="skill-icon">${sk.icon}</div>
-      <div class="skill-body">
-        <div class="skill-name">${sk.name}</div>
-        <div class="skill-desc">${sk.desc}</div>
+  // Group skills by category, preserving SKILL_CATEGORIES order.
+  const byCategory = new Map(SKILL_CATEGORIES.map((c) => [c.id, []]));
+  for (const sk of SKILLS) {
+    if (!byCategory.has(sk.category)) byCategory.set(sk.category, []);
+    byCategory.get(sk.category).push(sk);
+  }
+
+  let html = '';
+  for (const cat of SKILL_CATEGORIES) {
+    const skills = byCategory.get(cat.id) || [];
+    if (skills.length === 0) continue;
+
+    html += `
+      <div class="skill-category">
+        <span class="skill-category-icon">${cat.icon}</span>
+        <span class="skill-category-name">${cat.name}</span>
+        <span class="skill-category-desc">— ${cat.desc}</span>
       </div>
-      <div class="skill-sched" onclick="event.stopPropagation()">
-        <select data-sched="${sk.id}">
-          ${sk.schedules.map(s=>`<option value="${s.v}" ${s.sel?'selected':''}>${s.l}</option>`).join('')}
-        </select>
-      </div>
-      <div class="skill-toggle"></div>
-    </div>`).join('');
+    `;
+
+    for (const sk of skills) {
+      const prereq  = checkSkillPrereqs(sk);
+      const enabled = state.enabledSkills.has(sk.id);
+      const badge   = prereq.ok
+        ? `<span class="skill-prereq ok">✓ Ready</span>`
+        : `<span class="skill-prereq missing" title="Connect this in Step 2">⚠️ Needs: ${prereq.missing.join(', ')}</span>`;
+
+      html += `
+        <div class="skill-card ${enabled?'enabled':''} ${prereq.ok?'':'dimmed'}" onclick="toggleSkill(this,'${sk.id}')">
+          <div class="skill-icon">${sk.icon}</div>
+          <div class="skill-body">
+            <div class="skill-name">${sk.name}</div>
+            <div class="skill-desc">${sk.desc}</div>
+            ${badge}
+          </div>
+          <div class="skill-sched" onclick="event.stopPropagation()">
+            <select data-sched="${sk.id}" onchange="onScheduleChanged()">
+              ${sk.schedules.map(s=>`<option value="${s.v}" ${s.sel?'selected':''}>${s.l}</option>`).join('')}
+            </select>
+          </div>
+          <div class="skill-toggle"></div>
+        </div>`;
+    }
+  }
+  list.innerHTML = html;
 }
 
 function toggleSkill(card, id) {
   card.classList.toggle('enabled');
   if (card.classList.contains('enabled')) state.enabledSkills.add(id);
   else state.enabledSkills.delete(id);
+  // Manual edits drop the "matching preset" highlight
+  state.activePresetId = null;
+  renderPresetGrid();
+}
+
+function onScheduleChanged() {
+  // User tweaked a cadence — they're no longer on a clean preset
+  state.activePresetId = null;
+  renderPresetGrid();
+}
+
+// ============================================================
+// Skill Presets — one click sets everything sensibly
+// ============================================================
+function renderPresetGrid() {
+  const grid = document.getElementById('presetGrid');
+  if (!grid) return;
+  const activeId = state.activePresetId;
+  grid.innerHTML = SKILL_PRESETS.map((p) => {
+    const isActive  = activeId === p.id;
+    const isRecPref = p.id === 'intermediate';   // "Recommended" green styling
+    return `
+      <div class="preset-card ${isActive?'active':''} ${isRecPref?'recommended':''}" onclick="applyPreset('${p.id}')">
+        <div class="preset-card-header">
+          <span class="preset-icon">${p.icon}</span>
+          <span class="preset-name">${p.name}</span>
+          <span class="preset-tag">${p.tag}</span>
+        </div>
+        <div class="preset-desc">${p.desc}</div>
+        <div class="preset-best-for"><strong>Best for:</strong> ${p.bestFor}</div>
+      </div>`;
+  }).join('');
+}
+
+/**
+ * Apply a preset — enable its skills, set their cadences, and set the
+ * self-learning interval. Skills NOT in the preset are turned OFF so the
+ * user gets the clean opinionated profile they clicked.
+ */
+function applyPreset(presetId) {
+  const preset = SKILL_PRESETS.find((p) => p.id === presetId);
+  if (!preset) return;
+
+  state.activePresetId = presetId;
+
+  // Reset all skills to OFF, then turn on the preset's skills.
+  state.enabledSkills.clear();
+  for (const skillId of Object.keys(preset.skills)) {
+    state.enabledSkills.add(skillId);
+  }
+
+  // Re-render the skill list so toggle states + dimmed classes update.
+  renderSkillList();
+  renderPresetGrid();
+
+  // Set the schedule select for each preset skill to the cadence cron value.
+  // Has to happen AFTER renderSkillList() because the selects are recreated.
+  for (const [skillId, cron] of Object.entries(preset.skills)) {
+    const sel = document.querySelector(`select[data-sched="${skillId}"]`);
+    if (sel) {
+      // Find an option matching the cron value — fall back to first if absent
+      const opt = Array.from(sel.options).find((o) => o.value === cron);
+      sel.value = opt ? cron : sel.options[0].value;
+    }
+  }
+
+  // Set the self-learning interval
+  const interval = document.getElementById('selfImproveInterval');
+  if (interval) interval.value = String(preset.selfImproveHours);
+
+  // Subtle confirmation toast
+  if (typeof toast === 'function') {
+    const skillCount = Object.keys(preset.skills).length;
+    toast(`${preset.icon} ${preset.name} profile applied — ${skillCount} skill${skillCount===1?'':'s'} configured`, 'success');
+  }
 }
 
 // ============================================================
