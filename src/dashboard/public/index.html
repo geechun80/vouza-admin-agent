@@ -1532,6 +1532,95 @@
       color: var(--text); padding: 0 2px; border-radius: 3px;
     }
 
+    /* ── Backup action buttons in Health panel ────────────────────── */
+    .health-action-row {
+      display: flex; gap: 10px; flex-wrap: wrap;
+      margin-top: 16px;
+    }
+    .health-action-btn {
+      padding: 8px 14px; border-radius: 8px;
+      background: var(--bg-glass-card); border: 1px solid var(--border);
+      color: var(--text); cursor: pointer; font-size: 13px;
+      transition: all 0.15s;
+    }
+    .health-action-btn:hover {
+      border-color: var(--brand);
+      background: var(--bg-glass-hover);
+    }
+    .health-action-btn.primary {
+      background: linear-gradient(135deg, #7c3aed, #1a8fff);
+      border: none; color: #fff;
+    }
+
+    /* ── Accessibility: focus indicators for keyboard navigation ──── */
+    :focus-visible {
+      outline: 2px solid var(--brand) !important;
+      outline-offset: 2px;
+      border-radius: 4px;
+    }
+    button:focus-visible,
+    a:focus-visible,
+    input:focus-visible,
+    textarea:focus-visible,
+    select:focus-visible,
+    [tabindex]:focus-visible {
+      outline: 2px solid var(--brand-light) !important;
+      outline-offset: 2px;
+    }
+    /* Skip-to-content link — invisible until focused via Tab */
+    .skip-to-content {
+      position: absolute; top: 8px; left: 8px; z-index: 10001;
+      padding: 8px 14px; background: var(--brand); color: #fff;
+      text-decoration: none; border-radius: 6px;
+      transform: translateY(-200%); transition: transform 0.2s;
+    }
+    .skip-to-content:focus { transform: translateY(0); }
+
+    /* ── Command palette (Cmd+K / Ctrl+K) ────────────────────────── */
+    .cmd-palette-overlay {
+      position: fixed; inset: 0; z-index: 9998;
+      background: rgba(0,0,0,0.5); backdrop-filter: blur(3px);
+      display: none; align-items: flex-start; justify-content: center;
+      padding-top: 12vh;
+    }
+    .cmd-palette-overlay.visible { display: flex; }
+    .cmd-palette {
+      width: min(560px, 92vw); max-height: 60vh;
+      background: linear-gradient(135deg, rgba(28,18,58,0.98), rgba(15,10,40,0.98));
+      border: 1px solid rgba(124,58,237,0.4);
+      border-radius: 14px;
+      box-shadow: 0 16px 50px rgba(0,0,0,0.5);
+      overflow: hidden;
+      display: flex; flex-direction: column;
+    }
+    .cmd-palette-input {
+      width: 100%; padding: 16px 20px;
+      background: transparent; border: none; border-bottom: 1px solid var(--border);
+      color: var(--text); font-size: 16px; outline: none;
+    }
+    .cmd-palette-input::placeholder { color: var(--text-dim); }
+    .cmd-palette-list {
+      list-style: none; padding: 6px; margin: 0;
+      overflow-y: auto;
+    }
+    .cmd-item {
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 14px; border-radius: 8px;
+      cursor: pointer; transition: background 0.1s;
+      color: var(--text);
+    }
+    .cmd-item.active,
+    .cmd-item:hover { background: rgba(124,58,237,0.15); }
+    .cmd-item .cmd-icon { font-size: 18px; width: 22px; text-align: center; }
+    .cmd-item .cmd-label { flex: 1; font-size: 14px; }
+    .cmd-item .cmd-hint  { font-size: 11px; color: var(--text-dim); }
+    .cmd-palette-footer {
+      padding: 8px 14px;
+      border-top: 1px solid var(--border);
+      font-size: 11px; color: var(--text-dim);
+      display: flex; justify-content: space-between;
+    }
+
     /* ── Restore-draft banner (wizard auto-save) ──────────────────── */
     .draft-restore-banner {
       display: flex; align-items: center; gap: 12px;
@@ -1808,6 +1897,30 @@
   </div>
 </div>
 
+<!-- Accessibility: skip-to-content link (visible on Tab focus) -->
+<a href="#mainContent" class="skip-to-content">Skip to main content</a>
+
+<!-- ============================================================
+     COMMAND PALETTE (Cmd+K / Ctrl+K)
+============================================================ -->
+<div class="cmd-palette-overlay" id="cmdPalette" role="dialog" aria-label="Command palette" aria-modal="true">
+  <div class="cmd-palette">
+    <input
+      type="text"
+      class="cmd-palette-input"
+      id="cmdPaletteInput"
+      placeholder="Type a command or jump to..."
+      aria-label="Search commands"
+      autocomplete="off"
+    >
+    <ul class="cmd-palette-list" id="cmdPaletteList"></ul>
+    <div class="cmd-palette-footer">
+      <span>↑ ↓ Navigate · Enter to run</span>
+      <span>Esc to close</span>
+    </div>
+  </div>
+</div>
+
 <!-- ============================================================
      MAIN APP
 ============================================================ -->
@@ -1815,7 +1928,7 @@
   <div class="app-layout">
 
     <!-- Main Content -->
-    <div class="main-col">
+    <div class="main-col" id="mainContent" role="main">
 
       <!-- ════ CONVERSATION SIDEBAR (shown in live mode) ════ -->
       <div class="conv-sidebar" id="convSidebar">
@@ -1826,7 +1939,7 @@
             <img src="/images/vouza-logo.png" alt="Vouza">
             <span id="convSidebarAgentName">Admin Agent</span>
           </div>
-          <button class="conv-new-btn" onclick="newConversation()">✏️ New</button>
+          <button class="conv-new-btn" onclick="newConversation()" aria-label="Start a new conversation" title="Start a new conversation (Ctrl+K → New)">✏️ New</button>
         </div>
 
         <!-- Search -->
@@ -1854,12 +1967,13 @@
         <div class="conv-sidebar-footer">
           <div class="conv-footer-info">
             <div>💾 Saved automatically</div>
+            <div style="font-size:10px;color:var(--text-dim);opacity:0.7;margin-top:2px">⌘K / Ctrl+K for commands</div>
             <a href="https://github.com/geechun80/vouza-admin-agent" target="_blank" class="conv-footer-link">📚 Docs &amp; Support</a>
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:5px">
-            <button class="conv-memory-btn" onclick="openSettings()" title="Reconfigure agent">⚙️ Settings</button>
-            <button class="conv-memory-btn" onclick="toggleMemoryPanel()" title="What your agent has learned">🧠 Memories</button>
-            <button class="conv-memory-btn" onclick="toggleHealthPanel()" title="Spend, provider health, uptime">📊 Health</button>
+            <button class="conv-memory-btn" onclick="openSettings()" title="Reconfigure agent" aria-label="Open settings to reconfigure the agent">⚙️ Settings</button>
+            <button class="conv-memory-btn" onclick="toggleMemoryPanel()" title="What your agent has learned" aria-label="Open agent memories panel">🧠 Memories</button>
+            <button class="conv-memory-btn" onclick="toggleHealthPanel()" title="Spend, provider health, uptime" aria-label="Open system health and operations panel">📊 Health</button>
           </div>
         </div>
 
@@ -5315,12 +5429,50 @@ function renderHealthPanel({ budget, health, agent }) {
     </div>
   `;
 
+  // ── Backup / migration actions ────────────────────────────────────────
+  const backup = `
+    <div class="health-section">
+      <h3>💾 Backup &amp; migration</h3>
+      <div style="font-size:13px;color:var(--text-dim);line-height:1.6;padding:0 4px;margin-bottom:8px">
+        Save a full snapshot of your agent — config, credentials, memories, and recent conversation list — as a single JSON file. Useful for migrating to a new machine or as a personal backup.
+      </div>
+      <div style="font-size:12px;color:#f59e0b;line-height:1.5;padding:8px 12px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:8px;margin-bottom:10px">
+        ⚠️ The backup includes your API keys unencrypted. Treat the downloaded file like a password — don't share it.
+      </div>
+      <div class="health-action-row">
+        <button class="health-action-btn primary" onclick="downloadBackup()" aria-label="Download full configuration backup">📥 Download backup</button>
+      </div>
+    </div>
+  `;
+
   return `
     <div class="health-grid">${statCards.join('')}</div>
     ${providerRows}
     ${spendRows}
     ${hints}
+    ${backup}
   `;
+}
+
+// Trigger the backup download. The server endpoint sends a JSON file with
+// Content-Disposition: attachment, so the browser downloads it directly.
+async function downloadBackup() {
+  try {
+    const r = await fetch('/api/export-config');
+    if (!r.ok) { toast('Backup failed — server returned ' + r.status, 'error'); return; }
+    const blob = await r.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `vouza-backup-${new Date().toISOString().slice(0,10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast('✅ Backup downloaded. Keep it safe — it includes your API keys.', 'success');
+  } catch (e) {
+    toast('Backup failed: ' + String(e), 'error');
+  }
 }
 
 function formatUptime(ms) {
@@ -5812,6 +5964,116 @@ document.addEventListener('input', (e) => {
 
 // Run the draft check shortly after init() to allow prefillFromConfig() to settle
 setTimeout(checkForDraftToRestore, 800);
+
+// ============================================================
+// Command Palette (Cmd+K / Ctrl+K) — power-user keyboard accelerator
+// ============================================================
+// Modal overlay with fuzzy-matched commands. Mirrors VSCode / Linear / Raycast
+// patterns so power users have a fast way to jump anywhere without clicking.
+// Each command has a label, icon, optional hint (keyboard shortcut), and a
+// run() function. The list is filtered as the user types.
+
+const COMMANDS = [
+  { id:'new-conv',    label:'Start a new conversation',     icon:'✏️', hint:'',          run: () => { if (typeof newConversation === 'function') newConversation(); } },
+  { id:'open-health', label:'Open system health dashboard', icon:'📊', hint:'',          run: () => toggleHealthPanel() },
+  { id:'open-mem',    label:'Open agent memories',          icon:'🧠', hint:'',          run: () => toggleMemoryPanel() },
+  { id:'open-set',    label:'Open settings (wizard)',       icon:'⚙️', hint:'',          run: () => openSettings() },
+  { id:'backup',      label:'Download a full backup',       icon:'💾', hint:'',          run: () => downloadBackup() },
+  { id:'docs',        label:'Open documentation on GitHub', icon:'📚', hint:'',          run: () => window.open('https://github.com/geechun80/vouza-admin-agent', '_blank') },
+  { id:'add-email',   label:'Connect Email',                icon:'📧', hint:'',          run: () => onSetupItemClick('email', false, 'I want to connect my email. Walk me through it step by step.') },
+  { id:'add-tel',     label:'Connect Telegram',             icon:'💬', hint:'',          run: () => onSetupItemClick('telegram', false, 'Help me set up Telegram so I can chat with the AI from my phone.') },
+  { id:'add-wa',      label:'Connect WhatsApp',             icon:'📱', hint:'',          run: () => onSetupItemClick('whatsapp', false, "Help me connect WhatsApp. I want to scan the QR code.") },
+  { id:'add-cal',     label:'Connect Calendar',             icon:'📅', hint:'',          run: () => onSetupItemClick('calendar', false, "Help me connect Google Calendar so the AI can schedule meetings.") },
+  { id:'add-sheets',  label:'Connect Spreadsheets',         icon:'📊', hint:'',          run: () => onSetupItemClick('spreadsheet', false, "Help me connect Google Sheets for invoice and data tracking.") },
+  { id:'restart',     label:'Restart the agent now',        icon:'🔁', hint:'',          run: () => { if (typeof retryLaunch === 'function') retryLaunch(); } },
+];
+
+let _cmdIdx = 0;
+
+function openCmdPalette() {
+  const overlay = document.getElementById('cmdPalette');
+  const input   = document.getElementById('cmdPaletteInput');
+  if (!overlay || !input) return;
+  overlay.classList.add('visible');
+  input.value = '';
+  renderCmdList('');
+  setTimeout(() => input.focus(), 50);
+}
+
+function closeCmdPalette() {
+  document.getElementById('cmdPalette')?.classList.remove('visible');
+}
+
+function renderCmdList(query) {
+  const list = document.getElementById('cmdPaletteList');
+  if (!list) return;
+  const q = (query || '').toLowerCase().trim();
+  const matches = q
+    ? COMMANDS.filter((c) => c.label.toLowerCase().includes(q) || c.id.includes(q))
+    : COMMANDS;
+  _cmdIdx = 0;
+  list.innerHTML = matches.length === 0
+    ? `<li class="cmd-item"><span class="cmd-icon">🔍</span><span class="cmd-label" style="color:var(--text-dim)">No commands match "${escHtml(q)}"</span></li>`
+    : matches.map((c, i) => `
+        <li class="cmd-item ${i === 0 ? 'active' : ''}" data-id="${c.id}" onclick="runCmd('${c.id}')" role="option">
+          <span class="cmd-icon">${c.icon}</span>
+          <span class="cmd-label">${highlightHits(c.label, q)}</span>
+          ${c.hint ? `<span class="cmd-hint">${escHtml(c.hint)}</span>` : ''}
+        </li>
+      `).join('');
+}
+
+function runCmd(id) {
+  const cmd = COMMANDS.find((c) => c.id === id);
+  closeCmdPalette();
+  if (cmd) {
+    // Slight delay so the modal closes visually before action runs
+    setTimeout(() => { try { cmd.run(); } catch (e) { console.error(e); } }, 50);
+  }
+}
+
+function moveCmdSelection(delta) {
+  const list = document.getElementById('cmdPaletteList');
+  if (!list) return;
+  const items = list.querySelectorAll('.cmd-item[data-id]');
+  if (items.length === 0) return;
+  _cmdIdx = (_cmdIdx + delta + items.length) % items.length;
+  items.forEach((it, i) => it.classList.toggle('active', i === _cmdIdx));
+  items[_cmdIdx].scrollIntoView({ block: 'nearest' });
+}
+
+function getActiveCmdId() {
+  const list = document.getElementById('cmdPaletteList');
+  const active = list?.querySelector('.cmd-item.active[data-id]');
+  return active?.getAttribute('data-id');
+}
+
+// Global keyboard handlers
+document.addEventListener('keydown', (e) => {
+  // Cmd+K on Mac, Ctrl+K on Windows/Linux — open palette from anywhere
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    openCmdPalette();
+    return;
+  }
+  // Palette-specific keys when it's open
+  const overlay = document.getElementById('cmdPalette');
+  if (!overlay?.classList.contains('visible')) return;
+  if (e.key === 'Escape')       { closeCmdPalette(); }
+  else if (e.key === 'ArrowDown') { e.preventDefault(); moveCmdSelection(+1); }
+  else if (e.key === 'ArrowUp')   { e.preventDefault(); moveCmdSelection(-1); }
+  else if (e.key === 'Enter')     { e.preventDefault(); const id = getActiveCmdId(); if (id) runCmd(id); }
+});
+
+// Clicking the overlay (outside the palette box) closes it
+document.getElementById('cmdPalette')?.addEventListener('click', (e) => {
+  if (e.target.id === 'cmdPalette') closeCmdPalette();
+});
+
+// Live filter as user types
+document.getElementById('cmdPaletteInput')?.addEventListener('input', (e) => {
+  renderCmdList(e.target.value);
+});
 
 // Trigger the onboarding tour once live mode is fully visible — wait a bit
 // so DOM layout settles. Watching for class changes on #mainApp catches both

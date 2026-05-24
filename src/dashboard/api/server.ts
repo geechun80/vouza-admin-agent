@@ -354,6 +354,65 @@ export async function startDashboard(port = 3456): Promise<void> {
     }
   });
 
+  // --- Backup / Export ---
+  // Returns the user's complete configuration + memories + recent chat
+  // history as a single downloadable JSON file. Useful for:
+  //   - Migrating to a new machine
+  //   - Insurance against hard drive failure
+  //   - Sharing a fully-configured agent with a colleague
+  //
+  // CREDENTIALS ARE INCLUDED unmasked in this export — the file is intended
+  // for the user's own personal backup, never shared publicly. The frontend
+  // warns the user about this before triggering the download.
+  app.get("/api/export-config", requireLocalOrigin, async (_req, res) => {
+    try {
+      const config = await loadSetupConfig();
+
+      // Best-effort: load memories. Fails open if memory store has issues.
+      let memories: any[] = [];
+      try {
+        const memDir = join(process.cwd(), "data", "memory");
+        const store = createMemoryStore(memDir);
+        await store.load();
+        memories = Array.from(store.entries.values());
+      } catch { /* keep memories: [] */ }
+
+      // Best-effort: include last 50 conversation summaries (titles only, not full
+      // chat content — keeps backup small + privacy-friendlier). User can grab
+      // full transcripts separately via the chat-history endpoints if needed.
+      let conversations: any[] = [];
+      try {
+        const files = (await readdir(join(process.cwd(), "data", "conversations")))
+          .filter((f) => f.endsWith(".json"))
+          .slice(0, 50);
+        for (const f of files) {
+          try {
+            const raw = await readFile(join(process.cwd(), "data", "conversations", f), "utf8");
+            const c = JSON.parse(raw);
+            conversations.push({ id: c.id, title: c.title, updatedAt: c.updatedAt, messageCount: c.messageCount });
+          } catch { /* skip corrupt files */ }
+        }
+      } catch { /* dir missing — skip */ }
+
+      const bundle = {
+        format:        "vouza-admin-agent-backup",
+        version:       1,
+        exportedAt:    new Date().toISOString(),
+        agentName:     config.agent?.name || "Admin Agent",
+        config,                  // includes credentials — see warning above
+        memories,
+        conversations,
+      };
+
+      const filename = `vouza-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      res.setHeader("Content-Type", "application/json");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(JSON.stringify(bundle, null, 2));
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
   // --- Config API ---
   app.get("/api/config", async (_req, res) => {
     const config = await loadSetupConfig();
