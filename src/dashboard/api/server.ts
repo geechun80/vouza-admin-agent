@@ -354,6 +354,98 @@ export async function startDashboard(port = 3456): Promise<void> {
     }
   });
 
+  // --- Version + Changelog ---
+  // Used by the frontend's "What's new" notifier — surfaces unread changes
+  // since the user last dismissed the changelog modal.
+  app.get("/api/version", async (_req, res) => {
+    try {
+      // Read version from package.json (single source of truth, no hardcoded
+      // strings to forget to update on release)
+      const pkgRaw = await readFile(join(process.cwd(), "package.json"), "utf8");
+      const pkg = JSON.parse(pkgRaw);
+      let changelog = "";
+      try {
+        changelog = await readFile(join(process.cwd(), "CHANGELOG.md"), "utf8");
+      } catch { /* CHANGELOG.md may not exist on older installs */ }
+      res.json({ version: pkg.version || "0.0.0", changelog });
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  // --- Restore / Import ---
+  // Replaces the user's full configuration with a previously-exported backup.
+  // Destructive operation — must auto-backup current state first so a bad
+  // import can always be rolled back. Validates format envelope to reject
+  // arbitrary uploads (someone pasting their grocery list as JSON).
+  app.post("/api/import-config", requireLocalOrigin, async (req, res) => {
+    try {
+      const bundle = req.body;
+
+      // 1. Validate envelope — must look like one of our backups
+      if (!bundle || bundle.format !== "vouza-admin-agent-backup") {
+        return res.status(400).json({
+          ok: false,
+          error: "This doesn't look like a Vouza backup file. Expected format: vouza-admin-agent-backup."
+        });
+      }
+      if (!bundle.config || typeof bundle.config !== "object") {
+        return res.status(400).json({ ok: false, error: "Backup is missing config — cannot restore." });
+      }
+      if (bundle.version !== 1) {
+        return res.status(400).json({
+          ok: false,
+          error: `Backup format version ${bundle.version} is not supported by this agent version.`,
+        });
+      }
+
+      // 2. Auto-backup current state BEFORE writing — gives us a rollback point
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const rollbackPath = join(process.cwd(), "data", `config.json.before-restore-${stamp}.bak`);
+      try {
+        const currentRaw = await readFile(CONFIG_PATH, "utf8");
+        await writeFile(rollbackPath, currentRaw, "utf8");
+      } catch {
+        // If there's no current config, nothing to back up — that's fine.
+      }
+
+      // 3. Write the restored config atomically (write-then-rename via fs)
+      const tmpPath = CONFIG_PATH + ".restoring";
+      await writeFile(tmpPath, JSON.stringify(bundle.config, null, 2), "utf8");
+      const fsPromises = await import("fs/promises");
+      await fsPromises.rename(tmpPath, CONFIG_PATH);
+
+      // 4. Best-effort memory restore — failures don't fail the whole import
+      let memoriesRestored = 0;
+      if (Array.isArray(bundle.memories) && bundle.memories.length > 0) {
+        try {
+          const memDir = join(process.cwd(), "data", "memory");
+          const store = createMemoryStore(memDir);
+          await store.load();
+          for (const m of bundle.memories) {
+            if (m && m.type && m.title && m.content) {
+              await store.add({ type: m.type, title: m.title, content: m.content, tags: m.tags || [] }).catch(() => {});
+              memoriesRestored++;
+            }
+          }
+        } catch { /* keep going */ }
+      }
+
+      res.json({
+        ok: true,
+        restored: {
+          config:        true,
+          memories:      memoriesRestored,
+          conversations: 0, // intentionally NOT restored — would clobber active threads
+        },
+        rollbackPath: rollbackPath.split(/[\\/]/).pop(),  // basename only — don't leak full path
+        message: `✅ Restored! ${memoriesRestored} memor${memoriesRestored === 1 ? 'y' : 'ies'} re-added. Previous config saved as ${rollbackPath.split(/[\\/]/).pop()} in case you need to roll back. Restart the agent for changes to take effect.`,
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: String(err) });
+    }
+  });
+
   // --- Backup / Export ---
   // Returns the user's complete configuration + memories + recent chat
   // history as a single downloadable JSON file. Useful for:

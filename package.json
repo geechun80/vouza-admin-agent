@@ -1,6 +1,6 @@
 {
   "name": "admin-agent",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Self-improving AI agent framework — multi-provider, template-ready, inspired by Claude Code architecture",
   "type": "module",
   "engines": {

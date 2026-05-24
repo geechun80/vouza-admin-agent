@@ -4290,8 +4290,9 @@ async function renderSetupStatusPanel() {
     </div>
     <div class="setup-status-items">
       ${results.map((r) => `
-        <div class="setup-status-item ${r.connected?'connected':'missing'}"
+        <div class="setup-status-item ${r.connected?'connected':'missing'}" data-channel-id="${r.id}"
              onclick="${r.connected?`onSetupItemClick('${r.id}', true)`:`onSetupItemClick('${r.id}', false, ${JSON.stringify(r.ask).replace(/"/g, '&quot;')})`}">
+          ${r.connected ? `<span class="live-dot ok" title="Connected — live" aria-label="Connected and live"></span>` : ''}
           <span class="icon">${r.icon}</span>
           <span class="name">${r.name}</span>
           <span class="action">${r.connected?'✓':'+ Add'}</span>
@@ -5441,6 +5442,11 @@ function renderHealthPanel({ budget, health, agent }) {
       </div>
       <div class="health-action-row">
         <button class="health-action-btn primary" onclick="downloadBackup()" aria-label="Download full configuration backup">📥 Download backup</button>
+        <button class="health-action-btn" onclick="triggerRestorePicker()" aria-label="Restore from a previously-downloaded backup file">♻️ Restore from backup…</button>
+        <input type="file" id="restoreFilePicker" accept="application/json" style="display:none" onchange="handleRestoreFile(event)">
+      </div>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:8px;opacity:0.7">
+        Restore is non-destructive — your current config is auto-saved as <code>data/config.json.before-restore-*.bak</code> in case you need to roll back manually.
       </div>
     </div>
   `;
@@ -5452,6 +5458,119 @@ function renderHealthPanel({ budget, health, agent }) {
     ${hints}
     ${backup}
   `;
+}
+
+// Programmatically open the hidden file picker — separated so the button's
+// onclick handler stays simple.
+function triggerRestorePicker() {
+  document.getElementById('restoreFilePicker')?.click();
+}
+
+/**
+ * Read a user-selected backup JSON file, validate it client-side, show a
+ * confirmation modal, then POST to /api/import-config. The server runs its
+ * own validation + auto-backup before applying — we double-check here so
+ * the user never sees a "I clicked restore and weird things happened" path.
+ */
+async function handleRestoreFile(event) {
+  const file = event?.target?.files?.[0];
+  // Reset the input so re-selecting the same file fires onchange again
+  if (event?.target) event.target.value = '';
+  if (!file) return;
+  if (file.size > 10 * 1024 * 1024) {
+    toast('Backup file is too large (>10 MB). This doesn\'t look like a Vouza backup.', 'error');
+    return;
+  }
+
+  let bundle;
+  try {
+    const text = await file.text();
+    bundle = JSON.parse(text);
+  } catch (e) {
+    toast('Could not parse the file — make sure it\'s the original JSON export.', 'error');
+    return;
+  }
+
+  // Client-side envelope check matches the server's
+  if (!bundle || bundle.format !== 'vouza-admin-agent-backup') {
+    toast('This file isn\'t a Vouza backup (wrong format envelope).', 'error');
+    return;
+  }
+
+  // Build a confirmation summary so the user knows what they're about to restore
+  const summary = [
+    `From: <strong>${escHtml(bundle.agentName || 'Unknown agent')}</strong>`,
+    `Date: <strong>${escHtml((bundle.exportedAt || '').slice(0, 10) || 'unknown')}</strong>`,
+    `Memories: <strong>${(bundle.memories || []).length}</strong>`,
+    `Conversations summary: <strong>${(bundle.conversations || []).length}</strong>`,
+  ].join('<br>');
+
+  const confirmed = await showRestoreConfirm(summary);
+  if (!confirmed) return;
+
+  // Send to server
+  toast('Restoring backup…', 'info');
+  try {
+    const r = await fetch('/api/import-config', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(bundle),
+    });
+    const data = await r.json();
+    if (!r.ok || !data.ok) {
+      toast('Restore failed: ' + (data.error || r.statusText), 'error');
+      return;
+    }
+    toast(data.message || '✅ Restored! Restart the agent to apply.', 'success');
+    // Refresh the Health panel so the user sees the new state
+    setTimeout(() => loadHealthPanel(), 800);
+  } catch (e) {
+    toast('Restore failed: ' + String(e), 'error');
+  }
+}
+
+/**
+ * Lightweight confirmation modal — Promise-based so the calling code reads
+ * top-to-bottom. Resolves true on Restore, false on Cancel or backdrop click.
+ */
+function showRestoreConfirm(summaryHtml) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px)';
+    overlay.innerHTML = `
+      <div role="dialog" aria-modal="true" aria-label="Confirm restore"
+           style="background:linear-gradient(135deg,rgba(28,18,58,0.98),rgba(15,10,40,0.98));border:1px solid rgba(124,58,237,0.4);border-radius:14px;padding:24px;max-width:480px;width:92vw;box-shadow:0 16px 50px rgba(0,0,0,0.5);color:var(--text)">
+        <div style="font-size:24px;margin-bottom:8px">♻️ Restore from backup</div>
+        <div style="font-size:13px;color:var(--text-dim);margin-bottom:14px;line-height:1.55">
+          This will <strong style="color:#f59e0b">replace your current configuration</strong> with the backup contents. Your current config is auto-saved to a <code>.bak</code> file first so you can roll back if needed.
+        </div>
+        <div style="background:rgba(255,255,255,0.04);border-radius:8px;padding:12px;font-size:13px;line-height:1.7;margin-bottom:18px">
+          ${summaryHtml}
+        </div>
+        <div style="display:flex;gap:10px;justify-content:flex-end">
+          <button class="health-action-btn" data-act="cancel" aria-label="Cancel restore">Cancel</button>
+          <button class="health-action-btn primary" data-act="ok" aria-label="Confirm restore">Restore</button>
+        </div>
+      </div>
+    `;
+    const cleanup = (v) => {
+      document.body.removeChild(overlay);
+      window.removeEventListener('keydown', onKey);
+      resolve(v);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') cleanup(false);
+      if (e.key === 'Enter')  cleanup(true);
+    };
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) cleanup(false);
+      const act = e.target?.getAttribute?.('data-act');
+      if (act === 'cancel') cleanup(false);
+      if (act === 'ok')     cleanup(true);
+    });
+    document.body.appendChild(overlay);
+    window.addEventListener('keydown', onKey);
+  });
 }
 
 // Trigger the backup download. The server endpoint sends a JSON file with
@@ -6073,6 +6192,90 @@ document.getElementById('cmdPalette')?.addEventListener('click', (e) => {
 // Live filter as user types
 document.getElementById('cmdPaletteInput')?.addEventListener('input', (e) => {
   renderCmdList(e.target.value);
+});
+
+// ============================================================
+// What's New — changelog notifier
+// ============================================================
+// Compares the current build's version to the one the user last dismissed.
+// If they differ, shows a non-intrusive badge with a "What's new?" modal
+// listing the latest CHANGELOG entries. One-time per version.
+
+const SEEN_VERSION_KEY = 'vouza_changelog_seen_v1';
+
+async function checkChangelog() {
+  // Only ever run in live mode — wizard users get the tour, not the changelog
+  if (!document.getElementById('mainApp')?.classList.contains('live-mode')) return;
+  try {
+    const r = await fetch('/api/version');
+    if (!r.ok) return;
+    const { version, changelog } = await r.json();
+    if (!version) return;
+
+    const seen = localStorage.getItem(SEEN_VERSION_KEY);
+    if (seen === version) return; // user already dismissed this version
+
+    // First-ever launch (no `seen` flag at all) — silently record current version
+    // without showing the modal. We only celebrate UPDATES.
+    if (!seen) {
+      localStorage.setItem(SEEN_VERSION_KEY, version);
+      return;
+    }
+
+    showWhatsNewModal(version, changelog || '');
+  } catch { /* network fail — silent */ }
+}
+
+function showWhatsNewModal(version, changelog) {
+  // Pull just the most recent entry from the CHANGELOG (everything before the
+  // second `## ` heading). Keeps the modal short and focused.
+  let body = changelog;
+  const headings = [...changelog.matchAll(/^## /gm)];
+  if (headings.length >= 2) {
+    body = changelog.slice(headings[0].index, headings[1].index).trim();
+  } else if (headings.length === 1) {
+    body = changelog.slice(headings[0].index).trim();
+  }
+
+  // Very lightweight markdown → HTML for the changelog body
+  const html = body
+    .replace(/^## (.+)$/gm, '<h3 style="font-size:16px;margin:0 0 8px;color:var(--text)">$1</h3>')
+    .replace(/^\*\*(.+?)\*\*$/gm, '<div style="font-weight:600;color:var(--brand-light);margin:6px 0 10px;font-size:13px">$1</div>')
+    .replace(/^- (.+)$/gm, '<li>$1</li>')
+    .replace(/(<li>.*<\/li>\s*)+/g, '<ul style="margin:0 0 12px;padding-left:20px;font-size:13px;color:var(--text-dim);line-height:1.7">$&</ul>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong style="color:var(--text)">$1</strong>')
+    .replace(/`([^`]+)`/g, '<code style="background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:4px;font-size:12px">$1</code>');
+
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px)';
+  overlay.innerHTML = `
+    <div role="dialog" aria-modal="true" aria-label="What's new in this version"
+         style="background:linear-gradient(135deg,rgba(28,18,58,0.98),rgba(15,10,40,0.98));border:1px solid rgba(124,58,237,0.4);border-radius:14px;padding:24px;max-width:560px;width:92vw;max-height:75vh;overflow-y:auto;box-shadow:0 16px 50px rgba(0,0,0,0.5);color:var(--text)">
+      <div style="font-size:11px;font-weight:700;letter-spacing:0.6px;color:var(--brand-light);text-transform:uppercase;margin-bottom:6px">What's new</div>
+      ${html || '<div style="color:var(--text-dim);font-size:13px">No changelog available.</div>'}
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px">
+        <button class="health-action-btn primary" data-act="ok" aria-label="Dismiss what's-new modal">Got it 🎉</button>
+      </div>
+    </div>
+  `;
+  const cleanup = () => {
+    document.body.removeChild(overlay);
+    localStorage.setItem(SEEN_VERSION_KEY, version);
+  };
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay || e.target?.getAttribute?.('data-act') === 'ok') cleanup();
+  });
+  document.body.appendChild(overlay);
+}
+
+// Trigger changelog check ~2 s after live mode activates (lets the tour
+// finish first if both happen on the same session).
+new MutationObserver(() => {
+  if (document.getElementById('mainApp')?.classList.contains('live-mode')) {
+    setTimeout(checkChangelog, 2000);
+  }
+}).observe(document.getElementById('mainApp') || document.body, {
+  attributes: true, attributeFilter: ['class'],
 });
 
 // Trigger the onboarding tour once live mode is fully visible — wait a bit
