@@ -1379,6 +1379,100 @@
     }
     .conv-footer-link:hover { opacity: 1; color: var(--brand-light); }
 
+    /* ── First-launch onboarding tour overlay ─────────────────────── */
+    .tour-overlay {
+      position: fixed; inset: 0; z-index: 9999;
+      background: rgba(0,0,0,0.55); backdrop-filter: blur(2px);
+      display: none; opacity: 0; transition: opacity 0.25s;
+    }
+    .tour-overlay.visible { display: block; opacity: 1; }
+    .tour-highlight {
+      position: absolute; border-radius: 12px;
+      box-shadow: 0 0 0 9999px rgba(0,0,0,0.55),
+                  0 0 0 3px rgba(124,58,237,0.8),
+                  0 0 30px rgba(124,58,237,0.5);
+      pointer-events: none; transition: all 0.35s ease;
+    }
+    .tour-tooltip {
+      position: absolute; max-width: 340px;
+      padding: 18px 20px; border-radius: 14px;
+      background: linear-gradient(135deg, rgba(28,18,58,0.98), rgba(15,10,40,0.98));
+      border: 1px solid rgba(124,58,237,0.4);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+      color: var(--text); font-size: 14px; line-height: 1.55;
+      transition: all 0.35s ease;
+    }
+    .tour-tooltip .tour-step-num {
+      font-size: 11px; font-weight: 700; letter-spacing: 0.8px;
+      color: var(--brand-light); text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .tour-tooltip .tour-title {
+      font-size: 16px; font-weight: 700; margin-bottom: 6px;
+    }
+    .tour-tooltip .tour-body {
+      color: var(--text-dim); font-size: 13px; margin-bottom: 14px;
+    }
+    .tour-tooltip .tour-actions {
+      display: flex; align-items: center; gap: 10px;
+    }
+    .tour-tooltip .tour-skip {
+      background: none; border: none; color: var(--text-dim);
+      font-size: 12px; cursor: pointer; padding: 4px 0;
+    }
+    .tour-tooltip .tour-skip:hover { color: var(--text); }
+    .tour-tooltip .tour-next {
+      margin-left: auto; padding: 7px 16px;
+      border-radius: 8px; border: none; cursor: pointer;
+      background: linear-gradient(135deg, #7c3aed, #1a8fff);
+      color: #fff; font-size: 13px; font-weight: 600;
+    }
+    .tour-tooltip .tour-next:hover { filter: brightness(1.1); }
+
+    /* ── Skeleton loading shimmer ─────────────────────────────────── */
+    .skeleton {
+      background: linear-gradient(90deg,
+        rgba(255,255,255,0.04) 0%,
+        rgba(255,255,255,0.10) 50%,
+        rgba(255,255,255,0.04) 100%);
+      background-size: 200% 100%;
+      animation: skeleton-shimmer 1.4s ease-in-out infinite;
+      border-radius: 6px;
+      display: inline-block;
+    }
+    @keyframes skeleton-shimmer {
+      0%   { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+    .skeleton-line {
+      display: block; height: 14px; margin: 6px 0;
+      width: 100%;
+    }
+    .skeleton-line.short  { width: 60%; }
+    .skeleton-line.medium { width: 80%; }
+
+    /* ── Restore-draft banner (wizard auto-save) ──────────────────── */
+    .draft-restore-banner {
+      display: flex; align-items: center; gap: 12px;
+      padding: 12px 16px; border-radius: 10px;
+      background: rgba(245,158,11,0.08);
+      border: 1px solid rgba(245,158,11,0.2);
+      margin-bottom: 20px;
+    }
+    .draft-restore-banner .draft-icon { font-size: 20px; flex-shrink: 0; }
+    .draft-restore-banner .draft-text { flex: 1; font-size: 13px; color: var(--text); }
+    .draft-restore-banner .draft-text strong { color: #f59e0b; }
+    .draft-restore-banner button {
+      padding: 6px 12px; border-radius: 8px; border: none;
+      cursor: pointer; font-size: 12px; font-weight: 600;
+    }
+    .draft-restore-banner .draft-restore-btn {
+      background: #f59e0b; color: #fff;
+    }
+    .draft-restore-banner .draft-discard-btn {
+      background: rgba(255,255,255,0.06); color: var(--text-dim);
+    }
+
     .conv-list {
       flex: 1;
       overflow-y: auto;
@@ -1661,9 +1755,14 @@
 
         <!-- Conversation list -->
         <div class="conv-list" id="convList">
-          <div class="conv-empty">
-            <div class="conv-empty-icon">💬</div>
-            No conversations yet.<br>Start chatting!
+          <!-- Skeleton shimmer while loading — replaced by real list or empty state -->
+          <div id="convListSkeleton" style="padding:8px 12px">
+            <span class="skeleton skeleton-line medium"></span>
+            <span class="skeleton skeleton-line short" style="height:10px;margin-bottom:14px"></span>
+            <span class="skeleton skeleton-line"></span>
+            <span class="skeleton skeleton-line short" style="height:10px;margin-bottom:14px"></span>
+            <span class="skeleton skeleton-line medium"></span>
+            <span class="skeleton skeleton-line short" style="height:10px"></span>
           </div>
         </div>
 
@@ -2574,6 +2673,10 @@ function showStep(n) {
     renderSkillList();
   }
   if (n === 4) { renderReview(); }
+
+  // If user came from live mode (Settings flow), always offer a way back.
+  // Runs after step rendering so the nav buttons exist when we inject.
+  ensureBackToChatButton(n);
 
   guideForStep(n);
   updateTips();
@@ -3563,6 +3666,9 @@ async function saveFinalConfig() {
     await fetch('/api/config',{
       method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(cfg),
     });
+    // Successful commit — discard any draft so the restore banner doesn't
+    // show on the next page load
+    try { localStorage.removeItem(DRAFT_KEY); } catch {}
     toast('Configuration saved!', 'success');
   } catch(err) { toast('Save failed: '+err, 'error'); }
 }
@@ -3866,27 +3972,45 @@ function generateConvId() {
   return 'conv_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
 }
 
+// Tracks whether the user opened the wizard FROM live mode (Settings flow),
+// so we know to show "Back to Chat" instead of forcing them through Go Live.
+let _inSettingsMode = false;
+
 // Switch dashboard out of "live" mode to allow reconfiguring
 function openSettings() {
+  _inSettingsMode = true;
   document.getElementById('mainApp').classList.remove('live-mode');
   // Ensure wizard forms are pre-filled from saved config
   _isResume = true;
   if (_savedConfig) prefillFromConfig(_savedConfig);
   showStep(1);
-  // Inject a "← Back to Chat" button into Step 1 nav so user can return without re-doing Go Live
-  const navGroup = document.querySelector('#step-1 .btn-nav-group');
-  if (navGroup && !document.getElementById('backToChatBtn')) {
-    const backBtn = document.createElement('button');
-    backBtn.id = 'backToChatBtn';
-    backBtn.className = 'btn btn-secondary';
-    backBtn.textContent = '← Back to Chat';
-    backBtn.onclick = () => {
-      backBtn.remove();
-      _isResume = false;
-      activateLiveMode();
-    };
-    navGroup.insertBefore(backBtn, navGroup.firstChild);
-  }
+  // Back-to-Chat button is now injected by showStep() on every step
+}
+
+/**
+ * Add a "← Back to Chat" button to the current step's nav group so the user
+ * can exit the settings flow from ANY step (Step 2 if they were just adding
+ * a credential, Step 3 if they were tweaking skills, etc.). Previously this
+ * only worked from Step 1.
+ *
+ * Idempotent — re-running doesn't duplicate the button.
+ */
+function ensureBackToChatButton(stepNum) {
+  if (!_inSettingsMode) return;
+  const navGroup = document.querySelector(`#step-${stepNum} .btn-nav-group`);
+  if (!navGroup) return;
+  // Remove any stale instances from other steps (only the current step should have one)
+  document.querySelectorAll('.back-to-chat-btn').forEach((el) => el.remove());
+  const backBtn = document.createElement('button');
+  backBtn.className = 'btn btn-secondary back-to-chat-btn';
+  backBtn.textContent = '← Back to Chat';
+  backBtn.onclick = () => {
+    document.querySelectorAll('.back-to-chat-btn').forEach((el) => el.remove());
+    _inSettingsMode = false;
+    _isResume = false;
+    activateLiveMode();
+  };
+  navGroup.insertBefore(backBtn, navGroup.firstChild);
 }
 
 // Switch dashboard to "live" mode — shows conversation sidebar, hides wizard
@@ -5000,6 +5124,293 @@ async function updateMemoryCount() {
     if (el && data.total > 0) el.textContent = `(${data.total})`;
   } catch {}
 }
+
+// ============================================================
+// First-launch onboarding tour
+// ============================================================
+// Shown exactly ONCE per browser (localStorage flag). Walks new users
+// through the key parts of the live dashboard so they don't feel lost.
+// Skip button + Next button. Tooltips position themselves automatically
+// relative to the highlighted element.
+
+const TOUR_FLAG_KEY = 'vouza_tour_seen_v1';
+
+const TOUR_STEPS = [
+  {
+    target:  '.guide-pane, #guideInput',
+    title:   '💬 Chat with your AI here',
+    body:    'Type any request — "check my emails", "schedule a meeting Tuesday", "summarise this PDF". Your AI uses the tools you connected to actually do the work.',
+    placement: 'top',
+  },
+  {
+    target:  '#setupStatusPanel',
+    title:   '✅ Add more apps anytime',
+    body:    'See what\'s connected here. Click "+ Add" next to anything missing — your AI will walk you through setup right in the chat. No need to re-open the wizard.',
+    placement: 'right',
+  },
+  {
+    target:  '.conv-list, #convList',
+    title:   '📚 Conversation history',
+    body:    'Every chat is saved automatically. Click any past conversation to pick up where you left off. Use the search box above to find specific topics.',
+    placement: 'right',
+  },
+  {
+    target:  '.conv-sidebar-footer',
+    title:   '⚙️ Settings &amp; Memories',
+    body:    '<strong>Settings</strong> opens the configuration wizard. <strong>Memories</strong> shows what your AI has learned about you over time. <strong>Docs &amp; Support</strong> opens the GitHub docs in a new tab.',
+    placement: 'right',
+  },
+  {
+    target:  '.conv-sidebar-top',
+    title:   '✏️ New conversation anytime',
+    body:    'Click <strong>New</strong> to start a fresh thread. Useful when you switch topics or want a clean context for your AI. You can always come back to old threads from the list below.',
+    placement: 'right',
+  },
+];
+
+let _tourIdx = 0;
+
+function startOnboardingTour() {
+  if (localStorage.getItem(TOUR_FLAG_KEY)) return; // already seen
+  if (!document.getElementById('mainApp')?.classList.contains('live-mode')) return;
+
+  // Build the overlay if it doesn't exist
+  let overlay = document.getElementById('tourOverlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'tourOverlay';
+    overlay.className = 'tour-overlay';
+    overlay.innerHTML = `
+      <div class="tour-highlight" id="tourHighlight"></div>
+      <div class="tour-tooltip" id="tourTooltip">
+        <div class="tour-step-num" id="tourStepNum"></div>
+        <div class="tour-title" id="tourTitle"></div>
+        <div class="tour-body" id="tourBody"></div>
+        <div class="tour-actions">
+          <button class="tour-skip" onclick="endOnboardingTour()">Skip tour</button>
+          <button class="tour-next" id="tourNextBtn" onclick="nextTourStep()">Next →</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+  }
+
+  _tourIdx = 0;
+  overlay.classList.add('visible');
+  // Slight delay so live mode has fully rendered before we measure positions
+  setTimeout(() => renderTourStep(), 400);
+
+  // Re-position on window resize / scroll
+  window.addEventListener('resize', renderTourStep);
+}
+
+function renderTourStep() {
+  const step = TOUR_STEPS[_tourIdx];
+  if (!step) { endOnboardingTour(); return; }
+
+  // Find the target element — try multiple selectors if comma-separated
+  let target = null;
+  for (const sel of step.target.split(',').map((s) => s.trim())) {
+    target = document.querySelector(sel);
+    if (target) break;
+  }
+
+  // If the target isn't on the page (rare), skip this step
+  if (!target) { _tourIdx++; renderTourStep(); return; }
+
+  const rect = target.getBoundingClientRect();
+  const padding = 8;
+
+  // Position the highlight ring around the target element
+  const hl = document.getElementById('tourHighlight');
+  hl.style.top    = `${rect.top - padding}px`;
+  hl.style.left   = `${rect.left - padding}px`;
+  hl.style.width  = `${rect.width + padding * 2}px`;
+  hl.style.height = `${rect.height + padding * 2}px`;
+
+  // Position the tooltip — try the requested placement, fall back to viewport edges
+  const tt = document.getElementById('tourTooltip');
+  document.getElementById('tourStepNum').textContent = `Step ${_tourIdx + 1} of ${TOUR_STEPS.length}`;
+  document.getElementById('tourTitle').innerHTML     = step.title;
+  document.getElementById('tourBody').innerHTML      = step.body;
+  document.getElementById('tourNextBtn').textContent =
+    (_tourIdx === TOUR_STEPS.length - 1) ? 'Got it ✓' : 'Next →';
+
+  // Wait for tooltip dimensions to settle, then position it
+  requestAnimationFrame(() => {
+    const ttRect = tt.getBoundingClientRect();
+    const margin = 16;
+    let top, left;
+
+    switch (step.placement) {
+      case 'right':
+        top  = Math.max(margin, rect.top + (rect.height / 2) - (ttRect.height / 2));
+        left = rect.right + margin;
+        // If it overflows right edge, push it to the left of the target instead
+        if (left + ttRect.width > window.innerWidth - margin) {
+          left = rect.left - ttRect.width - margin;
+        }
+        break;
+      case 'top':
+        top  = rect.top - ttRect.height - margin;
+        left = Math.max(margin, rect.left + (rect.width / 2) - (ttRect.width / 2));
+        if (top < margin) {
+          top = rect.bottom + margin; // flip to bottom if no room above
+        }
+        break;
+      case 'bottom':
+      default:
+        top  = rect.bottom + margin;
+        left = Math.max(margin, rect.left + (rect.width / 2) - (ttRect.width / 2));
+        break;
+    }
+    // Clamp to viewport
+    left = Math.min(left, window.innerWidth  - ttRect.width  - margin);
+    top  = Math.min(top,  window.innerHeight - ttRect.height - margin);
+    tt.style.top  = `${Math.max(margin, top)}px`;
+    tt.style.left = `${Math.max(margin, left)}px`;
+  });
+}
+
+function nextTourStep() {
+  _tourIdx++;
+  if (_tourIdx >= TOUR_STEPS.length) { endOnboardingTour(); return; }
+  renderTourStep();
+}
+
+function endOnboardingTour() {
+  const overlay = document.getElementById('tourOverlay');
+  if (overlay) overlay.classList.remove('visible');
+  localStorage.setItem(TOUR_FLAG_KEY, '1');
+  window.removeEventListener('resize', renderTourStep);
+}
+
+// ============================================================
+// Wizard auto-save to localStorage (data-loss prevention)
+// ============================================================
+// Saves form field values as the user types, so accidental tab closure
+// doesn't lose progress. Lives entirely client-side — server only sees
+// committed values via the existing /api/config flow.
+
+const DRAFT_KEY = 'vouza_wizard_draft_v1';
+let _draftSaveTimer = null;
+
+/**
+ * Snapshot every text/email/password/textarea field on the page and store
+ * to localStorage. Debounced so we don't write on every keystroke.
+ */
+function scheduleDraftSave() {
+  if (_draftSaveTimer) clearTimeout(_draftSaveTimer);
+  _draftSaveTimer = setTimeout(() => {
+    try {
+      const draft = {};
+      document.querySelectorAll('input[type="text"], input[type="email"], input[type="password"], textarea').forEach((el) => {
+        // Skip fields with no id, and skip the chat input
+        if (!el.id || el.id === 'guideInput' || el.id === 'convSearch' || el.id === 'memorySearch') return;
+        if (el.value && el.value.trim().length > 0) draft[el.id] = el.value;
+      });
+      if (Object.keys(draft).length > 0) {
+        localStorage.setItem(DRAFT_KEY, JSON.stringify({ ts: Date.now(), fields: draft }));
+      }
+    } catch { /* localStorage may be disabled — silent */ }
+  }, 1500); // 1.5s after last keystroke
+}
+
+/**
+ * On page load, check for a draft newer than the saved config. If found,
+ * show a banner offering to restore. User can accept (re-fill fields)
+ * or discard (delete the draft).
+ */
+function checkForDraftToRestore() {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (!raw) return;
+    const draft = JSON.parse(raw);
+    if (!draft.fields || Object.keys(draft.fields).length === 0) return;
+
+    // If draft is older than 14 days, discard silently
+    if (Date.now() - draft.ts > 14 * 24 * 60 * 60 * 1000) {
+      localStorage.removeItem(DRAFT_KEY);
+      return;
+    }
+
+    // If every drafted field is already filled by saved config, nothing to restore
+    const anyEmpty = Object.entries(draft.fields).some(([id]) => {
+      const el = document.getElementById(id);
+      return el && (!el.value || el.value.trim().length === 0);
+    });
+    if (!anyEmpty) return;
+
+    // Show the restore banner above Step 1
+    const step1 = document.getElementById('step-1');
+    if (!step1) return;
+    const banner = document.createElement('div');
+    banner.className = 'draft-restore-banner';
+    const minutes = Math.round((Date.now() - draft.ts) / 60000);
+    const timeAgo = minutes < 60 ? `${minutes} min ago` :
+                    minutes < 1440 ? `${Math.round(minutes/60)} hr ago` :
+                    `${Math.round(minutes/1440)} days ago`;
+    banner.innerHTML = `
+      <div class="draft-icon">💾</div>
+      <div class="draft-text">
+        We found <strong>unsaved setup progress</strong> from ${timeAgo}.
+        Want to restore it?
+      </div>
+      <button class="draft-restore-btn" onclick="restoreDraft()">Restore</button>
+      <button class="draft-discard-btn" onclick="discardDraft()">Discard</button>
+    `;
+    step1.insertBefore(banner, step1.firstChild);
+  } catch { /* corrupt JSON or localStorage disabled — silent */ }
+}
+
+function restoreDraft() {
+  try {
+    const draft = JSON.parse(localStorage.getItem(DRAFT_KEY) || '{}');
+    let restored = 0;
+    for (const [id, val] of Object.entries(draft.fields || {})) {
+      const el = document.getElementById(id);
+      if (el && (!el.value || el.value.trim().length === 0)) {
+        el.value = val;
+        restored++;
+        // Trigger any change handlers
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }
+    document.querySelector('.draft-restore-banner')?.remove();
+    toast(`💾 Restored ${restored} unsaved field${restored === 1 ? '' : 's'}`, 'success');
+  } catch (e) {
+    toast('Could not restore draft — please re-enter', 'error');
+  }
+}
+
+function discardDraft() {
+  localStorage.removeItem(DRAFT_KEY);
+  document.querySelector('.draft-restore-banner')?.remove();
+}
+
+// Attach the auto-save listener globally (input event bubbles)
+document.addEventListener('input', (e) => {
+  const tag = e.target?.tagName;
+  if (tag !== 'INPUT' && tag !== 'TEXTAREA') return;
+  // Only wizard fields (skip chat, search, etc.)
+  if (e.target.id === 'guideInput' || e.target.id === 'convSearch' || e.target.id === 'memorySearch') return;
+  scheduleDraftSave();
+});
+
+// Run the draft check shortly after init() to allow prefillFromConfig() to settle
+setTimeout(checkForDraftToRestore, 800);
+
+// Trigger the onboarding tour once live mode is fully visible — wait a bit
+// so DOM layout settles. Watching for class changes on #mainApp catches both
+// the immediate-live (operator key already set up) and post-wizard cases.
+new MutationObserver(() => {
+  if (document.getElementById('mainApp')?.classList.contains('live-mode')) {
+    setTimeout(startOnboardingTour, 600);
+  }
+}).observe(document.getElementById('mainApp') || document.body, {
+  attributes: true, attributeFilter: ['class'],
+});
+
 </script>
 </body>
 </html>
