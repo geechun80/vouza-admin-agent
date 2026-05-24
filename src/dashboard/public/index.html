@@ -1451,6 +1451,87 @@
     .skeleton-line.short  { width: 60%; }
     .skeleton-line.medium { width: 80%; }
 
+    /* ── System Health panel ──────────────────────────────────────── */
+    .health-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 14px; margin-bottom: 20px;
+    }
+    .health-stat-card {
+      padding: 18px; border-radius: 14px;
+      background: var(--bg-glass-card); border: 1px solid var(--border);
+    }
+    .health-stat-card .label {
+      font-size: 11px; font-weight: 700; letter-spacing: 0.6px;
+      color: var(--text-dim); text-transform: uppercase; margin-bottom: 8px;
+    }
+    .health-stat-card .value {
+      font-size: 26px; font-weight: 700; color: var(--text); line-height: 1.1;
+    }
+    .health-stat-card .sub {
+      font-size: 12px; color: var(--text-dim); margin-top: 4px;
+    }
+    .health-stat-card.good   { border-color: rgba(16,185,129,0.3); }
+    .health-stat-card.warn   { border-color: rgba(245,158,11,0.3); }
+    .health-stat-card.bad    { border-color: rgba(239,68,68,0.3);  }
+    .health-stat-card.good   .value { color: #10b981; }
+    .health-stat-card.warn   .value { color: #f59e0b; }
+    .health-stat-card.bad    .value { color: #ef4444; }
+
+    .health-bar {
+      width: 100%; height: 6px; border-radius: 6px;
+      background: rgba(255,255,255,0.06); overflow: hidden; margin-top: 10px;
+    }
+    .health-bar-fill {
+      height: 100%; transition: width 0.5s ease;
+      background: linear-gradient(90deg, #10b981, #25d366);
+    }
+    .health-bar-fill.warn { background: linear-gradient(90deg, #f59e0b, #d97706); }
+    .health-bar-fill.bad  { background: linear-gradient(90deg, #ef4444, #dc2626); }
+
+    .health-section {
+      margin-top: 24px;
+    }
+    .health-section h3 {
+      font-size: 13px; font-weight: 700; letter-spacing: 0.6px;
+      color: var(--text); text-transform: uppercase;
+      margin-bottom: 12px; opacity: 0.9;
+    }
+    .provider-health-row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 14px; border-radius: 8px;
+      background: var(--bg-glass-card); border: 1px solid var(--border);
+      margin-bottom: 6px;
+    }
+    .provider-health-row .status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      flex-shrink: 0; background: var(--text-dim);
+    }
+    .provider-health-row.healthy .status-dot { background: #10b981; box-shadow: 0 0 8px rgba(16,185,129,0.5); }
+    .provider-health-row.warn    .status-dot { background: #f59e0b; box-shadow: 0 0 8px rgba(245,158,11,0.5); }
+    .provider-health-row.bad     .status-dot { background: #ef4444; box-shadow: 0 0 8px rgba(239,68,68,0.5); }
+    .provider-health-row .pname { flex: 1; font-size: 13px; color: var(--text); }
+    .provider-health-row .pmeta { font-size: 11px; color: var(--text-dim); }
+
+    /* ── Live status pill (sidebar header — small green dot) ───────── */
+    .live-dot {
+      display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+      background: var(--text-dim); margin-right: 5px;
+      vertical-align: middle;
+    }
+    .live-dot.ok   { background: #10b981; box-shadow: 0 0 6px rgba(16,185,129,0.6); animation: pulse-good 2s ease-in-out infinite; }
+    .live-dot.warn { background: #f59e0b; }
+    .live-dot.bad  { background: #ef4444; }
+    @keyframes pulse-good {
+      0%, 100% { opacity: 1; }
+      50%      { opacity: 0.5; }
+    }
+
+    /* ── Search-result highlight ──────────────────────────────────── */
+    mark.conv-search-hit {
+      background: rgba(245,158,11,0.3);
+      color: var(--text); padding: 0 2px; border-radius: 3px;
+    }
+
     /* ── Restore-draft banner (wizard auto-save) ──────────────────── */
     .draft-restore-banner {
       display: flex; align-items: center; gap: 12px;
@@ -1775,9 +1856,10 @@
             <div>💾 Saved automatically</div>
             <a href="https://github.com/geechun80/vouza-admin-agent" target="_blank" class="conv-footer-link">📚 Docs &amp; Support</a>
           </div>
-          <div>
-            <button class="conv-memory-btn" style="margin-right:5px;" onclick="openSettings()" title="Reconfigure Agent">⚙️ Settings</button>
-            <button class="conv-memory-btn" onclick="toggleMemoryPanel()">🧠 Memories</button>
+          <div style="display:flex;flex-wrap:wrap;gap:5px">
+            <button class="conv-memory-btn" onclick="openSettings()" title="Reconfigure agent">⚙️ Settings</button>
+            <button class="conv-memory-btn" onclick="toggleMemoryPanel()" title="What your agent has learned">🧠 Memories</button>
+            <button class="conv-memory-btn" onclick="toggleHealthPanel()" title="Spend, provider health, uptime">📊 Health</button>
           </div>
         </div>
 
@@ -2155,6 +2237,23 @@
         </div>
         <div id="memoryPanelContent">
           <div style="color:var(--text-dim);font-size:14px">Loading memories...</div>
+        </div>
+      </div>
+
+      <!-- ════ SYSTEM HEALTH PANEL ════ -->
+      <!-- Visible operator dashboard for budget, provider health, agent uptime.
+           Replaces the old "you have to read logs to know if it's working" UX. -->
+      <div class="step-view" id="health-panel" style="display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
+          <div>
+            <div class="step-eyebrow">Operations</div>
+            <h2 class="step-title" style="margin:0">📊 System Health</h2>
+            <p class="step-subtitle" style="margin:4px 0 0">Live view of your agent's spend, provider status, and uptime. Refreshes every 15 seconds.</p>
+          </div>
+          <button class="btn" onclick="toggleHealthPanel()" style="min-width:80px">← Back</button>
+        </div>
+        <div id="healthPanelContent">
+          <div style="color:var(--text-dim);font-size:14px">Loading…</div>
         </div>
       </div>
 
@@ -4032,6 +4131,8 @@ function activateLiveMode() {
   renderSetupStatusPanel();
   // Check agent is actually running — warn if auto-launch failed
   checkAgentHealth();
+  // Start the live-status dot polling (small dot next to agent name)
+  startLiveStatusPolling();
 }
 
 /**
@@ -4217,10 +4318,13 @@ function renderConvList(convs) {
     html += `<div class="conv-group-label">${g.label}</div>`;
     g.items.forEach(c => {
       const active  = c.id === convState.currentId ? 'active' : '';
-      const preview = c.preview ? escHtml(c.preview.slice(0,60)) : '';
+      // highlightHits visually marks the matched search substring (no-op when no query)
+      const query   = convState.searchQuery || '';
+      const title   = highlightHits(c.title, query);
+      const preview = c.preview ? highlightHits(c.preview.slice(0,60), query) : '';
       html += `
         <div class="conv-item ${active}" onclick="openConversation('${c.id}')" data-id="${c.id}">
-          <div class="conv-item-title">${escHtml(c.title)}</div>
+          <div class="conv-item-title">${title}</div>
           <div class="conv-item-meta">${preview}</div>
           <button class="conv-item-del" onclick="deleteConv(event,'${c.id}')" title="Delete">×</button>
         </div>`;
@@ -5026,6 +5130,315 @@ async function toggleMemoryPanel() {
   } else {
     document.getElementById('memory-panel').style.display = 'none';
     showStep(memorySavedStep);
+  }
+}
+
+// ============================================================
+// System Health Panel — live view of budget + provider failover + agent uptime
+// ============================================================
+// All three endpoints already exist server-side (built during the audit pass).
+// This panel just makes that data visible to non-technical users so they can
+// see at a glance whether their agent is healthy, what they've spent today,
+// and which providers are in cooldown.
+
+let _healthPanelOpen = false;
+let _healthSavedStep = 1;
+let _healthRefreshTimer = null;
+
+async function toggleHealthPanel() {
+  // If user is currently in live mode, switch out so the wizard column is visible
+  const liveMode = document.getElementById('mainApp')?.classList.contains('live-mode');
+  if (liveMode && !_healthPanelOpen) {
+    document.getElementById('mainApp').classList.remove('live-mode');
+    _inSettingsMode = true; // ensures Back-to-Chat button appears
+  }
+
+  _healthPanelOpen = !_healthPanelOpen;
+  if (_healthPanelOpen) {
+    _healthSavedStep = state.step || 1;
+    document.querySelectorAll('.step-view').forEach((el) => (el.style.display = 'none'));
+    const panel = document.getElementById('health-panel');
+    panel.style.display = 'block';
+    await loadHealthPanel();
+    // Refresh every 15s while the panel is open
+    if (_healthRefreshTimer) clearInterval(_healthRefreshTimer);
+    _healthRefreshTimer = setInterval(loadHealthPanel, 15000);
+  } else {
+    document.getElementById('health-panel').style.display = 'none';
+    if (_healthRefreshTimer) { clearInterval(_healthRefreshTimer); _healthRefreshTimer = null; }
+    // Restore where the user was
+    if (_inSettingsMode) {
+      showStep(_healthSavedStep);
+    } else {
+      activateLiveMode();
+    }
+  }
+}
+
+async function loadHealthPanel() {
+  const el = document.getElementById('healthPanelContent');
+  if (!el) return;
+  // Parallel fetch all three endpoints. Failures are individually handled so
+  // a single broken endpoint doesn't blank the entire page.
+  const [budgetR, healthR, statusR] = await Promise.allSettled([
+    fetch('/api/budget-status').then((r) => r.json()).catch(() => null),
+    fetch('/api/provider-health').then((r) => r.json()).catch(() => null),
+    fetch('/api/agent/status').then((r) => r.json()).catch(() => null),
+  ]);
+  const budget = budgetR.status === 'fulfilled' ? budgetR.value : null;
+  const health = healthR.status === 'fulfilled' ? healthR.value : null;
+  const agent  = statusR.status === 'fulfilled' ? statusR.value : null;
+
+  el.innerHTML = renderHealthPanel({ budget, health, agent });
+}
+
+function renderHealthPanel({ budget, health, agent }) {
+  // ── Stat cards ────────────────────────────────────────────────────────
+  const statCards = [];
+
+  // 1. Agent uptime
+  if (agent) {
+    if (agent.running) {
+      const uptime = formatUptime(agent.uptimeMs || agent.uptime || 0);
+      statCards.push(`
+        <div class="health-stat-card good">
+          <div class="label">Agent Status</div>
+          <div class="value">🟢 Live</div>
+          <div class="sub">${escHtml(uptime)} uptime</div>
+        </div>
+      `);
+    } else {
+      statCards.push(`
+        <div class="health-stat-card bad">
+          <div class="label">Agent Status</div>
+          <div class="value">⚠️ Stopped</div>
+          <div class="sub"><button class="btn btn-primary" style="font-size:11px;padding:4px 10px;margin-top:6px" onclick="retryLaunch()">Restart</button></div>
+        </div>
+      `);
+    }
+  }
+
+  // 2. Today's spend (only meaningful when on Vouza fallback key)
+  if (budget) {
+    const pct = budget.pctUsed || 0;
+    const tone = pct >= 100 ? 'bad' : pct >= 80 ? 'warn' : 'good';
+    const barClass = pct >= 100 ? 'bad' : pct >= 80 ? 'warn' : '';
+    statCards.push(`
+      <div class="health-stat-card ${tone}">
+        <div class="label">Today's Spend (Vouza Key)</div>
+        <div class="value">$${(budget.spentUsd || 0).toFixed(2)}</div>
+        <div class="sub">of $${(budget.capUsd || 10).toFixed(2)} daily cap · ${pct}% used</div>
+        <div class="health-bar">
+          <div class="health-bar-fill ${barClass}" style="width:${Math.min(pct,100)}%"></div>
+        </div>
+      </div>
+    `);
+  }
+
+  // 3. Provider health summary
+  if (health) {
+    const providers = Object.keys(health);
+    const openCount = providers.filter((p) => health[p].circuitOpen).length;
+    if (providers.length === 0) {
+      statCards.push(`
+        <div class="health-stat-card good">
+          <div class="label">Provider Failover</div>
+          <div class="value">✓ All clear</div>
+          <div class="sub">No provider failures recorded</div>
+        </div>
+      `);
+    } else {
+      const tone = openCount > 0 ? 'warn' : 'good';
+      statCards.push(`
+        <div class="health-stat-card ${tone}">
+          <div class="label">Provider Failover</div>
+          <div class="value">${openCount === 0 ? '✓ Healthy' : `⚠️ ${openCount} in cooldown`}</div>
+          <div class="sub">${providers.length} provider${providers.length === 1 ? '' : 's'} tracked</div>
+        </div>
+      `);
+    }
+  }
+
+  // ── Per-provider detail rows ──────────────────────────────────────────
+  let providerRows = '';
+  if (health && Object.keys(health).length > 0) {
+    providerRows = `
+      <div class="health-section">
+        <h3>🤖 Per-provider failure status</h3>
+        ${Object.entries(health).map(([provider, info]) => {
+          const isOpen = info.circuitOpen;
+          const tone = isOpen ? 'bad' : (info.failuresInWindow > 0 ? 'warn' : 'healthy');
+          const cooldownMin = Math.ceil((info.cooldownRemaining || 0) / 60000);
+          const status = isOpen
+            ? `Circuit OPEN — auto-retries in ${cooldownMin} min`
+            : (info.failuresInWindow > 0 ? `${info.failuresInWindow} recent failure${info.failuresInWindow === 1 ? '' : 's'}` : 'Healthy');
+          return `
+            <div class="provider-health-row ${tone}">
+              <span class="status-dot"></span>
+              <span class="pname">${escHtml(provider)}</span>
+              <span class="pmeta">${escHtml(status)}</span>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  // ── Spend per provider breakdown ──────────────────────────────────────
+  let spendRows = '';
+  if (budget && budget.byProvider && Object.keys(budget.byProvider).length > 0) {
+    spendRows = `
+      <div class="health-section">
+        <h3>💵 Spend by provider (today)</h3>
+        ${Object.entries(budget.byProvider).map(([p, usd]) => `
+          <div class="provider-health-row healthy">
+            <span class="status-dot"></span>
+            <span class="pname">${escHtml(p)}</span>
+            <span class="pmeta">$${Number(usd).toFixed(4)}</span>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  // ── Hints + log file pointer ──────────────────────────────────────────
+  const hints = `
+    <div class="health-section">
+      <h3>💡 Operations tips</h3>
+      <div style="font-size:13px;color:var(--text-dim);line-height:1.65;padding:0 4px">
+        • Structured logs: <code style="background:rgba(255,255,255,0.04);padding:2px 6px;border-radius:4px">data/logs/admin-agent.log</code> (JSON lines, grep-friendly)<br>
+        • Chat history audit: <code style="background:rgba(255,255,255,0.04);padding:2px 6px;border-radius:4px">data/chat-history/&lt;sessionId&gt;.jsonl</code><br>
+        • Shell command audit: <code style="background:rgba(255,255,255,0.04);padding:2px 6px;border-radius:4px">data/shell-audit.log</code><br>
+        • Spend tracker is only enforced when running on Vouza's fallback API key. If you've configured your own key, this dashboard shows $0 — your platform's billing applies instead.<br>
+        • Provider failover auto-recovers after 5 minutes. If a circuit stays open, check your API key + account credit at that provider.
+      </div>
+    </div>
+  `;
+
+  return `
+    <div class="health-grid">${statCards.join('')}</div>
+    ${providerRows}
+    ${spendRows}
+    ${hints}
+  `;
+}
+
+function formatUptime(ms) {
+  if (!ms || ms < 0) return '—';
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  const h = Math.floor(m / 60);
+  const d = Math.floor(h / 24);
+  if (d > 0) return `${d}d ${h % 24}h`;
+  if (h > 0) return `${h}h ${m % 60}m`;
+  if (m > 0) return `${m}m ${s % 60}s`;
+  return `${s}s`;
+}
+
+// ============================================================
+// Friendly error wrapper — fetchSafe
+// ============================================================
+// Wraps fetch() with consistent error-to-user messaging so we don't surface
+// raw HTTP errors. Use for any user-initiated API call. Returns:
+//   { ok: true, data }   on success
+//   { ok: false, error } on failure (error is a friendly string)
+
+async function fetchSafe(url, options = {}) {
+  try {
+    const res = await fetch(url, options);
+    if (!res.ok) {
+      // Map common HTTP statuses to actionable messages
+      let friendly;
+      switch (res.status) {
+        case 400: friendly = "Something in your request wasn't valid. Try again or check the inputs."; break;
+        case 401: friendly = "You're not authorised for this. If you're using the dashboard remotely, your password may be wrong."; break;
+        case 403: friendly = "Access denied. This action isn't allowed from your current session."; break;
+        case 404: friendly = "That endpoint doesn't exist. Try refreshing the page in case the dashboard is out of date."; break;
+        case 429: friendly = "You're going too fast! Wait a few seconds and try again."; break;
+        case 500:
+        case 502:
+        case 503:
+        case 504: friendly = "The server hiccuped. Check that your agent is still running, then try again."; break;
+        default:  friendly = `Server returned ${res.status}.`;
+      }
+      // Try to extract a more specific server-provided message
+      try {
+        const body = await res.json();
+        if (body && body.error) friendly += ` (${String(body.error).slice(0, 120)})`;
+      } catch { /* not JSON — that's fine */ }
+      return { ok: false, error: friendly, status: res.status };
+    }
+    const data = await res.json().catch(() => ({}));
+    return { ok: true, data };
+  } catch (err) {
+    // Network failure / CORS / timeout / fetch aborted
+    const msg = String(err && err.message || err);
+    if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+      return { ok: false, error: "Can't reach the dashboard server. Check it's still running (pm2 list)." };
+    }
+    return { ok: false, error: msg };
+  }
+}
+
+// ============================================================
+// Conversation search — highlight matching text
+// ============================================================
+// Improves on the existing filterConvs() by visually highlighting the
+// matched substring in each conversation title/preview. Easier for the
+// eye to scan when there are many results.
+
+function highlightHits(text, query) {
+  if (!query || !text) return escHtml(text || '');
+  const safe = escHtml(text);
+  // Build a case-insensitive regex from the query — escape regex specials
+  const escQ = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return safe.replace(new RegExp(escQ, 'gi'), (m) => `<mark class="conv-search-hit">${m}</mark>`);
+}
+
+// ============================================================
+// Live status dots in sidebar header — small green dot when integrations
+// are healthy, amber if any channel is disconnected. Click → Health panel.
+// ============================================================
+
+let _liveStatusTimer = null;
+
+function startLiveStatusPolling() {
+  // Refresh every 30s while in live mode
+  if (_liveStatusTimer) clearInterval(_liveStatusTimer);
+  refreshLiveStatusDot();
+  _liveStatusTimer = setInterval(refreshLiveStatusDot, 30000);
+}
+
+async function refreshLiveStatusDot() {
+  // Only useful when in live mode
+  if (!document.getElementById('mainApp')?.classList.contains('live-mode')) return;
+  let tone = 'ok';
+  let tooltip = 'All connected services are healthy';
+  try {
+    const status = await fetch('/api/agent/status').then((r) => r.json()).catch(() => null);
+    if (!status?.running) {
+      tone = 'bad';
+      tooltip = 'Agent is not running — click for details';
+    } else {
+      const health = await fetch('/api/provider-health').then((r) => r.json()).catch(() => ({}));
+      const anyOpen = Object.values(health || {}).some((h) => h.circuitOpen);
+      if (anyOpen) { tone = 'warn'; tooltip = 'A provider is in cooldown — failover engaged'; }
+    }
+  } catch { tone = 'bad'; tooltip = 'Could not reach dashboard server'; }
+
+  const nameEl = document.getElementById('convSidebarAgentName');
+  if (nameEl) {
+    let dot = nameEl.parentElement?.querySelector('.live-dot');
+    if (!dot) {
+      dot = document.createElement('span');
+      dot.className = 'live-dot';
+      dot.style.cursor = 'pointer';
+      dot.title = tooltip;
+      dot.onclick = (e) => { e.stopPropagation(); toggleHealthPanel(); };
+      nameEl.parentElement?.insertBefore(dot, nameEl);
+    }
+    dot.className = `live-dot ${tone}`;
+    dot.title = tooltip;
   }
 }
 
