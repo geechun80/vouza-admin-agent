@@ -238,57 +238,71 @@ pm2 startup
 
 ## Updating to the latest version
 
-Follow these steps **in order**. Your saved config, chat history, and credentials are stored in `data/` and are **not touched** by the update — only the code changes.
+Your saved config, chat history, WhatsApp auth, and memories live in `data/` and are **never touched** by an update — only code changes.
 
-### Step 1 — Pull the latest code
+### Easiest — double-click the update script
 
-```bash
+Just open the project folder in File Explorer / Finder and double-click:
+
+- **Windows:** `update.bat`
+- **Mac / Linux:** `update.sh` (run from terminal: `./update.sh`)
+
+The script pulls, rebuilds, restarts under PM2, and confirms each step succeeded with friendly errors if anything goes wrong.
+
+---
+
+### Manual — if you prefer the command line
+
+The commands below depend on which terminal you're using. Pick the one that matches yours:
+
+#### Command Prompt (`cmd.exe`)
+
+```cmd
+cd vouza-admin-agent && git pull && npm ci && npm run build && pm2 restart admin-agent
+```
+
+#### Windows PowerShell 5.1 (default on Windows 10/11)
+
+> ⚠️ `&&` is **not** a valid statement separator in Windows PowerShell 5.1. Use this version instead:
+
+```powershell
 cd vouza-admin-agent
 git pull
-```
-
-### Step 2 — Update dependencies
-
-```bash
 npm ci
-```
-
-> ⚠️ **Use `npm ci`, not `npm install`.** `npm ci` reads `package-lock.json` and installs the EXACT versions we tested. `npm install` could silently upgrade pinned-but-risky deps (Baileys, Playwright) and break WhatsApp or the browser tools.
-
-### Step 3 — Rebuild
-
-```bash
 npm run build
-```
-
-You should see `✓ public/ copied to dist/` at the end.
-
-### Step 4 — Restart the agent
-
-Pick the one that matches how you installed it:
-
-**If you used PM2** (ran `install-pm2.bat` / `install-pm2.sh`):
-```bash
 pm2 restart admin-agent
-pm2 logs admin-agent --lines 20   # confirm it started cleanly
 ```
 
-**If you used Windows Task Scheduler** (ran `install-autostart.bat`):
-- Open Task Manager → find `wscript.exe` running → end task
-- Re-run by double-clicking **`start-background.vbs`** (or wait until next login)
+If any line shows an error, stop and read it before running the next one.
 
-**If you just run `npm run setup` manually**:
-- Close the existing terminal window
-- Run `npm run setup` again
+#### PowerShell 7+ / Git Bash / Mac Terminal / WSL / Linux
 
-### Step 5 — Verify the update worked
+```bash
+cd vouza-admin-agent && git pull && npm ci && npm run build && pm2 restart admin-agent
+```
+
+---
+
+### Why `npm ci` and not `npm install`?
+
+`npm ci` reads `package-lock.json` and installs the **exact** versions we tested. `npm install` could silently upgrade pinned-but-risky deps (Baileys, Playwright) and break WhatsApp or the browser tools.
+
+If you accidentally ran `npm install`, run `npm ci` once to restore the pinned versions, then `npm run build` again.
+
+---
+
+### Restart options depending on how you installed
+
+- **PM2** (ran `install-pm2.bat` / `install-pm2.sh`): `pm2 restart admin-agent`
+- **Windows Task Scheduler** (ran `install-autostart.bat`): open Task Manager → find `wscript.exe` running → End task → double-click `start-background.vbs`
+- **Manual** (you run `npm run setup` yourself): close the existing terminal, run `npm run setup` again
+
+### Verify the update worked
 
 1. Open the dashboard at **http://localhost:3456**
-2. The dashboard should load and show "🛡 Bound to loopback only" (or your configured bind) in the terminal output
-3. Check `data/logs/admin-agent.log` — fresh JSON log entries from the current minute confirm structured logging is running
-4. Test the Guide Bot by sending a message — it should reply at the bottom of the chat (not the top)
-
-> 💡 **Common gotcha:** if you ran `npm install` instead of `npm ci`, run `npm ci` once to restore exact pinned versions. Then `npm run build` again.
+2. A **"What's new"** modal should pop up showing the latest changes (only the first time after an update)
+3. Look at `data/logs/admin-agent.log` — fresh JSON log entries from the current minute confirm structured logging is running
+4. Test the Guide Bot by sending a message — it replies at the **bottom** of the chat (not the top)
 
 ---
 
