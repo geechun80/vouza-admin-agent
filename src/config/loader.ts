@@ -174,6 +174,35 @@ export async function loadConfigFromJson(): Promise<AgentConfig> {
       if (saved.credentials.openrouterApiKey)  baseConfig.apiKeys.openrouter  = saved.credentials.openrouterApiKey;
     }
 
+    // ── Operator fallback: apply VOUZA_API_KEY when no user key is set ───
+    //
+    // Same operator-fallback semantics as chat.ts uses for the dashboard
+    // Guide Bot, now applied to the main agent that powers Telegram /
+    // WhatsApp / AgentMail listeners. Without this, customers who haven't
+    // yet entered their own AI key (running on the Vouza shared key) hit
+    // 401 "Missing Authentication header" on every external-channel call
+    // because their apiKeys.<provider> is empty.
+    //
+    // Fires only when the resolved provider has NO key. If the user has
+    // pasted their own key, that always takes priority — no behavior
+    // change for the established-key path.
+    const operatorKey      = (process.env.VOUZA_API_KEY      || "").trim();
+    const operatorProvider = ((process.env.VOUZA_API_PROVIDER || "openrouter") as AIProvider);
+    const operatorModel    = (process.env.VOUZA_API_MODEL    || "google/gemini-2.5-flash-lite").trim();
+    if (operatorKey) {
+      const activeKey = baseConfig.apiKeys[baseConfig.provider];
+      if (!activeKey || activeKey.trim().length === 0) {
+        // Switch to the operator's provider + populate its key
+        baseConfig.provider               = operatorProvider;
+        baseConfig.apiKeys[operatorProvider] = operatorKey;
+        // Use the operator-recommended model unless the user has explicitly
+        // chosen a model that's compatible with the operator provider.
+        if (operatorProvider === "openrouter") {
+          baseConfig.model = operatorModel;
+        }
+      }
+    }
+
     // OpenRouter: apply provider + tiers from saved agent config
     if (saved.agent?.provider === "openrouter") {
       baseConfig.provider = "openrouter";

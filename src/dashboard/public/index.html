@@ -4284,14 +4284,38 @@ async function renderSetupStatusPanel() {
 
   // Items the user might want to connect — each maps to a Guide Bot prompt
   // template that triggers a step-by-step setup conversation.
+  //
+  // AI-key detection: must match the field names the loader.ts actually reads
+  // (openrouterApiKey, anthropicApiKey, etc.) — NOT openrouterKey/anthropicKey
+  // which earlier versions mistakenly checked. A wrong check showed "+ Add"
+  // even for users who'd already saved their key.
+  const creds = cfg.credentials || {};
+  const hasAnyUserAiKey =
+    !!creds.openaiApiKey ||
+    !!creds.anthropicApiKey ||
+    !!creds.googleApiKey || !!creds.googleAiApiKey ||
+    !!creds.openrouterApiKey ||
+    !!creds.xaiApiKey ||
+    !!creds.deepseekApiKey ||
+    !!creds.moonshotApiKey ||
+    !!creds.alibabaApiKey || !!creds.dashscopeApiKey;
+  // Also count as connected when the operator's Vouza fallback key is active
+  // (hasDefaultKey is exposed by /api/operator-defaults and reflects whether
+  // process.env.VOUZA_API_KEY is set on the server)
+  let hasOperatorKey = false;
+  try {
+    const op = await fetch('/api/operator-defaults').then(r => r.json()).catch(() => ({}));
+    hasOperatorKey = !!op.hasDefaultKey;
+  } catch { /* non-fatal */ }
+
   const ITEMS = [
-    { id:'ai',        name:'AI Model',           icon:'🤖', test: () => !!cfg.credentials?.openaiKey || !!cfg.credentials?.anthropicKey || !!cfg.credentials?.googleKey || !!cfg.credentials?.openrouterKey || !!cfg.credentials?.groqKey, ask: 'I want to add or change my AI API key. Please walk me through it.' },
+    { id:'ai',        name:'AI Model',           icon:'🤖', test: () => hasAnyUserAiKey || hasOperatorKey, ask: 'I want to add or change my AI API key. Please walk me through it.' },
     { id:'email',     name:'Email',              icon:'📧', test: () => cfg.channels?.email?.enabled,    ask: 'I want to connect my email. Walk me through it step by step.' },
     { id:'telegram',  name:'Telegram',           icon:'💬', test: () => cfg.channels?.telegram?.enabled, ask: 'Help me set up Telegram so I can chat with the AI from my phone.' },
     { id:'whatsapp',  name:'WhatsApp',           icon:'📱', test: () => cfg.channels?.whatsapp?.enabled, ask: 'Help me connect WhatsApp. I want to scan the QR code.' },
     { id:'calendar',  name:'Calendar',           icon:'📅', test: () => cfg.tools?.calendar?.enabled,    ask: 'Help me connect Google Calendar so the AI can schedule meetings.' },
     { id:'spreadsheet', name:'Spreadsheets',     icon:'📊', test: () => cfg.tools?.spreadsheet?.enabled, ask: 'Help me connect Google Sheets for invoice and data tracking.' },
-    { id:'voice',     name:'Voice Transcription',icon:'🎙️', test: () => !!cfg.credentials?.groqApiKey || !!cfg.credentials?.openaiVoiceKey, ask: 'Help me set up voice transcription (Groq Whisper — it\'s free).' },
+    { id:'voice',     name:'Voice Transcription',icon:'🎙️', test: () => !!creds.groqApiKey || !!creds.openaiVoiceKey, ask: 'Help me set up voice transcription (Groq Whisper — it\'s free).' },
   ];
 
   const results  = ITEMS.map((it) => ({ ...it, connected: !!it.test() }));
