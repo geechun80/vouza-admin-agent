@@ -1134,6 +1134,37 @@
       border-radius:10px; padding:2px 10px; margin-left:8px;
     }
 
+    /* ── Section priority badges (Step 2) ──────────────────────── */
+    .section-priority-badge {
+      padding: 3px 10px; border-radius: 10px;
+      font-size: 10px; font-weight: 700; letter-spacing: 0.6px;
+      text-transform: uppercase; flex-shrink: 0;
+    }
+    .section-priority-badge.required {
+      background: rgba(239,68,68,0.12); color: #ef4444;
+      border: 1px solid rgba(239,68,68,0.25);
+    }
+    .section-priority-badge.recommended {
+      background: rgba(16,185,129,0.12); color: #10b981;
+      border: 1px solid rgba(16,185,129,0.25);
+    }
+    .section-priority-badge.optional {
+      background: rgba(148,163,184,0.10); color: var(--text-dim);
+      border: 1px solid var(--border);
+    }
+    .section-label.section-required::before,
+    .section-label.section-required::after {
+      background: linear-gradient(90deg, transparent, rgba(239,68,68,0.3), transparent);
+    }
+    .section-label.section-recommended::before,
+    .section-label.section-recommended::after {
+      background: linear-gradient(90deg, transparent, rgba(16,185,129,0.3), transparent);
+    }
+    .section-helper {
+      font-size: 13px; color: var(--text-dim); line-height: 1.55;
+      margin: -8px 0 16px; padding: 0 4px;
+    }
+
     /* ============================================================
        COLLAPSIBLE ADVANCED
     ============================================================ */
@@ -1280,6 +1311,73 @@
       transition: border-color 0.15s;
     }
     .conv-search-wrap input:focus { border-color: var(--brand); }
+
+    /* ── Setup Status Panel (sidebar widget shown in live mode) ─────────── */
+    .setup-status-panel {
+      padding: 12px;
+      border-top: 1px solid var(--border);
+      background: rgba(255,255,255,0.02);
+    }
+    .setup-status-header {
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 11px; font-weight: 700; letter-spacing: 0.5px;
+      color: var(--text-dim); margin-bottom: 10px; text-transform: uppercase;
+    }
+    .setup-status-pct {
+      padding: 2px 8px; border-radius: 10px; font-size: 10px;
+      background: rgba(124,58,237,0.15); color: var(--brand-light);
+    }
+    .setup-status-pct.complete {
+      background: rgba(16,185,129,0.15); color: #10b981;
+    }
+    .setup-progress-bar {
+      width: 100%; height: 4px; border-radius: 4px;
+      background: rgba(255,255,255,0.06); overflow: hidden;
+      margin-bottom: 10px;
+    }
+    .setup-progress-fill {
+      height: 100%; transition: width 0.4s ease;
+      background: linear-gradient(90deg, #7c3aed, #1a8fff);
+    }
+    .setup-status-complete .setup-progress-fill {
+      background: linear-gradient(90deg, #10b981, #25d366);
+    }
+    .setup-status-items {
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .setup-status-item {
+      display: flex; align-items: center; gap: 6px;
+      padding: 6px 8px; border-radius: 6px;
+      font-size: 12px; color: var(--text-dim);
+      cursor: pointer; transition: background 0.15s;
+    }
+    .setup-status-item:hover { background: rgba(255,255,255,0.04); }
+    .setup-status-item.connected { color: var(--text); }
+    .setup-status-item.missing { color: #f59e0b; }
+    .setup-status-item .icon { font-size: 13px; width: 14px; text-align: center; }
+    .setup-status-item .name { flex: 1; }
+    .setup-status-item .action {
+      font-size: 10px; padding: 2px 7px; border-radius: 8px;
+      background: rgba(245,158,11,0.12); color: #f59e0b;
+      font-weight: 600;
+    }
+    .setup-status-item.connected .action {
+      background: rgba(16,185,129,0.12); color: #10b981;
+    }
+    .setup-status-add-btn {
+      width: 100%; margin-top: 10px;
+      padding: 8px 12px; border-radius: 8px;
+      background: linear-gradient(135deg, #7c3aed, #1a8fff);
+      color: #fff; border: none; cursor: pointer;
+      font-size: 12px; font-weight: 600;
+      transition: filter 0.15s;
+    }
+    .setup-status-add-btn:hover { filter: brightness(1.1); }
+    .conv-footer-link {
+      font-size: 11px; color: var(--text-dim); text-decoration: none;
+      display: block; margin-top: 3px; opacity: 0.7;
+    }
+    .conv-footer-link:hover { opacity: 1; color: var(--brand-light); }
 
     .conv-list {
       flex: 1;
@@ -1569,10 +1667,14 @@
           </div>
         </div>
 
+        <!-- Setup Status Panel — visible in live mode -->
+        <div class="setup-status-panel" id="setupStatusPanel"></div>
+
         <!-- Footer -->
         <div class="conv-sidebar-footer">
           <div class="conv-footer-info">
             <div>💾 Saved automatically</div>
+            <a href="https://github.com/geechun80/vouza-admin-agent" target="_blank" class="conv-footer-link">📚 Docs &amp; Support</a>
           </div>
           <div>
             <button class="conv-memory-btn" style="margin-right:5px;" onclick="openSettings()" title="Reconfigure Agent">⚙️ Settings</button>
@@ -1702,16 +1804,24 @@
 
       <!-- ════ STEP 2: Connect Apps ════ -->
       <div class="step-view" id="step-2">
-        <div class="step-eyebrow">Step 2 of 4 — Optional</div>
+        <div class="step-eyebrow">Step 2 of 4 — Connect Your Apps</div>
         <h2 class="step-title">Connect Your Apps</h2>
-        <p class="step-subtitle">Choose where your AI works. You can connect more apps anytime after setup.</p>
+        <p class="step-subtitle">Connect as many or as few as you want — you can always add more later from your live dashboard.</p>
 
         <!-- AI API Key (required) -->
-        <div class="section-label"><span>AI Account Access (Required)</span></div>
+        <div class="section-label section-required">
+          <span>🔑 AI Account Access</span>
+          <span class="section-priority-badge required">Required</span>
+        </div>
+        <p class="section-helper">Your AI needs an API key to think. Pick one provider — you can change it anytime.</p>
         <div id="aiKeySection"></div>
 
         <!-- Messaging Channels -->
-        <div class="section-label"><span>Where Your AI Works</span></div>
+        <div class="section-label section-recommended" style="margin-top:32px">
+          <span>📱 Where Your AI Works</span>
+          <span class="section-priority-badge recommended">Recommended</span>
+        </div>
+        <p class="section-helper">Pick how you'll talk to your AI day-to-day. Mobile access is a game-changer.</p>
 
         <div class="remote-access-tip">
           <span class="remote-tip-icon">📱</span>
@@ -1765,7 +1875,11 @@
         </div>
 
         <!-- Productivity Tools -->
-        <div class="section-label"><span>What Your AI Can Access</span></div>
+        <div class="section-label section-optional" style="margin-top:32px">
+          <span>🛠️ What Your AI Can Access</span>
+          <span class="section-priority-badge optional">Optional</span>
+        </div>
+        <p class="section-helper">Calendar, Sheets, Files, CRM — unlock more skills as you connect more. Skip anything you don't need.</p>
         <div class="selectable-grid" id="toolGrid"></div>
 
         <!-- Credential sections for tools that need API keys (e.g. Voice) -->
@@ -3789,8 +3903,90 @@ function activateLiveMode() {
   if (!convState.currentId) newConversation();
   // Load existing conversations
   loadConversations();
+  // Render the Setup Status panel — shows what's still not connected so the
+  // user can complete onboarding without leaving live mode
+  renderSetupStatusPanel();
   // Check agent is actually running — warn if auto-launch failed
   checkAgentHealth();
+}
+
+/**
+ * Render the Setup Status panel in the live-mode sidebar.
+ * Shows ✓ Connected vs ⚠️ Missing for every essential integration, with
+ * one-click "Set up via Guide Bot" that pre-sends a request to the Guide
+ * Bot to walk the user through the remaining setup step by step.
+ */
+async function renderSetupStatusPanel() {
+  const panel = document.getElementById('setupStatusPanel');
+  if (!panel) return;
+
+  let cfg;
+  try { cfg = await fetch('/api/config').then((r) => r.json()); } catch { return; }
+
+  // Items the user might want to connect — each maps to a Guide Bot prompt
+  // template that triggers a step-by-step setup conversation.
+  const ITEMS = [
+    { id:'ai',        name:'AI Model',           icon:'🤖', test: () => !!cfg.credentials?.openaiKey || !!cfg.credentials?.anthropicKey || !!cfg.credentials?.googleKey || !!cfg.credentials?.openrouterKey || !!cfg.credentials?.groqKey, ask: 'I want to add or change my AI API key. Please walk me through it.' },
+    { id:'email',     name:'Email',              icon:'📧', test: () => cfg.channels?.email?.enabled,    ask: 'I want to connect my email. Walk me through it step by step.' },
+    { id:'telegram',  name:'Telegram',           icon:'💬', test: () => cfg.channels?.telegram?.enabled, ask: 'Help me set up Telegram so I can chat with the AI from my phone.' },
+    { id:'whatsapp',  name:'WhatsApp',           icon:'📱', test: () => cfg.channels?.whatsapp?.enabled, ask: 'Help me connect WhatsApp. I want to scan the QR code.' },
+    { id:'calendar',  name:'Calendar',           icon:'📅', test: () => cfg.tools?.calendar?.enabled,    ask: 'Help me connect Google Calendar so the AI can schedule meetings.' },
+    { id:'spreadsheet', name:'Spreadsheets',     icon:'📊', test: () => cfg.tools?.spreadsheet?.enabled, ask: 'Help me connect Google Sheets for invoice and data tracking.' },
+    { id:'voice',     name:'Voice Transcription',icon:'🎙️', test: () => !!cfg.credentials?.groqApiKey || !!cfg.credentials?.openaiVoiceKey, ask: 'Help me set up voice transcription (Groq Whisper — it\'s free).' },
+  ];
+
+  const results  = ITEMS.map((it) => ({ ...it, connected: !!it.test() }));
+  const connected = results.filter((r) => r.connected).length;
+  const total     = results.length;
+  const pct       = Math.round((connected / total) * 100);
+  const allDone   = connected === total;
+
+  panel.innerHTML = `
+    <div class="setup-status-header">
+      <span>Setup Status</span>
+      <span class="setup-status-pct ${allDone?'complete':''}">${connected}/${total}</span>
+    </div>
+    <div class="setup-progress-bar ${allDone?'setup-status-complete':''}">
+      <div class="setup-progress-fill" style="width:${pct}%"></div>
+    </div>
+    <div class="setup-status-items">
+      ${results.map((r) => `
+        <div class="setup-status-item ${r.connected?'connected':'missing'}"
+             onclick="${r.connected?`onSetupItemClick('${r.id}', true)`:`onSetupItemClick('${r.id}', false, ${JSON.stringify(r.ask).replace(/"/g, '&quot;')})`}">
+          <span class="icon">${r.icon}</span>
+          <span class="name">${r.name}</span>
+          <span class="action">${r.connected?'✓':'+ Add'}</span>
+        </div>
+      `).join('')}
+    </div>
+    <button class="setup-status-add-btn" onclick="openSettings()">⚙️ Manage all integrations</button>
+  `;
+}
+
+/**
+ * Handle click on a Setup Status item.
+ * - connected item: opens the Settings flow on that section (advanced edit)
+ * - missing item: sends a pre-canned message into the Guide Bot chat so the
+ *   bot walks the user through setup conversationally
+ */
+function onSetupItemClick(itemId, connected, askPrompt) {
+  if (connected) {
+    // Already connected — open settings so user can modify if they want
+    openSettings();
+    return;
+  }
+  if (askPrompt) {
+    // Inject the prompt into the chat input and send it. The Guide Bot's
+    // system prompt has step-by-step instructions for every integration.
+    const input = document.getElementById('guideInput');
+    if (input) {
+      input.value = askPrompt;
+      // Trigger the send button so the message goes through the normal pipeline
+      const sendBtn = document.querySelector('[onclick*="sendGuideMessage"], #sendGuideBtn');
+      if (sendBtn) sendBtn.click();
+      else if (typeof sendGuideMessage === 'function') sendGuideMessage();
+    }
+  }
 }
 
 // Verify agent is up; show a gentle warning banner if not
@@ -4269,6 +4465,11 @@ function markWizardCardConnected(slug, integrationName) {
   // Show a brief toast so the user notices the update even if they're scrolled
   const name = integrationName || slug;
   toast(`✅ ${name} connected!`, 'success');
+
+  // Re-render the live-mode Setup Status panel so the badge flips immediately
+  if (typeof renderSetupStatusPanel === 'function') {
+    renderSetupStatusPanel().catch(() => {});
+  }
 }
 
 function buildToolCard(toolName, status, input) {
