@@ -354,6 +354,49 @@ export async function startDashboard(port = 3456): Promise<void> {
     }
   });
 
+  // --- Unified Integration Snapshot (Tier 1 Connection Foundation) ---
+  // Returns a single snapshot of every registered integration's status +
+  // recent probe history + auto-recovery state. The dashboard reads this
+  // for live status badges so they reflect REAL liveness (background
+  // probes run every 60s) instead of one-shot field-presence checks.
+  app.get("/api/integrations/snapshot", requireLocalOrigin, async (_req, res) => {
+    try {
+      const { healthMonitor } = await import("../../integrations/healthMonitor.js");
+      const { integrationRegistry } = await import("../../integrations/registry.js");
+      res.json({
+        generatedAt: new Date().toISOString(),
+        meta:        integrationRegistry.meta(),
+        snapshot:    healthMonitor.snapshot(),
+      });
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  // --- Manually probe a single integration (live API call right now) ---
+  app.post("/api/integrations/:id/probe", requireLocalOrigin, async (req, res) => {
+    try {
+      const { integrationRegistry } = await import("../../integrations/registry.js");
+      const integration = integrationRegistry.get(String(req.params.id));
+      if (!integration) return res.status(404).json({ error: `Unknown integration: ${req.params.id}` });
+      const probe = await integration.probe();
+      res.json({ id: integration.id, displayName: integration.displayName, probe });
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  // --- Reset a single integration (wipes session state + reconnects) ---
+  app.post("/api/integrations/:id/reset", requireLocalOrigin, async (req, res) => {
+    try {
+      const { integrationRegistry } = await import("../../integrations/registry.js");
+      const result = await integrationRegistry.reset(String(req.params.id));
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ ok: false, message: String(err) });
+    }
+  });
+
   // --- Live Connection Diagnostics ---
   // Runs an actual API call against each configured integration's endpoint
   // and reports per-integration pass/fail with the specific error. This is

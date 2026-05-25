@@ -401,8 +401,19 @@ function _getOrCreateSession(chatId: string): AgentContext {
 // Emitter helpers
 // ---------------------------------------------------------------------------
 
+// Cache the last status so consumers can read it synchronously without
+// subscribing. The Integration adapter uses this for getStatus() — calling
+// the worker over IPC for every status check would be wasteful.
+let _lastStatus: BaileysStatus | null = null;
+
 function _emitStatus(status: BaileysStatus): void {
+  _lastStatus = status;
   for (const fn of statusListeners) fn(status);
+}
+
+/** Last status reported by the Baileys worker. null if never started. */
+export function getLastBaileysStatus(): BaileysStatus | null {
+  return _lastStatus;
 }
 
 // ---------------------------------------------------------------------------

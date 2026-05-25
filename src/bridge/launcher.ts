@@ -237,6 +237,22 @@ export async function launchAgent(): Promise<AgentInstance> {
 
   await svcMgr.startAll(context, registry);
 
+  // ── Register integrations with the unified registry ──────────────────────
+  // Each adapter implements the Integration interface so the HealthMonitor
+  // can probe + auto-recover them uniformly. This is the new pattern
+  // replacing per-service ad-hoc status checks.
+  const { integrationRegistry } = await import("../integrations/registry.js");
+  const { healthMonitor } = await import("../integrations/healthMonitor.js");
+
+  if (hasWhatsApp) {
+    const { WhatsAppIntegration } = await import("../integrations/whatsappIntegration.js");
+    integrationRegistry.register(new WhatsAppIntegration(() => context));
+  }
+
+  // Start the background health monitor (probes every 60s, auto-recovers
+  // known-recoverable failures). Idempotent — safe to call even if already running.
+  healthMonitor.start();
+
   return {
     context,
     registry,
@@ -246,6 +262,8 @@ export async function launchAgent(): Promise<AgentInstance> {
     serviceManager: svcMgr,
     runTask: (message: string) => agentLoop(message, context, registry),
     stop: async () => {
+      const { healthMonitor: hm } = await import("../integrations/healthMonitor.js");
+      hm.stop();
       await svcMgr.stopAll();
       scheduler.stopAll();
       await memory.save();
