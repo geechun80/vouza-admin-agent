@@ -440,6 +440,21 @@ export async function startDashboard(port = 3456): Promise<void> {
       results.push({ name: "Telegram", ok: false, skipped: true, error: "Not configured" });
     }
 
+    // ── WhatsApp (Baileys) — check listener state ────────────────────────
+    if (config.channels?.whatsapp?.enabled && config.channels.whatsapp.provider === "web") {
+      const baileysState = isBaileysConnected() ? "connected" : "not-connected";
+      const status = baileysState === "connected" ? "✓ Linked to WhatsApp" : "⚠ Not linked — click Connect WhatsApp to scan a fresh QR";
+      results.push({
+        name: "WhatsApp (Baileys)",
+        ok: baileysState === "connected",
+        latencyMs: 0,
+        skipped: false,
+        detail: status,
+        keyPreview: "(no key — QR scan)",
+        error: baileysState === "connected" ? undefined : "Not connected. Common causes: 4-linked-device limit reached, antivirus blocking WebSocket, or stale auth in data/whatsapp-auth/.",
+      });
+    }
+
     // ── Voice (Groq Whisper) ─────────────────────────────────────────────
     if (creds.groqApiKey) {
       results.push(await time("Voice (Groq Whisper)", async () => {

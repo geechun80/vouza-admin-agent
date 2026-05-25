@@ -2593,7 +2593,12 @@ const SKILL_PRESETS = [
 
 const CRED_CONFIGS = {
   whatsapp: {
-    web:    { title:'WhatsApp Web (QR Code)', icon:'whatsapp', testType:'whatsapp-web', fields:[{id:'waWebServer',label:'Server URL',type:'text',placeholder:'http://localhost:3001',hint:'Start the QR server, then scan with your phone'}] },
+    // Baileys built-in flow needs NO fields — the dashboard generates a QR
+    // automatically. Earlier versions asked for a "Server URL" which confused
+    // users (it was only used by the legacy external-server flow, not Baileys).
+    // Customers typed http://localhost:3001 or even the public web.whatsapp.com
+    // URL there, then wondered why connection hung. Removed entirely.
+    web:    { title:'WhatsApp Web (Free — QR Scan)', icon:'whatsapp', testType:'whatsapp-web', fields:[], info:'No setup needed here. After saving, click the green <strong>Connect WhatsApp</strong> button below to generate a QR code and scan it from your phone (WhatsApp → Settings → Linked Devices → Link a Device).' },
     twilio: { title:'WhatsApp via Twilio', icon:'whatsapp', testType:'whatsapp', fields:[{id:'twilioSid',label:'Account SID',type:'text',placeholder:'ACxxx'},{id:'twilioToken',label:'Auth Token',type:'password',placeholder:'token'},{id:'twilioNum',label:'WhatsApp Number',type:'text',placeholder:'+1415...'}] },
     meta:   { title:'WhatsApp Cloud API', icon:'whatsapp', testType:'whatsapp-meta', fields:[{id:'metaToken',label:'Access Token',type:'password',placeholder:'EAAxx'},{id:'metaPhoneId',label:'Phone Number ID',type:'text',placeholder:'123456'}] },
     waha:   { title:'WAHA (Self-hosted)', icon:'whatsapp', testType:'waha', fields:[{id:'wahaUrl',label:'WAHA Server URL',type:'text',placeholder:'http://localhost:3000',hint:'URL where WAHA is running (default port 3000)'},{id:'wahaSession',label:'Session Name',type:'text',placeholder:'default',hint:'Session name from your WAHA dashboard (usually "default")'},{id:'wahaKey',label:'API Key',type:'password',placeholder:'optional',hint:'Only if your WAHA requires authentication'}] },
@@ -3530,15 +3535,23 @@ function buildWhatsAppWebQRCard(isConnected) {
                </div>
              </div>
              <div id="wa-qr-status" style="color:var(--text-dim);font-size:13px;margin-bottom:12px"></div>
-             <button id="wa-connect-btn" class="btn btn-primary" onclick="waQRConnect()">📱 Connect WhatsApp</button>
+             <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+               <button id="wa-connect-btn" class="btn btn-primary" onclick="waQRConnect()">📱 Connect WhatsApp</button>
+               <button class="btn btn-ghost" style="font-size:12px" onclick="waQRReset()" title="Wipe stale credentials and start a fresh QR connection">🔄 Reset connection</button>
+             </div>
              <div id="wa-reset-hint" style="display:none;margin-top:14px;padding:10px 12px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.25);border-radius:8px;font-size:12px;color:var(--text-dim);text-align:left">
-               <div style="color:#f59e0b;font-weight:600;margin-bottom:4px">⚠️ Getting "Invalid QR code"?</div>
-               This usually means stale credentials from a previous attempt. Click below to wipe them and start fresh.
-               <button class="btn btn-ghost" style="display:block;margin-top:8px;font-size:12px;width:100%" onclick="waQRReset()">🔄 Reset and start fresh</button>
+               <div style="color:#f59e0b;font-weight:600;margin-bottom:4px">⚠️ Getting "Invalid QR code" or "Check your connection"?</div>
+               Possible causes:
+               <ul style="margin:6px 0 0 18px;padding:0;line-height:1.7">
+                 <li>Stale credentials — click <strong>Reset connection</strong> above</li>
+                 <li>WhatsApp's <strong>4-linked-device limit</strong> reached (Settings → Linked Devices)</li>
+                 <li>Firewall blocking Baileys WebSocket — temporarily disable antivirus</li>
+                 <li>Phone has no internet — open a chat, try sending a message</li>
+               </ul>
              </div>`
         }
       </div>
-      <div class="hint">💡 Open WhatsApp on your phone → <strong>Settings → Linked Devices → Link a Device</strong> → scan the QR code above.</div>
+      <div class="hint">💡 Open WhatsApp on your phone → <strong>Settings → Linked Devices → Link a Device</strong> → scan the QR code above. Make sure your phone has internet and you haven't already linked 4 devices.</div>
     </div>`;
 }
 
