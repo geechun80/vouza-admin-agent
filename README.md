@@ -109,6 +109,77 @@ The setup wizard will guide you through:
 
 ---
 
+## Running with Docker (recommended for servers / cloud)
+
+For self-hosters, VPS deployments, or any "always-on" install where you don't want to manage Node + PM2 yourself.
+
+### Prerequisites
+
+- **Docker Desktop** (Win/Mac) or **Docker Engine** (Linux): [docker.com/get-started](https://www.docker.com/get-started)
+- That's it — no Node, no npm, no PM2 required
+
+### Quick start
+
+```bash
+# 1. Clone the repo
+git clone https://github.com/geechun80/vouza-admin-agent.git
+cd vouza-admin-agent
+
+# 2. Create your .env file (copy and customize)
+cp .env.example .env
+# Edit .env to set VOUZA_API_KEY=sk-or-v1-... at minimum
+
+# 3. Launch
+docker compose up -d
+
+# 4. Open the dashboard
+open http://localhost:3456    # macOS
+xdg-open http://localhost:3456 # Linux
+start http://localhost:3456    # Windows
+```
+
+That's it. The agent runs in the background, auto-restarts on crash, and survives reboots.
+
+### Daily Docker commands
+
+| Command | What it does |
+|---|---|
+| `docker compose up -d` | Start in background |
+| `docker compose logs -f` | Tail live logs (Ctrl+C to exit) |
+| `docker compose restart admin-agent` | Restart after config changes |
+| `docker compose down` | Stop everything gracefully |
+| `docker compose pull && docker compose up -d --build` | Update to latest |
+| `docker compose ps` | Show running containers |
+
+### With WAHA (optional WhatsApp HTTP API)
+
+If you want the WAHA integration (most users don't — Baileys QR works without it):
+
+```bash
+docker compose --profile waha up -d
+```
+
+This also starts the WAHA container on port 3000. WAHA stores its session in `./data/waha-sessions/`.
+
+### Data persistence
+
+The `./data/` directory is bind-mounted, so:
+- Your config / credentials / conversations survive container restarts
+- You can back up by zipping `./data/`
+- You can inspect files directly without entering the container
+
+### Updating
+
+```bash
+git pull
+docker compose build --no-cache
+docker compose up -d
+```
+
+The container rebuilds with the new code; data is preserved.
+
+---
+
 ## Running in the background (production setup)
 
 To keep the agent running 24/7 — even after reboot, crashes, or you closing the terminal — you have **two options**. Pick the one that fits your OS and comfort level.

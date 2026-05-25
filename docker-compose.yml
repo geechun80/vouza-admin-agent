@@ -1,0 +1,64 @@
+# =============================================================================
+# Vouza Admin Agent — Docker Compose
+#
+# Single-command launch for self-hosters and dev environments.
+#   docker compose up -d        # start everything in background
+#   docker compose logs -f      # tail live logs
+#   docker compose down         # graceful stop
+#   docker compose pull         # update to latest images
+#
+# Files & env:
+#   - .env at repo root (copy from .env.example and fill in your keys)
+#   - data/ volume persists config, conversations, WhatsApp auth, etc.
+# =============================================================================
+
+services:
+
+  # ── Main Vouza Admin Agent ────────────────────────────────────────────────
+  admin-agent:
+    build: .
+    image: vouza-admin-agent:latest
+    container_name: vouza-admin-agent
+    restart: unless-stopped
+    ports:
+      # Dashboard / API on 3456. If you need remote access, set
+      # DASHBOARD_BIND=0.0.0.0 + DASHBOARD_PASSWORD in .env so auth is enforced.
+      - "3456:3456"
+    volumes:
+      # Persists config, conversations, memories, WhatsApp auth, logs.
+      # Bind mount (./data) so you can also inspect/back up from host.
+      - ./data:/app/data
+    environment:
+      # Required: operator-supplied AI key (Anthropic/OpenAI/OpenRouter/etc.)
+      # When set, customers can chat with the Guide Bot before adding their own key.
+      VOUZA_API_KEY:      ${VOUZA_API_KEY:-}
+      VOUZA_API_PROVIDER: ${VOUZA_API_PROVIDER:-openrouter}
+      VOUZA_API_MODEL:    ${VOUZA_API_MODEL:-google/gemini-2.5-flash-lite}
+      VOUZA_BRAND_NAME:   ${VOUZA_BRAND_NAME:-Vouza}
+      # Remote dashboard access — leave unset for local-only (default safe)
+      DASHBOARD_BIND:     ${DASHBOARD_BIND:-0.0.0.0}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
+      LOG_LEVEL:          ${LOG_LEVEL:-info}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3456/api/operator-defaults > /dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  # ── Optional: WAHA (WhatsApp HTTP API) ────────────────────────────────────
+  # Enable with: docker compose --profile waha up -d
+  # If you don't need WAHA, the agent uses the built-in Baileys (QR scan) which
+  # needs zero extra services. Only enable WAHA if you specifically want a
+  # WhatsApp Business API style integration.
+  waha:
+    image: ghcr.io/devlikeapro/waha:latest
+    container_name: vouza-waha
+    restart: unless-stopped
+    profiles: ["waha"]
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data/waha-sessions:/app/.sessions
+    environment:
+      WAHA_PRINT_QR: "false"
