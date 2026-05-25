@@ -276,6 +276,24 @@ export async function launchAgent(): Promise<AgentInstance> {
     integrationRegistry.register(new EmailIntegration(() => context));
   }
 
+  // ── MCP — Model Context Protocol ────────────────────────────────────────
+  // Load + connect any configured MCP servers, bridge their tools into the
+  // agent's tool registry, and register the MCP Integration adapter so the
+  // dashboard shows aggregate status alongside native integrations.
+  try {
+    const { mcpClientManager } = await import("../mcp/client.js");
+    await mcpClientManager.loadFromDisk();
+    await mcpClientManager.connectAll();
+    const { bridgeMcpToolsIntoRegistry } = await import("../mcp/toolBridge.js");
+    bridgeMcpToolsIntoRegistry(registry);
+    const { McpIntegration } = await import("../integrations/mcpIntegration.js");
+    integrationRegistry.register(new McpIntegration());
+  } catch (err) {
+    // MCP failure must NEVER block the agent from starting — log and continue
+    const { logger } = await import("../util/logger.js");
+    logger.warn({ event: "mcp_init_failed", err: String(err) }, "MCP initialization failed (continuing without)");
+  }
+
   // Start the background health monitor (probes every 60s, auto-recovers
   // known-recoverable failures). Idempotent — safe to call even if already running.
   healthMonitor.start();

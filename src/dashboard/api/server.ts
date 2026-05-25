@@ -354,6 +354,62 @@ export async function startDashboard(port = 3456): Promise<void> {
     }
   });
 
+  // --- MCP (Model Context Protocol) ---
+  // List configured servers + curated suggestions for the dashboard.
+  // Power-user feature — non-tech users don't see this in the wizard.
+  app.get("/api/mcp/servers", requireLocalOrigin, async (_req, res) => {
+    try {
+      const { mcpClientManager } = await import("../../mcp/client.js");
+      const { MCP_SUGGESTIONS } = await import("../../mcp/suggestions.js");
+      res.json({
+        servers:     mcpClientManager.list(),
+        status:      mcpClientManager.getAllStatus(),
+        suggestions: MCP_SUGGESTIONS,
+        toolCount:   mcpClientManager.getAllTools().length,
+      });
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  // Add or update a server config (re-applies + reconnects)
+  app.post("/api/mcp/servers", requireLocalOrigin, async (req, res) => {
+    try {
+      const { mcpClientManager } = await import("../../mcp/client.js");
+      const config = req.body;
+      if (!config?.id || !config?.command) {
+        return res.status(400).json({ error: "MCP server config requires id and command" });
+      }
+      await mcpClientManager.upsertServer(config);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  // Remove a server entirely
+  app.delete("/api/mcp/servers/:id", requireLocalOrigin, async (req, res) => {
+    try {
+      const { mcpClientManager } = await import("../../mcp/client.js");
+      await mcpClientManager.removeServer(String(req.params.id));
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  // Manually reconnect a server (e.g. after fixing its env vars)
+  app.post("/api/mcp/servers/:id/connect", requireLocalOrigin, async (req, res) => {
+    try {
+      const { mcpClientManager } = await import("../../mcp/client.js");
+      await mcpClientManager.disconnect(String(req.params.id));
+      await mcpClientManager.connect(String(req.params.id));
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: String(err) });
+    }
+  });
+
   // --- Unified Integration Snapshot (Tier 1 Connection Foundation) ---
   // Returns a single snapshot of every registered integration's status +
   // recent probe history + auto-recovery state. The dashboard reads this
