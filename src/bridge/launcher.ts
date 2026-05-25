@@ -249,6 +249,11 @@ export async function launchAgent(): Promise<AgentInstance> {
     integrationRegistry.register(new WhatsAppIntegration(() => context));
   }
 
+  if (hasTelegram) {
+    const { TelegramIntegration } = await import("../integrations/telegramIntegration.js");
+    integrationRegistry.register(new TelegramIntegration(() => context, () => registry));
+  }
+
   // Start the background health monitor (probes every 60s, auto-recovers
   // known-recoverable failures). Idempotent — safe to call even if already running.
   healthMonitor.start();

@@ -71,6 +71,25 @@ let _webhookSecret:   string               = "";
 /** Return the webhook secret so server.ts can verify incoming Telegram updates. */
 export function getWebhookSecret(): string { return _webhookSecret; }
 
+/**
+ * Snapshot of the listener's current runtime state. Used by the Integration
+ * adapter to report status to the unified registry / dashboard without
+ * needing to make any network calls.
+ */
+export function getTelegramListenerState(): {
+  hasToken:    boolean;
+  webhookActive: boolean;
+  pollingActive: boolean;
+  botToken?:    string;
+} {
+  return {
+    hasToken:      !!_webhookToken || !!_webhookCtx || _polling,
+    webhookActive: !!_webhookToken,
+    pollingActive: _polling,
+    botToken:      _webhookToken || undefined,
+  };
+}
+
 // Polling-mode running flag + offset
 let _polling      = false;
 let updateOffset  = 0;
