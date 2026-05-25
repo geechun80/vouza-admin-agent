@@ -261,6 +261,21 @@ export async function launchAgent(): Promise<AgentInstance> {
     integrationRegistry.register(new TelegramIntegration(() => context, () => registry));
   }
 
+  if (hasAgentMail) {
+    const { AgentMailIntegration } = await import("../integrations/agentMailIntegration.js");
+    integrationRegistry.register(new AgentMailIntegration(() => context, () => registry));
+  }
+
+  if (hasVoice) {
+    const { VoiceIntegration } = await import("../integrations/voiceIntegration.js");
+    integrationRegistry.register(new VoiceIntegration(() => context));
+  }
+
+  if (hasEmail) {
+    const { EmailIntegration } = await import("../integrations/emailIntegration.js");
+    integrationRegistry.register(new EmailIntegration(() => context));
+  }
+
   // Start the background health monitor (probes every 60s, auto-recovers
   // known-recoverable failures). Idempotent — safe to call even if already running.
   healthMonitor.start();

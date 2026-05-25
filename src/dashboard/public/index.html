@@ -4276,6 +4276,9 @@ function activateLiveMode() {
   // Render the Setup Status panel — shows what's still not connected so the
   // user can complete onboarding without leaving live mode
   renderSetupStatusPanel();
+  // Auto-refresh every 30s so badges reflect live probe results from
+  // /api/integrations/snapshot without requiring manual reloads
+  startSetupStatusAutoRefresh();
   // Check agent is actually running — warn if auto-launch failed
   checkAgentHealth();
   // Start the live-status dot polling (small dot next to agent name)
@@ -4288,51 +4291,98 @@ function activateLiveMode() {
  * one-click "Set up via Guide Bot" that pre-sends a request to the Guide
  * Bot to walk the user through the remaining setup step by step.
  */
+// Maps the Setup Status item ID to the corresponding Integration registry ID.
+// Lets us layer LIVE probe results from /api/integrations/snapshot on top
+// of the configured-vs-not status read from /api/config. So the dot reflects
+// real liveness, not just field presence.
+const SETUP_ITEM_TO_INTEGRATION = {
+  ai:        'ai-provider',
+  email:     'email',
+  telegram:  'telegram',
+  whatsapp:  'whatsapp',
+  voice:     'voice',
+  // calendar + spreadsheet adapters come in a later commit
+};
+
 async function renderSetupStatusPanel() {
   const panel = document.getElementById('setupStatusPanel');
   if (!panel) return;
 
-  let cfg;
-  try { cfg = await fetch('/api/config').then((r) => r.json()); } catch { return; }
+  // Fetch config + operator defaults + integration snapshot in parallel.
+  // Snapshot may not be available on older agents — fall back to config-only.
+  const [cfg, op, snap] = await Promise.all([
+    fetch('/api/config').then((r) => r.json()).catch(() => null),
+    fetch('/api/operator-defaults').then((r) => r.json()).catch(() => ({})),
+    fetch('/api/integrations/snapshot').then((r) => r.ok ? r.json() : null).catch(() => null),
+  ]);
+  if (!cfg) return;
 
-  // Items the user might want to connect — each maps to a Guide Bot prompt
-  // template that triggers a step-by-step setup conversation.
-  //
-  // AI-key detection: must match the field names the loader.ts actually reads
-  // (openrouterApiKey, anthropicApiKey, etc.) — NOT openrouterKey/anthropicKey
-  // which earlier versions mistakenly checked. A wrong check showed "+ Add"
-  // even for users who'd already saved their key.
+  // Integration registry snapshot: maps integration-id → { status, lastProbe, ... }
+  // Status enum: disabled | unconfigured | connecting | connected | degraded | failed | cooldown
+  const liveStatuses = snap?.snapshot || {};
+
+  // AI-key detection must match loader.ts field names exactly
   const creds = cfg.credentials || {};
   const hasAnyUserAiKey =
-    !!creds.openaiApiKey ||
-    !!creds.anthropicApiKey ||
-    !!creds.googleApiKey || !!creds.googleAiApiKey ||
-    !!creds.openrouterApiKey ||
-    !!creds.xaiApiKey ||
-    !!creds.deepseekApiKey ||
-    !!creds.moonshotApiKey ||
+    !!creds.openaiApiKey || !!creds.anthropicApiKey ||
+    !!creds.googleApiKey || !!creds.googleAiApiKey || !!creds.openrouterApiKey ||
+    !!creds.xaiApiKey || !!creds.deepseekApiKey || !!creds.moonshotApiKey ||
     !!creds.alibabaApiKey || !!creds.dashscopeApiKey;
-  // Also count as connected when the operator's Vouza fallback key is active
-  // (hasDefaultKey is exposed by /api/operator-defaults and reflects whether
-  // process.env.VOUZA_API_KEY is set on the server)
-  let hasOperatorKey = false;
-  try {
-    const op = await fetch('/api/operator-defaults').then(r => r.json()).catch(() => ({}));
-    hasOperatorKey = !!op.hasDefaultKey;
-  } catch { /* non-fatal */ }
+  const hasOperatorKey = !!op.hasDefaultKey;
 
   const ITEMS = [
-    { id:'ai',        name:'AI Model',           icon:'🤖', test: () => hasAnyUserAiKey || hasOperatorKey, ask: 'I want to add or change my AI API key. Please walk me through it.' },
-    { id:'email',     name:'Email',              icon:'📧', test: () => cfg.channels?.email?.enabled,    ask: 'I want to connect my email. Walk me through it step by step.' },
-    { id:'telegram',  name:'Telegram',           icon:'💬', test: () => cfg.channels?.telegram?.enabled, ask: 'Help me set up Telegram so I can chat with the AI from my phone.' },
-    { id:'whatsapp',  name:'WhatsApp',           icon:'📱', test: () => cfg.channels?.whatsapp?.enabled, ask: 'Help me connect WhatsApp. I want to scan the QR code.' },
-    { id:'calendar',  name:'Calendar',           icon:'📅', test: () => cfg.tools?.calendar?.enabled,    ask: 'Help me connect Google Calendar so the AI can schedule meetings.' },
-    { id:'spreadsheet', name:'Spreadsheets',     icon:'📊', test: () => cfg.tools?.spreadsheet?.enabled, ask: 'Help me connect Google Sheets for invoice and data tracking.' },
-    { id:'voice',     name:'Voice Transcription',icon:'🎙️', test: () => !!creds.groqApiKey || !!creds.openaiVoiceKey, ask: 'Help me set up voice transcription (Groq Whisper — it\'s free).' },
+    { id:'ai',          name:'AI Model',            icon:'🤖', test: () => hasAnyUserAiKey || hasOperatorKey, ask: 'I want to add or change my AI API key. Please walk me through it.' },
+    { id:'email',       name:'Email',               icon:'📧', test: () => cfg.channels?.email?.enabled,    ask: 'I want to connect my email. Walk me through it step by step.' },
+    { id:'telegram',    name:'Telegram',            icon:'💬', test: () => cfg.channels?.telegram?.enabled, ask: 'Help me set up Telegram so I can chat with the AI from my phone.' },
+    { id:'whatsapp',    name:'WhatsApp',            icon:'📱', test: () => cfg.channels?.whatsapp?.enabled, ask: 'Help me connect WhatsApp. I want to scan the QR code.' },
+    { id:'calendar',    name:'Calendar',            icon:'📅', test: () => cfg.tools?.calendar?.enabled,    ask: 'Help me connect Google Calendar so the AI can schedule meetings.' },
+    { id:'spreadsheet', name:'Spreadsheets',        icon:'📊', test: () => cfg.tools?.spreadsheet?.enabled, ask: 'Help me connect Google Sheets for invoice and data tracking.' },
+    { id:'voice',       name:'Voice Transcription', icon:'🎙️', test: () => !!creds.groqApiKey || !!creds.openaiVoiceKey, ask: 'Help me set up voice transcription (Groq Whisper — it\'s free).' },
   ];
 
-  const results  = ITEMS.map((it) => ({ ...it, connected: !!it.test() }));
-  const connected = results.filter((r) => r.connected).length;
+  // For each item, layer:
+  //   1. configured?  (from /api/config — is the credential present)
+  //   2. liveStatus?  (from /api/integrations/snapshot — is it actually working)
+  // If both available, dot color reflects the live probe; if not, fall back to configured.
+  const results = ITEMS.map((it) => {
+    const configured = !!it.test();
+    const integrationId = SETUP_ITEM_TO_INTEGRATION[it.id];
+    const live = integrationId ? liveStatuses[integrationId] : undefined;
+    let dotClass = configured ? 'ok' : '';
+    let tooltip  = configured ? 'Configured' : 'Not configured';
+    let action   = configured ? '✓' : '+ Add';
+
+    if (live?.status) {
+      switch (live.status) {
+        case 'connected':
+          dotClass = 'ok';
+          tooltip = live.status.message || 'Connected and live';
+          break;
+        case 'connecting':
+          dotClass = 'warn';
+          tooltip = (live.status.message || 'Connecting') + ' …';
+          action = '…';
+          break;
+        case 'degraded':
+          dotClass = 'warn';
+          tooltip = `Degraded: ${live.status.message || 'recent probe failed'}`;
+          action = '⚠';
+          break;
+        case 'failed':
+          dotClass = 'bad';
+          tooltip = `Failed: ${live.status.message || 'check key'}`;
+          action = '⚠ Fix';
+          break;
+        case 'unconfigured':
+        case 'disabled':
+          dotClass = '';
+          break;
+      }
+    }
+    return { ...it, configured, dotClass, tooltip, action };
+  });
+
+  const connected = results.filter((r) => r.configured).length;
   const total     = results.length;
   const pct       = Math.round((connected / total) * 100);
   const allDone   = connected === total;
@@ -4347,17 +4397,30 @@ async function renderSetupStatusPanel() {
     </div>
     <div class="setup-status-items">
       ${results.map((r) => `
-        <div class="setup-status-item ${r.connected?'connected':'missing'}" data-channel-id="${r.id}"
-             onclick="${r.connected?`onSetupItemClick('${r.id}', true)`:`onSetupItemClick('${r.id}', false, ${JSON.stringify(r.ask).replace(/"/g, '&quot;')})`}">
-          ${r.connected ? `<span class="live-dot ok" title="Connected — live" aria-label="Connected and live"></span>` : ''}
+        <div class="setup-status-item ${r.configured?'connected':'missing'}" data-channel-id="${r.id}"
+             onclick="${r.configured?`onSetupItemClick('${r.id}', true)`:`onSetupItemClick('${r.id}', false, ${JSON.stringify(r.ask).replace(/"/g, '&quot;')})`}">
+          ${r.dotClass ? `<span class="live-dot ${r.dotClass}" title="${escHtml(r.tooltip)}" aria-label="${escHtml(r.tooltip)}"></span>` : ''}
           <span class="icon">${r.icon}</span>
           <span class="name">${r.name}</span>
-          <span class="action">${r.connected?'✓':'+ Add'}</span>
+          <span class="action">${r.action}</span>
         </div>
       `).join('')}
     </div>
     <button class="setup-status-add-btn" onclick="openSettings()">⚙️ Manage all integrations</button>
   `;
+}
+
+// Auto-refresh the Setup Status panel every 30s so live probes are reflected
+// without the user clicking around. Started on live-mode entry; stopped when
+// leaving. Defensive: clears any prior timer to avoid leaks on hot reload.
+let _setupStatusAutoRefreshTimer = null;
+function startSetupStatusAutoRefresh() {
+  if (_setupStatusAutoRefreshTimer) clearInterval(_setupStatusAutoRefreshTimer);
+  _setupStatusAutoRefreshTimer = setInterval(() => {
+    if (!document.getElementById('mainApp')?.classList.contains('live-mode')) return;
+    renderSetupStatusPanel().catch(() => {});
+  }, 30_000);
+  if (_setupStatusAutoRefreshTimer.unref) _setupStatusAutoRefreshTimer.unref();
 }
 
 /**
