@@ -244,6 +244,13 @@ export async function launchAgent(): Promise<AgentInstance> {
   const { integrationRegistry } = await import("../integrations/registry.js");
   const { healthMonitor } = await import("../integrations/healthMonitor.js");
 
+  // AI provider is ALWAYS registered — without it, the agent can't think.
+  // The adapter probes the resolved key (user OR operator fallback) every
+  // 60s, catching revoked / expired / wrong-format keys in the dashboard
+  // long before a user-triggered message returns 401.
+  const { AIProviderIntegration } = await import("../integrations/aiProviderIntegration.js");
+  integrationRegistry.register(new AIProviderIntegration(() => context));
+
   if (hasWhatsApp) {
     const { WhatsAppIntegration } = await import("../integrations/whatsappIntegration.js");
     integrationRegistry.register(new WhatsAppIntegration(() => context));
