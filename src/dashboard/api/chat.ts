@@ -35,7 +35,11 @@ import {
 import { sendWhatsAppMessageTool, readWhatsAppMessagesTool } from "../../tools/whatsapp.js";
 import { saveMemoryTool, searchMemoryTool, forgetMemoryTool } from "../../tools/memory.js";
 import { transcribeAudioTool, transcribeAndSummarizeTool } from "../../tools/voice.js";
-import { getSetupStatusTool, saveIntegrationCredentialsTool } from "../../tools/setup.js";
+import {
+  getSetupStatusTool,
+  saveIntegrationCredentialsTool,
+  runIntegrationPipelineTool,
+} from "../../tools/setup.js";
 import { testCredentialTool } from "../../tools/setupValidator.js";
 import { webSearchTool } from "../../tools/webSearch.js";
 import { runShellCommandTool } from "../../tools/shell.js";
@@ -337,7 +341,39 @@ intimidating to non-technical users. Use phrases like "you're nearly done",
 
 **Never tell the user "go back to the setup wizard"** — that's the wrong UX.
 You ARE the setup wizard now. Drive the conversation to completion through
-the chat itself.`;
+the chat itself.
+
+## ── INTEGRATION PIPELINE (PREFERRED FOR GMAIL · GOOGLE CALENDAR · TELEGRAM · WHATSAPP) ──
+For gmail, google_calendar, telegram, and whatsapp, PREFER the
+run_integration_pipeline tool over save_integration_credentials.
+
+**Single-call contract:**
+Call run_integration_pipeline ONCE with the credentials. The pipeline runs
+detect → validate → test → save → confirm → live-test in a single call and
+returns a structured result. Do NOT retry on failure — the result already
+contains the exact human-readable error and the specific fix the user needs
+to apply. Relay both verbatim and WAIT for the user.
+
+**How to read the result:**
+- success=true → tell the user with the data returned (bot username, event title, etc.)
+- success=false + doNotRetry=true → the user must change something. Show
+  error + suggestedFix. Do NOT call the tool again until the user sends new
+  input.
+- success=false + doNotRetry=false → a transient failure (network etc.).
+  Mention it briefly; if the user wants, retry once.
+
+**Argument shapes:**
+- telegram: integration "telegram", credentials { telegramToken }
+- gmail (App Password): integration "gmail", credentials { gmailUser, gmailPass }
+- gmail / google_calendar (Service Account): integration "gmail" or "google_calendar",
+  credentials { googleSaKey } — pass the JSON either as a single string
+  (paste of the .json file) or as a parsed object. The pipeline normalizes both.
+- whatsapp: integration "whatsapp", credentials {} (Baileys uses QR pairing —
+  no token needed; the pipeline just verifies the worker is reachable)
+
+For all OTHER integrations (outlook, smtp, slack, voice_groq, voice_openai,
+ai_provider, whatsapp_twilio), continue to use save_integration_credentials
+as before — the pipeline does not cover them yet.`;
 
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -733,7 +769,7 @@ function buildRegistry(): ToolRegistry {
     sendWhatsAppMessageTool, readWhatsAppMessagesTool,
     saveMemoryTool, searchMemoryTool, forgetMemoryTool,
     transcribeAudioTool, transcribeAndSummarizeTool,
-    getSetupStatusTool, saveIntegrationCredentialsTool, testCredentialTool,
+    getSetupStatusTool, saveIntegrationCredentialsTool, runIntegrationPipelineTool, testCredentialTool,
     webSearchTool,
     runShellCommandTool,  // Phase 0.5 — sandboxed shell for setup help
   ];

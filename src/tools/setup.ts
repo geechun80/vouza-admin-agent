@@ -18,6 +18,8 @@ import { buildTool } from "./registry.js";
 import { readFile, writeFile, mkdir } from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
+import { getPipeline, googleVariantFor, runPipeline } from "../orchestrator/index.js";
+import { childLogger } from "../util/logger.js";
 
 const CONFIG_PATH = path.resolve(process.cwd(), "data", "config.json");
 
@@ -1071,5 +1073,85 @@ export const saveIntegrationCredentialsTool = buildTool({
     } catch (err) {
       return { success: false, error: `Failed to save credentials: ${err}` };
     }
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// run_integration_pipeline — M2 self-healing orchestrator entry point
+//
+// Replaces ad-hoc detect → save dance for supported integrations. ONE call,
+// structured result. The LLM should NOT retry — the result's suggestedFix +
+// doNotRetry flag tell the user exactly what to change (Rule 56).
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const runIntegrationPipelineTool = buildTool({
+  name: "run_integration_pipeline",
+  description:
+    "Run the self-healing setup pipeline for an integration (detect, validate, test, save, confirm, live-test). " +
+    "Use this for gmail, google_calendar, telegram, whatsapp instead of save_integration_credentials — " +
+    "it auto-detects the credential type, runs real probes, and persists in one call. " +
+    "Call ONCE per attempt. If the result has success=false, RELAY the error and suggestedFix " +
+    "verbatim to the user and STOP — do not retry. doNotRetry=true means the user must change " +
+    "something before another call will succeed.",
+  category: "system",
+  isReadOnly: false,
+  isConcurrencySafe: false,
+  inputSchema: z.object({
+    integration: z
+      .enum(["gmail", "google_calendar", "telegram", "whatsapp", "whatsapp_baileys"])
+      .describe("Which integration to set up"),
+    credentials: z
+      .record(z.unknown())
+      .optional()
+      .describe(
+        "Credential blob — keys depend on integration. " +
+        "telegram: { telegramToken }. " +
+        "gmail: { gmailUser, gmailPass } OR { googleSaKey }. " +
+        "google_calendar: { googleSaKey } (JSON string or object). " +
+        "whatsapp: optional — Baileys uses QR pairing, no credentials needed here.",
+      ),
+    chatId: z
+      .union([z.string(), z.number()])
+      .optional()
+      .describe("Telegram only — chat_id for the live-test message. Omit for first-time setup."),
+  }),
+  async call(input, ctx): Promise<any> {
+    const pipeline = getPipeline(input.integration);
+    if (!pipeline) {
+      return {
+        success: false,
+        error: `No pipeline registered for integration "${input.integration}".`,
+        doNotRetry: true,
+      };
+    }
+
+    const variant = googleVariantFor(input.integration);
+    const pipelineInput: any = {
+      credentials: input.credentials ?? {},
+      ...(variant ? { variant } : {}),
+      ...(input.chatId !== undefined ? { chatId: input.chatId } : {}),
+    };
+
+    const log = childLogger({
+      component: "orchestrator",
+      integration: input.integration,
+    });
+
+    const result = await runPipeline(pipeline, pipelineInput, {
+      integration: input.integration,
+      logger: log,
+      config: ctx?.config,
+    });
+
+    return {
+      success: result.success,
+      data: result.data,
+      stepReached: result.stepReached,
+      error: result.error,
+      suggestedFix: result.suggestedFix,
+      doNotRetry: result.doNotRetry,
+      // Attempts log intentionally NOT returned — internal fallbacks should
+      // stay silent (Aerick feedback: don't show retry noise in chat).
+    };
   },
 });
