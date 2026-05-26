@@ -24,10 +24,47 @@ import { logger } from "../util/logger.js";
 const PROBE_INTERVAL_MS    = 60_000;  // 60s between full sweeps
 const AUTO_RESET_AFTER     = 3;       // consecutive failures before auto-reset
 const RECENT_WINDOW_MS     = 60 * 60_000; // 1 hour rolling window
+const EVENT_WINDOW_SIZE    = 1000;    // M3 rolling event window per integration
 
 interface ProbeHistoryEntry {
   probe:  IntegrationProbe;
   ts:     number;
+}
+
+/**
+ * Rolling-window event for the observability dashboard (M3).
+ * Distinct from ProbeHistoryEntry — events capture every call/webhook/failure,
+ * not just background probes. Capped at EVENT_WINDOW_SIZE (1000) per integration
+ * via FIFO eviction.
+ */
+export interface HealthEvent {
+  /** Wall-clock ms since epoch when the event occurred. */
+  ts:         number;
+  /** What kind of activity this is. */
+  kind:       "call" | "webhook" | "failure";
+  /** Latency in ms (0 for webhooks where it's not meaningful). */
+  latencyMs:  number;
+  /** Whether the operation succeeded. */
+  ok:         boolean;
+  /** Optional error message for failures. */
+  error?:     string;
+  /** Optional source (e.g. webhook origin, action name). */
+  source?:    string;
+  /** Optional verification result for webhooks. */
+  verified?:  boolean;
+}
+
+/** Compute the Nth percentile (0-100) of a numeric array. Returns 0 for empty. */
+export function percentile(values: number[], p: number): number {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  // Linear interpolation between closest ranks
+  const rank = (p / 100) * (sorted.length - 1);
+  const lo = Math.floor(rank);
+  const hi = Math.ceil(rank);
+  if (lo === hi) return sorted[lo];
+  const frac = rank - lo;
+  return sorted[lo] * (1 - frac) + sorted[hi] * frac;
 }
 
 class HealthMonitor {
@@ -39,6 +76,11 @@ class HealthMonitor {
   private consecutiveFailures: Map<string, number> = new Map();
   // Per-integration last reset attempt time (rate-limit auto-recovery to once per 5 min).
   private lastAutoReset: Map<string, number> = new Map();
+  // M3 — per-integration rolling event window (capped at EVENT_WINDOW_SIZE via FIFO).
+  // Events are appended in insertion order (oldest at index 0, newest at end) so
+  // ordering is preserved exactly as recorded — important for the "concurrent
+  // writes don't lose events" invariant tested in healthMonitorRollingWindow.
+  private events: Map<string, HealthEvent[]> = new Map();
 
   /** Start the background probe loop. Idempotent. */
   start(): void {
@@ -169,13 +211,120 @@ class HealthMonitor {
     return out;
   }
 
+  // ── M3: rolling event window API ─────────────────────────────────────────
+
+  /**
+   * Record a single observable event against an integration. FIFO-evicts the
+   * oldest event once the buffer reaches EVENT_WINDOW_SIZE so memory stays
+   * bounded regardless of traffic volume.
+   *
+   * Synchronous + push-based — never awaits. Safe to call from a tight loop;
+   * order is preserved exactly as observed.
+   */
+  recordEvent(integrationId: string, event: Omit<HealthEvent, "ts"> & { ts?: number }): void {
+    const list = this.events.get(integrationId) ?? [];
+    const full: HealthEvent = {
+      ts:         event.ts ?? Date.now(),
+      kind:       event.kind,
+      latencyMs:  event.latencyMs,
+      ok:         event.ok,
+      error:      event.error,
+      source:     event.source,
+      verified:   event.verified,
+    };
+    list.push(full);
+    // FIFO eviction — drop oldest until we're back inside the cap
+    while (list.length > EVENT_WINDOW_SIZE) list.shift();
+    this.events.set(integrationId, list);
+  }
+
+  /**
+   * Return events for one integration, optionally filtered by time window
+   * (ms looking back from now) and/or kind. Returns a shallow copy so callers
+   * can mutate freely without affecting internal state.
+   */
+  getEvents(
+    integrationId: string,
+    opts: { windowMs?: number; kind?: HealthEvent["kind"] } = {},
+  ): HealthEvent[] {
+    const list = this.events.get(integrationId) ?? [];
+    const now = Date.now();
+    return list.filter((e) => {
+      if (opts.windowMs !== undefined && now - e.ts > opts.windowMs) return false;
+      if (opts.kind && e.kind !== opts.kind) return false;
+      return true;
+    });
+  }
+
+  /**
+   * Compute rollup metrics for one integration over a given window.
+   * Returns zeroed metrics (no crash) if there are no events.
+   */
+  rollupMetrics(integrationId: string, windowMs = 60 * 60_000): {
+    callCount:        number;
+    failureCount:     number;
+    webhookCount:     number;
+    retryCount:       number;
+    p50LatencyMs:     number;
+    p95LatencyMs:     number;
+    lastSuccessTs:    number | null;
+    lastErrorTs:      number | null;
+    lastErrorMessage: string | null;
+  } {
+    const events = this.getEvents(integrationId, { windowMs });
+    const calls = events.filter((e) => e.kind === "call");
+    const failures = events.filter((e) => !e.ok);
+    const webhooks = events.filter((e) => e.kind === "webhook");
+    const latencies = calls.filter((e) => e.ok).map((e) => e.latencyMs);
+
+    // "Retry count" = number of failure events (24h surface in UI uses windowMs=24h)
+    const retryCount = failures.length;
+
+    // Walk the FULL (unfiltered) buffer for last-success/last-error so the UI
+    // can show a stale timestamp even outside the rollup window
+    const allEvents = this.events.get(integrationId) ?? [];
+    let lastSuccessTs: number | null = null;
+    let lastErrorTs: number | null = null;
+    let lastErrorMessage: string | null = null;
+    for (let i = allEvents.length - 1; i >= 0; i--) {
+      const e = allEvents[i];
+      if (e.ok && lastSuccessTs === null) lastSuccessTs = e.ts;
+      if (!e.ok && lastErrorTs === null) {
+        lastErrorTs = e.ts;
+        lastErrorMessage = e.error ?? null;
+      }
+      if (lastSuccessTs !== null && lastErrorTs !== null) break;
+    }
+
+    return {
+      callCount:        calls.length,
+      failureCount:     failures.length,
+      webhookCount:     webhooks.length,
+      retryCount,
+      p50LatencyMs:     percentile(latencies, 50),
+      p95LatencyMs:     percentile(latencies, 95),
+      lastSuccessTs,
+      lastErrorTs,
+      lastErrorMessage,
+    };
+  }
+
+  /** Returns the IDs of every integration that has at least one recorded event. */
+  knownIntegrationIds(): string[] {
+    return Array.from(this.events.keys());
+  }
+
   /** Used by tests. */
   __clearForTests(): void {
     this.history.clear();
     this.consecutiveFailures.clear();
     this.lastAutoReset.clear();
+    this.events.clear();
   }
 }
 
 /** Singleton — one health monitor per agent process. */
 export const healthMonitor = new HealthMonitor();
+
+/** Exposed for tests. */
+export const HEALTH_EVENT_WINDOW_SIZE = EVENT_WINDOW_SIZE;
