@@ -219,6 +219,21 @@ function _spawnWorker(): void {
 
   // Send config to worker immediately (it will start connecting on receipt)
   const whisperCfg = _baseCtx ? resolveWhisperConfig(_baseCtx.config) : null;
+
+  // ── Allowlist resolution (SAFETY-CRITICAL) ───────────────────────────────
+  // Baileys links to the user's PERSONAL WhatsApp account, so without an
+  // allowlist the agent would auto-reply to every friend who texts the user.
+  // Read the allowlist from the user's saved config — defaults to empty,
+  // which means only the owner (the WhatsApp account itself) can talk to
+  // the agent. Aerick can add additional senders via the dashboard.
+  const waCfg = (_baseCtx?.config as any)?.tools?.whatsapp?.config ?? {};
+  const rawAllowed = waCfg.allowedSenders ?? waCfg.allowlist ?? [];
+  const allowedSenders: string[] = Array.isArray(rawAllowed)
+    ? rawAllowed.filter((s: unknown) => typeof s === "string" && s.trim().length > 0)
+    : typeof rawAllowed === "string"
+      ? rawAllowed.split(/[,\n]/).map((s: string) => s.trim()).filter(Boolean)
+      : [];
+
   child.send({
     type:   "start",
     config: {
@@ -228,6 +243,7 @@ function _spawnWorker(): void {
       whisperBaseUrl:  whisperCfg?.baseUrl,
       whisperModel:    whisperCfg?.model,
       whisperProvider: whisperCfg?.provider,
+      allowedSenders,
     },
   });
 
@@ -244,11 +260,39 @@ function _spawnWorker(): void {
       return;
     }
 
+    // Cap the restart count to prevent infinite loops when auth is
+    // unrecoverably broken (e.g. WhatsApp banned the device). Reported by
+    // Aerick (2026-05-26): re-scanning the same number caused an infinite
+    // restart loop that effectively hung the agent.
+    const MAX_RESTART_ATTEMPTS = 5;
+    if (_restartCount >= MAX_RESTART_ATTEMPTS) {
+      console.error(chalk.red(
+        `  [WhatsApp] Worker has crashed ${_restartCount} times — giving up. ` +
+        `Use "Reset connection" in the dashboard to wipe auth and try again.`
+      ));
+      _emitStatus("logged_out"); // requires user action
+      return;
+    }
+
+    // Exit code 1 from the worker signals "bad session — wipe auth before
+    // retrying" (set by the connectionReplaced/badSession branches in the
+    // worker's connection.update handler). Without this auth wipe, the new
+    // worker would hit the same auth-rejection and crash again immediately.
+    const isBadSession = code === 1;
+    if (isBadSession) {
+      console.warn(chalk.yellow(
+        "  [WhatsApp] Worker reported bad session — wiping auth dir before respawn"
+      ));
+      rm(AUTH_DIR, { recursive: true, force: true })
+        .then(() => console.log(chalk.gray(`  [WhatsApp] Cleared ${AUTH_DIR}`)))
+        .catch((err) => console.warn(chalk.gray(`  [WhatsApp] Could not wipe auth: ${err}`)));
+    }
+
     // Unexpected crash — restart with exponential backoff
     const delay = Math.min(BASE_DELAY_MS * 2 ** _restartCount, MAX_DELAY_MS);
     _restartCount++;
     console.log(chalk.yellow(
-      `  [WhatsApp] Worker crashed (code ${code}) — restarting in ${delay / 1000}s…`
+      `  [WhatsApp] Worker crashed (code ${code}) — restarting in ${delay / 1000}s (attempt ${_restartCount}/${MAX_RESTART_ATTEMPTS})…`
     ));
 
     setTimeout(() => {

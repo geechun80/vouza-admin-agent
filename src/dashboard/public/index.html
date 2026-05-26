@@ -3506,6 +3506,37 @@ let _waQRCyclesShown  = 0;     // # of QR refreshes within this connect attempt
 const WA_RESET_HINT_AFTER = 2; // show "reset" hint after this many QR cycles without success
 
 function buildWhatsAppWebQRCard(isConnected) {
+  // Read existing allowlist for the textarea (comma/newline-separated phone numbers)
+  const savedAllowlist = ((state?.config?.channels?.whatsapp?.config?.allowedSenders) || [])
+    .map((s) => typeof s === 'string' ? s : '')
+    .filter(Boolean)
+    .join('\n');
+
+  // ── SAFETY WARNING (always shown when this card renders) ─────────────────
+  // Baileys links to the user's PERSONAL WhatsApp account. Without an
+  // allowlist the agent would auto-reply to every friend — a disaster
+  // that one of our beta testers (2026-05-26) hit in production.
+  const safetyBlock = `
+    <div style="margin:0 0 14px;padding:12px 14px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.35);border-radius:10px;font-size:13px;line-height:1.55;color:var(--text)">
+      <div style="color:#ef4444;font-weight:700;margin-bottom:6px">⚠️ Important — WhatsApp links your PERSONAL account</div>
+      <div style="color:var(--text-dim)">
+        Unlike Telegram (which uses a separate bot), WhatsApp here is tied to your real WhatsApp number.
+        <strong style="color:var(--text)">By default the agent only responds to YOU (your own number).</strong>
+        Your friends' messages are ignored unless you explicitly add their numbers to the allowlist below.
+      </div>
+    </div>
+    <div class="form-group" style="margin-bottom:14px">
+      <label style="font-size:12px">Allowed senders <span style="color:var(--text-dim);font-weight:400">(one phone number per line — e.g. <code>+6596862398</code>)</span></label>
+      <textarea id="wa-allowlist" rows="3" placeholder="Leave empty so only YOU can talk to the agent.&#10;Add numbers (one per line) to permit specific friends/colleagues."
+        style="width:100%;font-family:monospace;font-size:12px;padding:8px 10px;border-radius:8px;background:var(--bg-glass);border:1px solid var(--border);color:var(--text);resize:vertical">${escHtml(savedAllowlist)}</textarea>
+      <div class="hint" style="margin-top:6px">
+        Your own number is <strong>always</strong> allowed automatically — no need to add it.
+        Save with the button below; changes take effect after the next agent restart.
+      </div>
+      <button class="btn btn-test" style="margin-top:8px;font-size:12px" onclick="saveWhatsAppAllowlist()">💾 Save allowlist</button>
+    </div>
+  `;
+
   return `
     <div class="glass-card" id="wa-qr-card">
       <div class="glass-card-header">
@@ -3515,11 +3546,12 @@ function buildWhatsAppWebQRCard(isConnected) {
           ${isConnected?'✅ Connected':'Not Connected'}
         </span>
       </div>
+      ${safetyBlock}
       <div id="wa-qr-area" style="text-align:center;padding:16px 0">
         ${isConnected
           ? `<div style="font-size:32px;margin-bottom:8px">✅</div>
              <div style="color:var(--success);font-weight:600">WhatsApp Connected</div>
-             <div class="hint" style="margin-top:6px">Your phone is linked. Messages will be handled by the AI.</div>
+             <div class="hint" style="margin-top:6px">Your phone is linked. The agent will only respond to YOU and any numbers on your allowlist above — your other contacts are ignored.</div>
              <button class="btn btn-ghost" style="margin-top:12px;font-size:12px" onclick="waQRLogout()">🔓 Unlink (scan new QR)</button>`
           : `<div class="hint" style="margin-bottom:14px">Click <strong>Connect</strong> to generate a QR code, then scan it with your phone.</div>
              <div id="wa-qr-img" style="display:none;margin:0 auto 4px">
@@ -3698,6 +3730,51 @@ function waQROnConnected() {
   `;
   updateTips();
   toast('✅ WhatsApp connected! Send a message from your phone to test.', 'success');
+}
+
+/**
+ * Save the WhatsApp sender allowlist to the user's config.
+ * The list is what controls who CAN talk to the agent via WhatsApp —
+ * without this, the agent would auto-reply to every friend who texts
+ * the linked account. The owner (the user themselves) is always
+ * permitted automatically; the allowlist is for additional contacts.
+ */
+async function saveWhatsAppAllowlist() {
+  const ta = document.getElementById('wa-allowlist');
+  if (!ta) return;
+  const lines = (ta.value || '')
+    .split(/[,\n]/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+
+  try {
+    // Merge into existing whatsapp channel config to avoid wiping QR-related fields
+    const cur  = await fetch('/api/config').then((r) => r.json()).catch(() => ({}));
+    const wa   = cur?.channels?.whatsapp || { enabled: true, provider: 'web', config: {} };
+    const next = {
+      ...wa,
+      enabled:  true,
+      provider: wa.provider || 'web',
+      config:   { ...(wa.config || {}), allowedSenders: lines },
+    };
+    const r = await fetch('/api/config', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ channels: { whatsapp: next } }),
+    });
+    if (!r.ok) {
+      toast('Save failed — try again', 'error');
+      return;
+    }
+    toast(
+      lines.length === 0
+        ? '✅ Allowlist cleared. Only YOU can talk to the agent now.'
+        : `✅ Allowlist saved (${lines.length} number${lines.length === 1 ? '' : 's'}). Restart the agent to apply.`,
+      'success'
+    );
+  } catch (e) {
+    toast('Save failed: ' + String(e), 'error');
+  }
 }
 
 async function waQRLogout() {

@@ -44,6 +44,21 @@ interface WorkerConfig {
   whisperBaseUrl?: string;
   whisperModel?:   string;
   whisperProvider?: "openai" | "groq";
+  /**
+   * Allowlist of WhatsApp JIDs (or phone numbers) that are permitted to
+   * trigger the agent. If empty, the agent responds to NO ONE except the
+   * owner (Aerick himself, identified by sock.user?.id).
+   *
+   * Accepted formats:
+   *   - Full JID: "6596862398@s.whatsapp.net"
+   *   - Phone number: "6596862398" or "+6596862398" (auto-normalized)
+   *
+   * SECURITY: Baileys links to the user's PERSONAL WhatsApp account, so
+   * every inbound message flows through our agent. Without an allowlist
+   * the agent would auto-reply to every friend who texts the user — a
+   * massive privacy + reputation disaster.
+   */
+  allowedSenders?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -149,23 +164,131 @@ async function connect(): Promise<void> {
       _connected = false;
       activeSock = null;
 
-      const code      = (lastDisconnect?.error as Boom)?.output?.statusCode;
-      const loggedOut = code === DisconnectReason.loggedOut;
+      const code = (lastDisconnect?.error as Boom)?.output?.statusCode;
 
-      if (loggedOut) {
-        _reconnecting = false;
-        ipc({ type: "status", status: "logged_out" });
-        process.exit(0); // parent will NOT restart on clean exit
-      } else if (_reconnecting) {
-        ipc({ type: "status", status: "disconnected" });
-        setTimeout(() => connect(), 5_000);
-      } else {
-        ipc({ type: "status", status: "disconnected" });
+      // Categorize the disconnect — different reasons require different
+      // recovery strategies. Without this, "connectionReplaced" (same phone
+      // re-scans) caused an infinite restart loop that effectively crashed
+      // the worker. Reported by Aerick (2026-05-26).
+      switch (code) {
+
+        case DisconnectReason.loggedOut: {
+          // User explicitly unlinked from their phone, OR WhatsApp invalidated
+          // the device (e.g. 4-device limit, suspicious activity). Cannot
+          // recover by reconnecting — user must scan a fresh QR. Exit 0 so
+          // the parent manager does NOT auto-restart.
+          _reconnecting = false;
+          log("info", "Logged out by user / WhatsApp — clean exit (no auto-restart)");
+          ipc({ type: "status", status: "logged_out" });
+          process.exit(0);
+          return;
+        }
+
+        case DisconnectReason.connectionReplaced: {
+          // The SAME phone scanned a new QR somewhere else (another Baileys
+          // session, WhatsApp Web in a browser, another agent instance).
+          // WhatsApp invalidated this connection in favor of the new one.
+          // Reconnecting would loop forever with the same "replaced" error.
+          // Clean exit — user must explicitly re-link via the dashboard if
+          // they want this instance to take over again.
+          _reconnecting = false;
+          log("warn", "Connection replaced — another session linked the same number. Clean exit.");
+          ipc({ type: "status", status: "logged_out" });
+          process.exit(0);
+          return;
+        }
+
+        case DisconnectReason.badSession: {
+          // Auth files corrupted or out of sync with WhatsApp servers.
+          // Reconnecting with the same auth would fail the same way every
+          // time. Exit non-zero so the parent manager wipes the auth dir
+          // (via its existing crash-recovery path) before respawning.
+          _reconnecting = false;
+          log("error", "Bad session — auth files appear corrupt. Exit 1 to trigger parent recovery.");
+          ipc({ type: "status", status: "logged_out" });  // requires fresh QR
+          process.exit(1);
+          return;
+        }
+
+        case DisconnectReason.restartRequired: {
+          // Baileys requires a fresh connection (typically right after the
+          // first QR scan completes). Brief delay then reconnect — auth
+          // files are valid and reconnection should succeed quickly.
+          log("info", "WhatsApp requested a restart (normal after first QR) — reconnecting in 2s");
+          ipc({ type: "status", status: "connecting" });
+          setTimeout(() => connect().catch((err) => log("error", `restart-reconnect failed: ${err}`)), 2_000);
+          return;
+        }
+
+        case DisconnectReason.timedOut:
+        case DisconnectReason.connectionLost:
+        case DisconnectReason.connectionClosed: {
+          // Transient network failures — reconnect with backoff. Don't
+          // re-init auth, just re-establish the WebSocket.
+          if (_reconnecting) {
+            log("info", `Transient close (code ${code}) — reconnecting in 5s`);
+            ipc({ type: "status", status: "disconnected" });
+            setTimeout(() => connect().catch((err) => log("error", `transient-reconnect failed: ${err}`)), 5_000);
+          } else {
+            ipc({ type: "status", status: "disconnected" });
+          }
+          return;
+        }
+
+        default: {
+          // Unknown disconnect code — treat conservatively. If we were
+          // already trying to reconnect, attempt once more; otherwise just
+          // report disconnected and let the parent decide.
+          log("warn", `Unrecognized disconnect code ${code} — defaulting to single reconnect attempt`);
+          if (_reconnecting) {
+            ipc({ type: "status", status: "disconnected" });
+            setTimeout(() => connect().catch((err) => log("error", `unknown-code-reconnect failed: ${err}`)), 5_000);
+          } else {
+            ipc({ type: "status", status: "disconnected" });
+          }
+          return;
+        }
       }
     }
   });
 
   _reconnecting = true;
+
+  // ── Owner JID detection ──────────────────────────────────────────────────
+  // The "owner" is the WhatsApp account this Baileys client is linked to —
+  // i.e., Aerick himself. We use this to (1) auto-permit Aerick's own
+  // messages-to-self and (2) prevent the agent from auto-replying to his
+  // friends. sock.user is populated once the connection establishes.
+  const getOwnerJid = (): string | null => {
+    const raw = sock.user?.id;
+    if (!raw) return null;
+    // sock.user.id often comes back as "6596862398:43@s.whatsapp.net" —
+    // strip the ":43" device suffix so it matches msg.key.remoteJid format
+    return raw.replace(/:\d+@/, "@");
+  };
+
+  // ── Allowlist enforcement ────────────────────────────────────────────────
+  // SAFETY-CRITICAL: this is what stops the agent from auto-replying to
+  // every friend who texts the user. By default the allowlist is empty,
+  // and the ONLY sender automatically permitted is the owner themselves
+  // (Aerick texting his own number, e.g. via "Message yourself" in WhatsApp).
+  //
+  // Normalize JIDs: accept "6596862398", "+6596862398", or full JIDs.
+  const normalizeJid = (s: string): string => {
+    const digitsOnly = s.replace(/[^\d]/g, "");
+    if (!digitsOnly) return s;
+    return `${digitsOnly}@s.whatsapp.net`;
+  };
+  const allowedJids = new Set<string>(
+    (_config?.allowedSenders ?? []).map(normalizeJid)
+  );
+
+  const isAllowed = (jid: string): boolean => {
+    const owner = getOwnerJid();
+    // Owner is always allowed — Aerick must always be able to talk to his own agent
+    if (owner && jid === owner) return true;
+    return allowedJids.has(jid);
+  };
 
   // ── Incoming messages ──────────────────────────────────────────────────────
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
@@ -179,6 +302,17 @@ async function connect(): Promise<void> {
 
       const chatId   = msg.key.remoteJid;
       const fromName = msg.pushName || chatId.split("@")[0] || "User";
+
+      // ── SAFETY GATE: allowlist enforcement ──────────────────────────────
+      // If the sender isn't on the allowlist (and isn't the owner), DROP
+      // the message silently. We don't even send a "permission denied"
+      // reply because that would (a) confirm to spammers that the number
+      // is active and (b) confuse innocent friends who don't know an agent
+      // is running.
+      if (!isAllowed(chatId)) {
+        log("info", `[allowlist] dropped message from ${fromName} (${chatId}) — not on allowlist`);
+        continue;
+      }
 
       const textBody = msg.message?.conversation ??
                        msg.message?.extendedTextMessage?.text ?? "";
