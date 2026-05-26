@@ -1056,7 +1056,7 @@ export async function startDashboard(port = 3456): Promise<void> {
 
   // --- Live Agent Chat (SSE streaming) ---
   app.post("/api/chat", requireLocalOrigin, async (req, res) => {
-    const { message, sessionId, apiKey, imageBase64, imageMimeType, wizardStep, userName } = req.body as {
+    const { message, sessionId, apiKey, imageBase64, imageMimeType, wizardStep, userName, attachedFileContent, attachedFileName } = req.body as {
       message: string;
       sessionId: string;
       apiKey?: string;
@@ -1064,10 +1064,30 @@ export async function startDashboard(port = 3456): Promise<void> {
       imageMimeType?: string;
       wizardStep?: number;
       userName?: string;
+      attachedFileContent?: string;
+      attachedFileName?: string;
     };
 
     if (!message || !sessionId) {
       return res.status(400).json({ error: "message and sessionId are required" });
+    }
+
+    // ── Attached text/JSON file: prepend a preamble so the agent reads it as text
+    // (built with plain string concatenation — Rule 56: never nested backticks inside template literals)
+    let effectiveMessage = message;
+    if (attachedFileContent && typeof attachedFileContent === "string") {
+      const safeName = (attachedFileName && typeof attachedFileName === "string")
+        ? attachedFileName.replace(/[\r\n]+/g, " ").slice(0, 120)
+        : "attached.txt";
+      // Cap raw file content at 200 KB to avoid context blowups
+      const capped = attachedFileContent.length > 200_000
+        ? attachedFileContent.slice(0, 200_000) + "\n\n[... truncated, file was larger than 200 KB ...]"
+        : attachedFileContent;
+      effectiveMessage =
+        'User attached file "' + safeName + '":\n\n' +
+        capped +
+        "\n\n--- end of file ---\n\n" +
+        message;
     }
 
     // SSE headers
@@ -1096,10 +1116,10 @@ export async function startDashboard(port = 3456): Promise<void> {
               data: imageBase64.replace(/^data:[^;]+;base64,/, ""), // strip data-URI prefix
             },
           },
-          { type: "text", text: message },
+          { type: "text", text: effectiveMessage },
         ];
       } else {
-        messagePayload = message;
+        messagePayload = effectiveMessage;
       }
 
       for await (const event of streamChat(sessionId, messagePayload, config, apiKey, wizardStep, userName)) {
