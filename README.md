@@ -113,10 +113,6 @@ You only need **one**. Paste it directly into the Setup Wizard — no file editi
 
 ## 🔌 Connect Channels
 
-<p align="center">
-  <img src="docs/assets/hero-chat.png" alt="Vouza Guide Bot walking the user through setup" width="900">
-</p>
-
 After the wizard, use the **🔌 Setup** panel in the dashboard to connect channels. Each integration goes through a guided pipeline that tests credentials live before saving — no more "saved but doesn't work."
 
 <details>
