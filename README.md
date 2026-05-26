@@ -115,6 +115,16 @@ You only need **one**. Paste it directly into the Setup Wizard — no file editi
 
 After the wizard, use the **🔌 Setup** panel in the dashboard to connect channels. Each integration goes through a guided pipeline that tests credentials live before saving — no more "saved but doesn't work."
 
+<p align="center">
+  <img src="docs/assets/hero-configure-modal.png" alt="Configure modal: paste credentials JSON or drag-drop the .json file" width="900">
+</p>
+
+<p align="center">
+  <img src="docs/assets/hero-pipeline-progress.png" alt="Pipeline progress: detect ✓ → validate ✓ → test ⟳ → save → confirm → live-test" width="900">
+</p>
+
+> *Paste the credential JSON or drag the `.json` file in — the pipeline runs each step live so you see exactly where any failure happens, with a specific suggested fix.*
+
 <details>
 <summary><b>📱 Telegram</b> (recommended — control your agent from your phone)</summary>
 
