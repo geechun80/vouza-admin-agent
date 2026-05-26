@@ -23,6 +23,7 @@
 // =============================================================================
 
 import type { Pipeline, Step, OrchestratorContext, StepResult } from "../types.js";
+import { realSmtpProbe } from "../probes/smtpProbe.js";
 
 export type GoogleVariant = "gmail" | "google_calendar";
 
@@ -213,12 +214,16 @@ export function makeGooglePipeline(deps: GoogleDeps = {}): Pipeline {
 
   const runTestOnce = async (input: any): Promise<StepResult<any>> => {
     if (input.kind === "app_password") {
-      try {
-        if (!deps.smtpProbe) {
-          // No probe injected — treat as best-effort pass. The save step will
-          // catch real misconfigurations on actual send.
-          return { ok: true, value: { testMode: "smtp-skipped" } };
+      // Default: use realSmtpProbe (nodemailer.verify() against smtp.gmail.com:587).
+      // Tests can still inject deps.smtpProbe to bypass network entirely.
+      if (!deps.smtpProbe) {
+        const probeResult = await realSmtpProbe(input.gmailUser, input.gmailPass);
+        if (probeResult.ok) {
+          return { ok: true, value: { testMode: "smtp" } };
         }
+        return probeResult; // already a well-formed StepResult with suggestedFix + doNotRetry
+      }
+      try {
         await deps.smtpProbe("smtp.gmail.com", 587, input.gmailUser, input.gmailPass);
         return { ok: true, value: { testMode: "smtp" } };
       } catch (e) {
