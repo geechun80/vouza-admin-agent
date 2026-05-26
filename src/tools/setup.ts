@@ -18,8 +18,70 @@ import { buildTool } from "./registry.js";
 import { readFile, writeFile, mkdir } from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
-import { getPipeline, googleVariantFor, runPipeline } from "../orchestrator/index.js";
+import {
+  getPipeline,
+  googleVariantFor,
+  runPipeline,
+  canonicalizeIntegrationName,
+} from "../orchestrator/index.js";
 import { childLogger } from "../util/logger.js";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared pipeline executor — used by both run_integration_pipeline (the
+// preferred new tool) and save_integration_credentials (legacy fallback that
+// internally routes here for the 4 supported integrations).
+//
+// Returns the same shape both call sites surface to the LLM, so the legacy
+// tool's failure-mode UX (suggestedFix + doNotRetry) matches the new tool.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PIPELINE_SUPPORTED = new Set(["gmail", "google_calendar", "telegram", "whatsapp"]);
+
+export async function executePipeline(
+  integration: string,
+  credentials: Record<string, unknown> | undefined,
+  ctx: any,
+  opts: { chatId?: string | number } = {},
+): Promise<{
+  success: boolean;
+  data?: any;
+  stepReached?: string;
+  error?: string;
+  suggestedFix?: string;
+  doNotRetry?: boolean;
+}> {
+  const pipeline = getPipeline(integration);
+  if (!pipeline) {
+    return {
+      success: false,
+      error: `No pipeline registered for integration "${integration}".`,
+      doNotRetry: true,
+    };
+  }
+
+  const variant = googleVariantFor(integration);
+  const pipelineInput: any = {
+    credentials: credentials ?? {},
+    ...(variant ? { variant } : {}),
+    ...(opts.chatId !== undefined ? { chatId: opts.chatId } : {}),
+  };
+
+  const log = childLogger({ component: "orchestrator", integration });
+  const result = await runPipeline(pipeline, pipelineInput, {
+    integration,
+    logger: log,
+    config: ctx?.config,
+  });
+
+  return {
+    success: result.success,
+    data: result.data,
+    stepReached: result.stepReached,
+    error: result.error,
+    suggestedFix: result.suggestedFix,
+    doNotRetry: result.doNotRetry,
+  };
+}
 
 const CONFIG_PATH = path.resolve(process.cwd(), "data", "config.json");
 
@@ -832,6 +894,29 @@ export const saveIntegrationCredentialsTool = buildTool({
       }
       const integration = input.integration;
 
+      // ── Backward-compat routing ──────────────────────────────────────────
+      // If the LLM picked this older tool but the integration has a real
+      // pipeline (gmail / google_calendar / telegram / whatsapp), delegate
+      // there. Same code path, same StepResult, same suggestedFix UX — so
+      // the user gets the proper self-healing flow even when the model
+      // chose the wrong tool name. For everything else (outlook, smtp,
+      // slack, voice_*, ai_provider, twilio), fall through to the original
+      // direct-save switch below — pipelines don't cover those yet.
+      const canonical = canonicalizeIntegrationName(integration);
+      if (canonical && PIPELINE_SUPPORTED.has(canonical)) {
+        const log = childLogger({ component: "tools.setup" });
+        log.info(
+          {
+            from:        "save_integration_credentials",
+            routed_to:   "run_integration_pipeline",
+            integration: canonical,
+            requested:   integration,
+          },
+          "legacy tool routed to pipeline",
+        );
+        return executePipeline(canonical, rawCreds, ctx);
+      }
+
       // ── Format validation (before any write) ────────────────────────────────
       const validationError = validateCredentials(c);
       if (validationError) return { success: false, error: validationError };
@@ -1116,42 +1201,10 @@ export const runIntegrationPipelineTool = buildTool({
       .describe("Telegram only — chat_id for the live-test message. Omit for first-time setup."),
   }),
   async call(input, ctx): Promise<any> {
-    const pipeline = getPipeline(input.integration);
-    if (!pipeline) {
-      return {
-        success: false,
-        error: `No pipeline registered for integration "${input.integration}".`,
-        doNotRetry: true,
-      };
-    }
-
-    const variant = googleVariantFor(input.integration);
-    const pipelineInput: any = {
-      credentials: input.credentials ?? {},
-      ...(variant ? { variant } : {}),
-      ...(input.chatId !== undefined ? { chatId: input.chatId } : {}),
-    };
-
-    const log = childLogger({
-      component: "orchestrator",
-      integration: input.integration,
+    return executePipeline(input.integration, input.credentials, ctx, {
+      chatId: input.chatId,
     });
-
-    const result = await runPipeline(pipeline, pipelineInput, {
-      integration: input.integration,
-      logger: log,
-      config: ctx?.config,
-    });
-
-    return {
-      success: result.success,
-      data: result.data,
-      stepReached: result.stepReached,
-      error: result.error,
-      suggestedFix: result.suggestedFix,
-      doNotRetry: result.doNotRetry,
-      // Attempts log intentionally NOT returned — internal fallbacks should
-      // stay silent (Aerick feedback: don't show retry noise in chat).
-    };
+    // Attempts log intentionally NOT surfaced — internal fallbacks stay
+    // silent (Aerick feedback: don't show retry noise in chat).
   },
 });
