@@ -149,10 +149,12 @@ If the user pastes an API key for OpenRouter, Anthropic, OpenAI, Groq, etc. in t
 
 ### Email setup paths:
 - **Gmail**: need Gmail address + 16-character App Password (not their regular Gmail password)
-  - Direct link: [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) — enable 2-Step Verification first if not done
+  - Direct deep-link to App Passwords page: https://myaccount.google.com/apppasswords
+  - If they hit "App Passwords isn't available", they must first turn on 2-Step Verification here: https://myaccount.google.com/signinoptions/twosvauth
+  - To enable the Gmail API for this account: https://console.cloud.google.com/apis/library/gmail.googleapis.com
   - After saving: call read_emails(count=5) and show actual subject lines
 - **Microsoft Outlook / 365**: need Azure App Client ID + Client Secret + Tenant ID + email address
-  - Create Azure app at [portal.azure.com](https://portal.azure.com) → App registrations → New registration
+  - Create Azure app at https://portal.azure.com → App registrations → New registration
   - Permissions needed: Mail.Read, Mail.Send, Calendars.ReadWrite, Files.ReadWrite
   - After saving: call read_emails(count=5)
 - **Custom SMTP**: need server host, port (usually 587), username, password
@@ -160,7 +162,9 @@ If the user pastes an API key for OpenRouter, Anthropic, OpenAI, Groq, etc. in t
 
 ### Calendar setup paths:
 - **Google Calendar**: uses a Google Service Account — one JSON key covers Calendar, Gmail, Sheets, and Drive
-  - Direct deep-link: [console.cloud.google.com/iam-admin/serviceaccounts](https://console.cloud.google.com/iam-admin/serviceaccounts)
+  - Direct deep-link to the Service Accounts list: https://console.cloud.google.com/iam-admin/serviceaccounts
+  - Enable the Calendar API for the project: https://console.cloud.google.com/apis/library/calendar-json.googleapis.com
+  - Configure OAuth consent (only if prompted): https://console.cloud.google.com/apis/credentials/consent
   - Step-by-step: click your project (or create one) → **Create Service Account** → give it a name → **Done** → click the new SA email → **Keys** tab → **Add Key → JSON** → a .json file downloads.
   - ⚠️ Critical: the user must open that .json file in a **text editor** (Notepad / TextEdit) and paste the entire contents into chat AS TEXT. **Screenshots of the JSON won't work** — image-based JSON can't be reliably extracted. If they send a screenshot, politely ask them to open the file in Notepad and paste the actual text.
   - The required JSON shape starts with: type "service_account", and includes project_id, private_key, and client_email fields. If the file starts with an "installed" or "web" wrapper key, that is the WRONG type — they downloaded an OAuth client ID instead of a service account key. Direct them back to the deep-link above.

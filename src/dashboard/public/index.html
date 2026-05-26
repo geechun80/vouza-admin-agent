@@ -968,17 +968,52 @@
       display:flex; gap:8px; align-items:center;
     }
 
-    .guide-input-row input {
+    .guide-input-row input,
+    .guide-input-row textarea {
       flex:1; padding:9px 14px;
       background:var(--bg-glass-card);
       border:1px solid var(--border);
       border-radius:20px; font-size:13px; color:var(--text);
     }
 
-    .guide-input-row input:focus {
+    .guide-input-row textarea {
+      resize:none; font-family:inherit; line-height:1.4;
+      min-height:38px; max-height:160px; overflow-y:auto;
+    }
+
+    .guide-input-row input:focus,
+    .guide-input-row textarea:focus {
       border-color:rgba(124,58,237,0.5);
       box-shadow:0 0 0 2px var(--brand-glow-sm);
+      outline:none;
     }
+
+    /* ── Text/JSON attachment chip (above textarea) ── */
+    #textFilePreview { display:none; padding:8px 0 0; }
+    .textfile-chip {
+      display:inline-flex; align-items:center; gap:8px;
+      padding:6px 12px; border-radius:14px;
+      background:rgba(124,58,237,0.10); border:1px solid rgba(124,58,237,0.30);
+      font-size:12px; color:var(--brand-light);
+    }
+    .textfile-chip button {
+      background:none; border:none; cursor:pointer; color:var(--text-muted);
+      font-size:14px; line-height:1; padding:0 2px;
+    }
+    .textfile-chip button:hover { color:#ef4444; }
+
+    /* ── Drag-and-drop overlay on chat panel ── */
+    .guide-col { position:relative; }
+    .guide-drop-overlay {
+      position:absolute; inset:0;
+      display:none; align-items:center; justify-content:center;
+      background:rgba(124,58,237,0.12);
+      border:2px dashed rgba(124,58,237,0.6);
+      border-radius:12px;
+      color:var(--brand-light); font-weight:600; font-size:14px;
+      pointer-events:none; z-index:50;
+    }
+    .guide-col.dragging .guide-drop-overlay { display:flex; }
 
     .btn-send {
       width:36px; height:36px; border-radius:50%;
@@ -2394,7 +2429,8 @@
     </div><!-- /main-col -->
 
     <!-- AI Guide Panel -->
-    <div class="guide-col">
+    <div class="guide-col" id="guideCol">
+      <div class="guide-drop-overlay">📎 Drop .json or .txt file to attach as text</div>
       <div class="guide-header">
         <div class="guide-avatar"><img src="/images/vee-bot.png" alt="Vee"></div>
         <div>
@@ -2412,14 +2448,15 @@
       </div>
 
       <div class="guide-input-area">
-        <input type="file" id="fileUpload" style="display:none" accept="image/*,.pdf,.docx,.xlsx,.csv,.mp3,.mp4,.m4a,.wav,.webm,.ogg,.flac" onchange="handleFileSelect(event)">
+        <input type="file" id="fileUpload" style="display:none" accept="image/*,.pdf,.docx,.xlsx,.csv,.json,.txt,.mp3,.mp4,.m4a,.wav,.webm,.ogg,.flac" onchange="handleFileSelect(event)">
+        <div id="textFilePreview"></div>
         <div id="imagePreview"></div>
         <div id="voicePreview" style="display:none"></div>
         <div class="guide-input-row">
           <button class="btn-icon-sm" onclick="openAttachment()" title="Attach image, document, or audio file">📎</button>
           <button class="btn-icon-sm" id="micBtn" onclick="toggleVoiceRecording()" title="Record voice message (click to start, click again to stop)">🎤</button>
           <span class="rec-timer" id="recTimer" style="display:none">⏺ 0:00</span>
-          <input type="text" id="guideInput" placeholder="Ask me anything..." onkeydown="if(event.key==='Enter')sendGuideMsg()">
+          <textarea id="guideInput" rows="1" placeholder="Ask me anything... (Shift+Enter for newline)"></textarea>
           <button class="btn-icon-sm" onclick="clearConversation()" title="Clear conversation">🗑️</button>
           <button class="btn-send" onclick="sendGuideMsg()">↑</button>
         </div>
@@ -4158,7 +4195,8 @@ const CHAT_SESSION_ID = 'sess-' + Math.random().toString(36).slice(2, 10);
 // State for the chat panel
 const chat = {
   busy: false,
-  pendingImage: null,  // { base64: string, mimeType: string, preview: string }
+  pendingImage: null,     // { base64: string, mimeType: string, preview: string }
+  pendingTextFile: null,  // { name: string, content: string }
 };
 
 // Step-specific opening messages (displayed before the user types anything)
@@ -4267,17 +4305,32 @@ function guideMsg(role, text) {
 }
 
 function guideBotScripted(text) {
-  const box      = document.getElementById('guideMessages');
   const typingEl = document.getElementById('guideTyping');
   typingEl.classList.add('visible');
   setTimeout(() => {
     typingEl.classList.remove('visible');
-    const el = document.createElement('div');
-    el.className = 'guide-msg bot';
-    el.innerHTML = `<div class="msg-bubble">${renderMd(text)}</div><div class="msg-time">${timeNow()}</div>`;
-    box.insertBefore(el, typingEl);
-    pinChatToBottom();
+    appendMsg('bot', `<div class="msg-bubble">${renderMd(text)}</div><div class="msg-time">${timeNow()}</div>`);
   }, Math.min(text.length * 10, 1000));
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// appendMsg — single helper for every chat insertion.
+// INVARIANT: typing indicator always lives at the END of the message list.
+// We always appendChild() the new message, then move typingEl to the bottom.
+// This eliminates the bug where bot replies showed up ABOVE user messages
+// (Aerick screenshot, 2026-05-27).
+// ─────────────────────────────────────────────────────────────────────────
+function appendMsg(role, innerHTML, opts) {
+  const box      = document.getElementById('guideMessages');
+  if (!box) return null;
+  const typingEl = document.getElementById('guideTyping');
+  const el = document.createElement('div');
+  el.className = 'guide-msg ' + role + ((opts && opts.history) ? ' history' : '');
+  el.innerHTML = innerHTML;
+  box.appendChild(el);
+  if (typingEl) box.appendChild(typingEl); // keep typing indicator last
+  pinChatToBottom();
+  return el;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -4677,17 +4730,10 @@ async function openConversation(id) {
 
 // Render a historical message (no timestamp, slightly dimmed)
 function appendHistoryMsg(content, role) {
-  const box    = document.getElementById('guideMessages');
-  const typing = document.getElementById('guideTyping');
-  const el     = document.createElement('div');
-  el.className = `guide-msg ${role} history`;
-  if (role === 'user') {
-    el.innerHTML = `<div class="msg-bubble"><span>${escHtml(content)}</span></div>`;
-  } else {
-    el.innerHTML = `<div class="msg-bubble">${renderMd(content)}</div>`;
-  }
-  if (typing) box.insertBefore(el, typing);
-  else box?.appendChild(el);
+  const inner = (role === 'user')
+    ? `<div class="msg-bubble"><span>${escHtml(content)}</span></div>`
+    : `<div class="msg-bubble">${renderMd(content)}</div>`;
+  appendMsg(role, inner, { history: true });
 }
 
 // Called after user sends a message — records it
@@ -4749,23 +4795,30 @@ async function deleteConv(e, id) {
 function sendGuideMsg() {
   const inp  = document.getElementById('guideInput');
   const text = inp.value.trim();
-  if (!text && !chat.pendingImage) return;
+  if (!text && !chat.pendingImage && !chat.pendingTextFile) return;
   if (chat.busy) { toast('Please wait — I\'m still responding…', 'error'); return; }
 
   inp.value = '';
+  autoGrowGuideInput();
 
   // Show user message in chat
-  appendUserMsg(text, chat.pendingImage);
+  appendUserMsg(text, chat.pendingImage, chat.pendingTextFile);
 
-  // Track for conversation history (text only — images tracked separately if needed)
+  // Track for conversation history (text only — images/files tracked separately if needed)
   if (text) convTrackUser(text);
 
-  // Call the live agent
-  callLiveAgent(text, chat.pendingImage);
+  // Snapshot attachments before clearing so callLiveAgent uses the right payload
+  const snapImage    = chat.pendingImage;
+  const snapTextFile = chat.pendingTextFile;
 
-  // Clear pending image
-  chat.pendingImage = null;
+  // Clear attachments BEFORE the async call so a quick second send doesn't re-attach
+  chat.pendingImage    = null;
+  chat.pendingTextFile = null;
   clearImagePreview();
+  clearTextFilePreview();
+
+  // Call the live agent
+  callLiveAgent(text, snapImage, snapTextFile);
 }
 
 // ── Chat scroll helper ──────────────────────────────────────────────────────
@@ -4784,26 +4837,23 @@ function pinChatToBottom() {
   });
 }
 
-function appendUserMsg(text, image) {
-  const box      = document.getElementById('guideMessages');
-  const typingEl = document.getElementById('guideTyping');
-  const el       = document.createElement('div');
-  el.className   = 'guide-msg user';
-
+function appendUserMsg(text, image, textFile) {
   let content = '';
   if (image) {
     content += `<img src="${image.preview}" style="max-width:180px;border-radius:8px;margin-bottom:6px;display:block">`;
   }
+  if (textFile) {
+    const kb = (textFile.content.length / 1024).toFixed(1);
+    content += `<div style="display:inline-block;padding:4px 10px;border-radius:10px;background:rgba(124,58,237,0.15);border:1px solid rgba(124,58,237,0.3);font-size:11px;margin-bottom:6px;">📎 ${escHtml(textFile.name)} (${kb} KB)</div><br>`;
+  }
   if (text) content += `<span>${escHtml(text)}</span>`;
 
-  el.innerHTML = `<div class="msg-bubble">${content}</div><div class="msg-time">${timeNow()}</div>`;
-  box.insertBefore(el, typingEl);
-  pinChatToBottom();
+  appendMsg('user', `<div class="msg-bubble">${content}</div><div class="msg-time">${timeNow()}</div>`);
 }
 
 // ── Live agent call with SSE streaming ─────────────────────────────────────
 
-async function callLiveAgent(text, image) {
+async function callLiveAgent(text, image, textFile) {
   chat.busy = true;
   setInputEnabled(false);
 
@@ -4827,14 +4877,19 @@ async function callLiveAgent(text, image) {
     const isKeySaved    = (keyEl?.placeholder || '').toLowerCase().includes('saved');
     const apiKeyToSend  = (typedKey && !isKeySaved) ? typedKey : undefined;
 
+    const fallbackMsg = text
+      || (textFile ? `(attached file: ${textFile.name})` : '')
+      || (image ? '(image attached)' : '');
     const body = {
-      message:       text || '(image attached)',
-      sessionId:     CHAT_SESSION_ID,
-      apiKey:        apiKeyToSend,         // undefined for established users
-      imageBase64:   image?.base64    || undefined,
-      imageMimeType: image?.mimeType  || undefined,
-      wizardStep:    state.step       || undefined,
-      userName:      document.getElementById('userName')?.value?.trim() || undefined,
+      message:             fallbackMsg,
+      sessionId:           CHAT_SESSION_ID,
+      apiKey:              apiKeyToSend,         // undefined for established users
+      imageBase64:         image?.base64        || undefined,
+      imageMimeType:       image?.mimeType      || undefined,
+      attachedFileContent: textFile?.content    || undefined,
+      attachedFileName:    textFile?.name       || undefined,
+      wizardStep:          state.step           || undefined,
+      userName:            document.getElementById('userName')?.value?.trim() || undefined,
     };
 
     const resp = await fetch('/api/chat', {
@@ -4848,15 +4903,18 @@ async function callLiveAgent(text, image) {
       throw new Error(err.error || resp.statusText);
     }
 
-    // Create the streaming bot bubble
+    // Create the streaming bot bubble — use appendMsg so the typing indicator
+    // always stays at the end (prevents Aerick's "bot reply above user msg" bug)
     typingEl.classList.remove('visible');
-    const botEl = document.createElement('div');
-    botEl.className = 'guide-msg bot';
-    botEl.innerHTML = `<div class="msg-bubble streaming-bubble" id="stream-bubble"></div>
-      <div class="msg-time">${timeNow()}</div>`;
-    box.insertBefore(botEl, typingEl);
+    const botEl = appendMsg('bot',
+      `<div class="msg-bubble streaming-bubble" id="stream-bubble"></div>` +
+      `<div class="msg-time">${timeNow()}</div>`
+    );
 
-    const bubble    = document.getElementById('stream-bubble');
+    const bubble    = botEl ? botEl.querySelector('#stream-bubble') : document.getElementById('stream-bubble');
+    // Helper: every time we mutate the streaming bubble, re-pin the typing
+    // indicator to the end of the message list (invariant).
+    const keepTypingLast = () => { if (typingEl && box) box.appendChild(typingEl); };
     let   fullText  = '';
     let   toolCards = '';
 
@@ -4882,12 +4940,14 @@ async function callLiveAgent(text, image) {
           case 'text_delta':
             fullText += event.text;
             bubble.innerHTML = toolCards + renderMd(fullText) + '<span class="t-blink">▌</span>';
+            keepTypingLast();
             pinChatToBottom();
             break;
 
           case 'tool_start':
             toolCards += buildToolCard(event.toolName, 'running', event.input);
             bubble.innerHTML = toolCards + (fullText ? renderMd(fullText) : '') + '<span class="t-blink">▌</span>';
+            keepTypingLast();
             pinChatToBottom();
             break;
 
@@ -4898,14 +4958,23 @@ async function callLiveAgent(text, image) {
               toolCards = toolCards.slice(0, last) + toolCards.slice(last).replace('tool-card running', `tool-card ${ok ? 'done' : 'fail'}`);
             }
             bubble.innerHTML = toolCards + (fullText ? renderMd(fullText) : '') + '<span class="t-blink">▌</span>';
+            keepTypingLast();
             pinChatToBottom();
             break;
           }
 
           case 'turn_complete':
           case 'done':
-            // Remove blinking cursor
-            bubble.innerHTML = toolCards + (fullText ? renderMd(fullText) : '(Done)');
+            // If the bot bubble ended up with no content (no text, no tool cards),
+            // remove it entirely so we don't leave a phantom empty bubble that
+            // creates the huge vertical gap Aerick saw.
+            if (!fullText && !toolCards) {
+              if (botEl && botEl.parentNode) botEl.parentNode.removeChild(botEl);
+            } else {
+              // Remove blinking cursor
+              bubble.innerHTML = toolCards + (fullText ? renderMd(fullText) : '(Done)');
+            }
+            keepTypingLast();
             pinChatToBottom();
             // Persist bot reply to conversation history
             if (fullText) convTrackBot(fullText);
@@ -4913,6 +4982,7 @@ async function callLiveAgent(text, image) {
 
           case 'error':
             bubble.innerHTML = toolCards + `<span style="color:var(--error)">⚠️ ${escHtml(event.error)}</span>`;
+            keepTypingLast();
             break;
 
           case 'credential_saved':
@@ -5039,8 +5109,16 @@ function handleFileSelect(e) {
   const file = e.target.files?.[0];
   if (!file) return;
   e.target.value = ''; // reset so same file can be reselected
+  ingestSelectedFile(file);
+}
 
-  // Route audio files to the voice transcription path
+/**
+ * Route a File into the right preview lane:
+ *  - audio   → voice transcription
+ *  - .json / .txt / text/plain / application/json → text-attachment chip
+ *  - everything else (images/docs) → image preview path
+ */
+function ingestSelectedFile(file) {
   const AUDIO_TYPES = /^audio\//;
   const AUDIO_EXTS  = /\.(mp3|mp4|m4a|wav|webm|ogg|flac)$/i;
   if (AUDIO_TYPES.test(file.type) || AUDIO_EXTS.test(file.name)) {
@@ -5048,7 +5126,24 @@ function handleFileSelect(e) {
     return;
   }
 
-  // Images and documents → existing preview/chat flow
+  const isTextFile =
+    /\.(json|txt)$/i.test(file.name) ||
+    file.type === 'application/json' ||
+    file.type === 'text/plain';
+
+  if (isTextFile) {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const content = String(ev.target.result || '');
+      chat.pendingTextFile = { name: file.name, content };
+      showTextFileChip(file.name, content.length);
+    };
+    reader.onerror = () => toast('Could not read file', 'error');
+    reader.readAsText(file);
+    return;
+  }
+
+  // Images and other binary docs → existing image-preview/chat flow
   const reader = new FileReader();
   reader.onload = (ev) => {
     const dataUrl  = ev.target.result;
@@ -5059,6 +5154,25 @@ function handleFileSelect(e) {
     showImagePreview(dataUrl, file.name);
   };
   reader.readAsDataURL(file);
+}
+
+// ── Text/JSON attachment chip ──────────────────────────────────────────────
+function showTextFileChip(name, byteLen) {
+  const prev = document.getElementById('textFilePreview');
+  if (!prev) return;
+  const kb = (byteLen / 1024).toFixed(1);
+  prev.style.display = 'block';
+  prev.innerHTML =
+    '<div class="textfile-chip">' +
+    '<span>📎 ' + escHtml(name) + ' (' + kb + ' KB)</span>' +
+    '<button onclick="clearTextFilePreview()" title="Remove">✕</button>' +
+    '</div>';
+}
+
+function clearTextFilePreview() {
+  chat.pendingTextFile = null;
+  const prev = document.getElementById('textFilePreview');
+  if (prev) { prev.style.display = 'none'; prev.innerHTML = ''; }
 }
 
 function showImagePreview(src, name) {
@@ -5340,6 +5454,80 @@ function setInputEnabled(on) {
   if (send) send.disabled = !on;
   if (send) send.style.opacity = on ? '1' : '0.4';
 }
+
+// ── Textarea auto-grow ─────────────────────────────────────────────────────
+function autoGrowGuideInput() {
+  const inp = document.getElementById('guideInput');
+  if (!inp) return;
+  inp.style.height = 'auto';
+  const next = Math.min(inp.scrollHeight, 160);
+  inp.style.height = next + 'px';
+}
+
+// ── Chat input wiring: keybindings, paste, drag-and-drop ──────────────────
+// Idempotent — DOMContentLoaded fires once but guard anyway.
+let _chatInputWired = false;
+function initChatInputBehaviours() {
+  if (_chatInputWired) return;
+  const inp = document.getElementById('guideInput');
+  const col = document.getElementById('guideCol');
+  if (!inp || !col) return;
+  _chatInputWired = true;
+
+  // Enter sends, Shift+Enter inserts newline
+  inp.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      sendGuideMsg();
+    }
+  });
+  inp.addEventListener('input', autoGrowGuideInput);
+
+  // Large-JSON paste → collapse to chip instead of dumping into textarea
+  inp.addEventListener('paste', (e) => {
+    const pasted = e.clipboardData?.getData('text');
+    if (!pasted || pasted.length <= 200) return;
+    const trimmed = pasted.trim();
+    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return;
+    try {
+      JSON.parse(trimmed);
+    } catch {
+      return;
+    }
+    // Looks like real JSON — capture as attached file, prevent textarea dump
+    e.preventDefault();
+    chat.pendingTextFile = { name: 'pasted.json', content: pasted };
+    showTextFileChip('pasted.json', pasted.length);
+  });
+
+  // Drag-and-drop overlay on the chat panel
+  let dragCounter = 0;
+  col.addEventListener('dragenter', (e) => {
+    if (!e.dataTransfer || !Array.from(e.dataTransfer.types || []).includes('Files')) return;
+    e.preventDefault();
+    dragCounter++;
+    col.classList.add('dragging');
+  });
+  col.addEventListener('dragover', (e) => {
+    if (!e.dataTransfer || !Array.from(e.dataTransfer.types || []).includes('Files')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  });
+  col.addEventListener('dragleave', () => {
+    dragCounter--;
+    if (dragCounter <= 0) { dragCounter = 0; col.classList.remove('dragging'); }
+  });
+  col.addEventListener('drop', (e) => {
+    if (!e.dataTransfer?.files?.length) return;
+    e.preventDefault();
+    dragCounter = 0;
+    col.classList.remove('dragging');
+    const file = e.dataTransfer.files[0];
+    ingestSelectedFile(file);
+  });
+}
+
+document.addEventListener('DOMContentLoaded', initChatInputBehaviours);
 
 // ── Tips chips ──────────────────────────────────────────────────────────────
 
