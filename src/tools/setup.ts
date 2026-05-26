@@ -786,13 +786,23 @@ export const saveIntegrationCredentialsTool = buildTool({
       ])
       .describe("Which integration to configure"),
     credentials: z
-      .record(z.string())
+      // Accept ANY value per key. Some integrations want strings (api keys,
+      // tokens). Google Calendar wants a JSON object OR a stringified JSON.
+      // Previously this was z.record(z.string()), which made the LLM loop —
+      // it tried the JSON as an object first (schema rejected), then as a
+      // string (schema accepted but the bot wasn't sure which was right).
+      // Now we accept both and normalize internally. Aerick incident
+      // (2026-05-27): bot got stuck calling save_integration_credentials
+      // 3+ times because of this exact schema mismatch.
+      .record(z.unknown())
       .describe(
-        "Key-value credential pairs. " +
+        "Key-value credential pairs. Most values are strings (API keys, tokens). " +
+        "EXCEPTION: googleSaKey may be passed as either (a) the JSON file contents " +
+        "as a single string, OR (b) a parsed object. The tool normalizes both. " +
         "gmail: {gmailUser, gmailPass} | " +
         "outlook: {outlookClientId, outlookSecret, outlookTenant, outlookEmail?} | " +
         "smtp: {smtpHost, smtpPort?, smtpUser, smtpPass} | " +
-        "google_calendar: {googleSaKey} | " +
+        "google_calendar: {googleSaKey} — paste the WHOLE .json file content here | " +
         "telegram: {telegramToken} | " +
         "slack: {slackToken} | " +
         "whatsapp_waha: {wahaUrl, wahaKey?} | " +
@@ -808,7 +818,17 @@ export const saveIntegrationCredentialsTool = buildTool({
       if (!cfg.credentials) cfg.credentials = {};
       if (!cfg.tools)       cfg.tools = {};
 
-      const { credentials: c, integration } = input;
+      // ── Normalize credentials to strings ────────────────────────────────
+      // The LLM may pass nested objects (e.g. parsed Google SA JSON) instead
+      // of strings. Stringify them so the downstream switch case (which
+      // assumes string values for JSON.parse) works without mode-switching.
+      const rawCreds = (input.credentials || {}) as Record<string, unknown>;
+      const c: Record<string, string> = {};
+      for (const [k, v] of Object.entries(rawCreds)) {
+        if (v === null || v === undefined) continue;
+        c[k] = typeof v === "string" ? v : JSON.stringify(v);
+      }
+      const integration = input.integration;
 
       // ── Format validation (before any write) ────────────────────────────────
       const validationError = validateCredentials(c);
@@ -861,10 +881,43 @@ export const saveIntegrationCredentialsTool = buildTool({
         }
 
         case "google_calendar": {
-          if (!c.googleSaKey)
-            return { success: false, error: "googleSaKey (full JSON string) is required." };
-          try { JSON.parse(c.googleSaKey); } catch {
-            return { success: false, error: "That doesn't look like valid JSON. Please paste the full contents of the service account key file." };
+          if (!c.googleSaKey) {
+            return {
+              success: false,
+              error: "Missing googleSaKey. Ask the user to paste the FULL contents of the service-account .json file they downloaded from Google Cloud Console. Do not retry — wait for the user to provide it.",
+            };
+          }
+          // Try to parse and validate the SA JSON structure. Give a SPECIFIC
+          // error per failure mode so the bot doesn't burn turns guessing.
+          let parsed: any;
+          try { parsed = JSON.parse(c.googleSaKey); } catch (e) {
+            return {
+              success: false,
+              error: "googleSaKey is not valid JSON. Likely cause: the user pasted only a fragment, or pasted a screenshot/image (which we can't read). Ask them to OPEN the .json file in a text editor and paste the entire contents. Do not retry until they re-send.",
+            };
+          }
+          // Reject OAuth2 client JSONs (common confusion — user downloads the
+          // "OAuth client ID" file instead of a service-account key).
+          if (parsed?.installed || parsed?.web) {
+            return {
+              success: false,
+              error: "This looks like an OAuth Client ID file (has 'installed' or 'web' key), not a Service Account key. The agent needs a SERVICE ACCOUNT key. Tell the user: in Google Cloud Console → IAM & Admin → Service Accounts → create or select one → Keys tab → Add Key → JSON. Paste THAT file's contents.",
+            };
+          }
+          // Check the required SA fields and report which are missing
+          const required = ["type", "project_id", "private_key", "client_email"];
+          const missing = required.filter((f) => !parsed?.[f]);
+          if (missing.length > 0) {
+            return {
+              success: false,
+              error: `Service account JSON is missing required fields: ${missing.join(", ")}. Ask the user to re-download a fresh key from Google Cloud Console (Service Accounts → Keys → Add Key → JSON).`,
+            };
+          }
+          if (parsed.type !== "service_account") {
+            return {
+              success: false,
+              error: `The JSON has type="${parsed.type}", but we need type="service_account". The user likely downloaded the wrong file type.`,
+            };
           }
           cfg.credentials.googleSaKey = c.googleSaKey;
           cfg.tools.google = {

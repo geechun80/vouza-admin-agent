@@ -5359,15 +5359,43 @@ function renderMd(t) {
   const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
   // Apply all inline formatting to an already-escaped string
-  const inline = s =>
-    // Clickable links  [text](url) — must run before bold/italic so *emphasis* inside link text works
-    s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
-        '<a href="$2" target="_blank" rel="noopener noreferrer" '
-      + 'style="color:var(--brand-light);text-decoration:underline">$1 ↗</a>')
-     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-     .replace(/\*(.*?)\*/g,     '<em>$1</em>')
-     .replace(/`([^`]+)`/g,
-        '<code style="background:rgba(255,255,255,0.1);padding:2px 5px;border-radius:4px;font-family:monospace;font-size:12px">$1</code>');
+  const inline = s => {
+    // STEP 1 — Markdown links [text](url) → anchor. Run first so an explicit
+    // [text](url) takes precedence over auto-linking, and so emphasis inside
+    // link text works without being eaten by the bold/italic regexes.
+    // We temporarily replace processed links with a sentinel so the auto-linker
+    // doesn't double-process them.
+    const linkPlaceholders = [];
+    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_m, text, url) => {
+      const html = `<a href="${url}" target="_blank" rel="noopener noreferrer" `
+                 + `style="color:var(--brand-light);text-decoration:underline">${text} ↗</a>`;
+      linkPlaceholders.push(html);
+      return `LINK${linkPlaceholders.length - 1}`;
+    });
+
+    // STEP 2 — Auto-link bare URLs.
+    // Aerick reported (2026-05-27): the bot tells users "Go to your Google
+    // Account settings at https://myaccount.google.com/" but the URL isn't
+    // clickable, so the user has to copy-paste it manually. Auto-linking
+    // here means EVERY URL the bot mentions becomes a one-tap link.
+    // Trailing punctuation (.,;:!?) is excluded from the URL so sentences
+    // ending with a URL still parse cleanly.
+    s = s.replace(/(https?:\/\/[^\s<>"]+?)([.,;:!?)\]]*)(?=\s|$|[<])/g,
+      (_m, url, trailing) =>
+        `<a href="${url}" target="_blank" rel="noopener noreferrer" `
+      + `style="color:var(--brand-light);text-decoration:underline">${url} ↗</a>${trailing}`
+    );
+
+    // STEP 3 — bold, italic, code (links are already isolated as placeholders)
+    s = s.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+         .replace(/\*(.*?)\*/g,     '<em>$1</em>')
+         .replace(/`([^`]+)`/g,
+            '<code style="background:rgba(255,255,255,0.1);padding:2px 5px;border-radius:4px;font-family:monospace;font-size:12px">$1</code>');
+
+    // STEP 4 — restore Markdown-link placeholders
+    s = s.replace(/LINK(\d+)/g, (_m, i) => linkPlaceholders[Number(i)]);
+    return s;
+  };
 
   // Process line by line so lists render properly
   const lines = t.split('\n');
