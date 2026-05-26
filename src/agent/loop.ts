@@ -33,6 +33,7 @@ import {
   isCircuitOpen,
 } from "./providerFailover.js";
 import { appendTurn } from "./conversationStore.js";
+import { logger } from "../util/logger.js";
 
 const DEFAULT_SYSTEM_PROMPT = `You are an AI-powered office administrator and executive assistant named Vouza.
 
@@ -316,8 +317,14 @@ export async function* agentLoop(
     const tiers = context.config.openrouterTiers ?? DEFAULT_OPENROUTER_TIERS;
     const complexity = classifyTask(userMessage, hasImage);
     activeModel = selectModelForComplexity(complexity, tiers);
-    // Emit routing decision so the UI can show which tier was selected
-    yield { type: "text_delta", text: `${TIER_LABELS[complexity]} — routing to ${activeModel}\n\n` };
+    // Log the routing decision for the dashboard's Live Log Tail + structured
+    // forensics. DO NOT yield as text_delta — Aerick reported (2026-05-26)
+    // that these "Balanced model — routing to ..." notices clutter the
+    // conversation flow in WhatsApp/Telegram and confuse end-users.
+    logger.info(
+      { event: "openrouter_route", complexity, tier: TIER_LABELS[complexity], model: activeModel },
+      `OpenRouter routed to ${activeModel} (${TIER_LABELS[complexity]})`
+    );
   }
 
   // ── Provider failover: pick the healthiest provider for this session ──
@@ -337,10 +344,12 @@ export async function* agentLoop(
   // since their model ID may not exist on the new provider.
   if (effectiveProvider !== primaryProvider) {
     activeModel = getDefaultModelFor(effectiveProvider);
-    yield {
-      type: "text_delta",
-      text: `_⚡ ${primaryProvider} is recovering — using ${effectiveProvider} for this conversation._\n\n`,
-    };
+    // Log the provider swap for forensics. Per Aerick's feedback, do NOT
+    // surface this as a chat message — the swap is transparent to the user.
+    logger.info(
+      { event: "provider_swap_at_startup", from: primaryProvider, to: effectiveProvider, model: activeModel },
+      `Provider in cooldown — using ${effectiveProvider} for this session`
+    );
   }
 
   // Cache Anthropic SDK clients across iterations (cheap to create, but
@@ -519,10 +528,13 @@ export async function* agentLoop(
 
           // ── Think Scrubber: strip <think>…</think> before showing user ───
           // Models like DeepSeek-R1 and extended-thinking Claude emit raw chain-
-          // of-thought inside <think> tags. We show a subtle indicator if present,
-          // then yield only the clean visible portion.
+          // of-thought inside <think> tags. We strip them silently and yield
+          // only the clean visible portion. Per Aerick's feedback (2026-05-26),
+          // do NOT emit a "💭 reasoning…" indicator in chat — it clutters the
+          // conversation flow especially when models emit multiple think blocks
+          // per response. Log instead so debugging info is preserved.
           if (hasThinkBlock(block.text)) {
-            yield { type: "text_delta", text: "💭 _reasoning…_\n\n" };
+            logger.debug({ event: "think_block_scrubbed", lengthChars: block.text.length }, "Stripped <think> block from assistant output");
           }
           const visible = scrubThinkBlocks(block.text);
           if (visible) {
@@ -657,11 +669,13 @@ export async function* agentLoop(
       if (errInfo.shouldRetry && retryCount < errInfo.maxRetries) {
         retryCount++;
         const waitMs = errInfo.waitMs(retryCount);
-        const waitSec = Math.round(waitMs / 1000);
-        yield {
-          type: "text_delta",
-          text: `\n_${errInfo.userMessage} (attempt ${retryCount}/${errInfo.maxRetries}, waiting ${waitSec}s…)_\n`,
-        };
+        // Log the retry for forensics — but DO NOT yield to chat. Users
+        // shouldn't see "rate limit reached, retrying in 5s..." mid-conversation.
+        // A slightly slower reply is fine; cluttering the chat is not.
+        logger.info(
+          { event: "api_retry", attempt: retryCount, maxRetries: errInfo.maxRetries, waitMs, errorType: errInfo.type },
+          `Transient API failure — retrying in ${Math.round(waitMs / 1000)}s (attempt ${retryCount}/${errInfo.maxRetries})`
+        );
         await new Promise((r) => setTimeout(r, waitMs));
         state.turnCount--; // don't charge this attempt against the turn budget
         continue;
@@ -670,7 +684,12 @@ export async function* agentLoop(
       // ── Context length: trigger compression and retry once ────────────────
       if (errInfo.type === "context_len" && retryCount < 1) {
         retryCount++;
-        yield { type: "text_delta", text: `\n_${errInfo.userMessage}_\n` };
+        // Compress silently — user shouldn't see "context too long, compressing..."
+        // mid-conversation; they should just see the answer arrive normally.
+        logger.info(
+          { event: "context_compression", provider: effectiveProvider, model: activeModel },
+          "Context window exceeded — compressing and retrying"
+        );
         // Force compress regardless of token threshold
         const { messages: compressed } = await compressContext(
           state.messages, apiKey, effectiveProvider, activeModel, 128_000, 0.99
@@ -703,10 +722,13 @@ export async function* agentLoop(
          errInfo.type === "permanent");
 
       if (canFailover) {
-        yield {
-          type: "text_delta",
-          text: `\n_⚡ ${effectiveProvider} is unavailable — switching to ${fallback} and retrying..._\n`,
-        };
+        // Log the failover for forensics. Per Aerick's feedback (2026-05-26),
+        // do NOT surface as chat text — the switch should be transparent so
+        // the user just sees a slightly delayed reply, not "switching to..."
+        logger.warn(
+          { event: "provider_failover_mid_request", from: effectiveProvider, to: fallback, errorType: errInfo.type },
+          `Mid-request provider failover: ${effectiveProvider} → ${fallback}`
+        );
         effectiveProvider = fallback;
         isAnthropic  = effectiveProvider === "anthropic";
         isOpenRouter = effectiveProvider === "openrouter";
