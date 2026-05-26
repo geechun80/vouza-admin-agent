@@ -15,6 +15,12 @@ Email · Calendar · WhatsApp · Telegram · Files · Voice · Web search — al
 
 </div>
 
+<p align="center">
+  <img src="docs/assets/hero-setup.png" alt="Vouza Admin Agent — Setup Panel with per-integration cards" width="900">
+</p>
+
+> *Per-integration cards with self-healing `detect → validate → test → save → confirm → live-test` pipeline. Click Test, watch each step succeed live.*
+
 ---
 
 ## ✨ Features
@@ -106,6 +112,10 @@ You only need **one**. Paste it directly into the Setup Wizard — no file editi
 ---
 
 ## 🔌 Connect Channels
+
+<p align="center">
+  <img src="docs/assets/hero-chat.png" alt="Vouza Guide Bot walking the user through setup" width="900">
+</p>
 
 After the wizard, use the **🔌 Setup** panel in the dashboard to connect channels. Each integration goes through a guided pipeline that tests credentials live before saving — no more "saved but doesn't work."
 
@@ -315,6 +325,14 @@ src/
 ```
 
 Key patterns documented in `memory/build_rules_agents.md` — 63 rules covering everything from listener structure to credential validation pipelines.
+
+---
+
+## 📚 Documentation
+
+- **[API Reference](docs/api-reference.md)** — HTTP endpoints, SSE events, auth
+- **[Architecture Deep-Dive](docs/architecture.md)** — Agent loop, orchestrator, integrations, security model
+- **[Customization Guide](docs/customization.md)** — Add tools, MCP servers, custom skills, branding
 
 ---
 
