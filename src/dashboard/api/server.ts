@@ -23,6 +23,8 @@ import {
 import { launchAgent, getAgentStatus, type AgentInstance } from "../../bridge/launcher.js";
 import { setAgentInstance } from "../../bridge/agentBridge.js";
 import { streamChat, clearSession } from "./chat.js";
+import { handleHealthDetailed } from "./health-detailed.js";
+import { handleSetupPipelineTest } from "./setup-pipeline.js";
 import { createMemoryStore } from "../../memory/store.js";
 import { handleWAHAEvent } from "../../whatsapp/wahaListener.js";
 import {
@@ -428,6 +430,21 @@ export async function startDashboard(port = 3456): Promise<void> {
       res.status(500).json({ error: String(err) });
     }
   });
+
+  // --- M3 Observability: detailed health (rolling-window rollups) ---
+  // Reads HealthMonitor's 1000-event-per-integration FIFO window and returns:
+  //   - per-integration p50/p95 latency (last 1h)
+  //   - last success / last error timestamps + message
+  //   - retry count (last 24h)
+  //   - webhook log (last 50 across integrations)
+  //   - failed actions (last 20 across integrations)
+  app.get("/api/health/detailed", requireLocalOrigin, handleHealthDetailed);
+
+  // --- M3 Setup Wizard: SSE-streaming pipeline test ---
+  // POST { integration, input } → SSE stream of step-by-step progress
+  // (detect → validate → test → save → confirm → live-test). Wraps the M2
+  // orchestrator runner and cleans up listeners on client disconnect.
+  app.post("/api/setup/pipeline/test", requireLocalOrigin, handleSetupPipelineTest);
 
   // --- Manually probe a single integration (live API call right now) ---
   app.post("/api/integrations/:id/probe", requireLocalOrigin, async (req, res) => {

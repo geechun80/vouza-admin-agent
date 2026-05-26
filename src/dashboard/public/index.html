@@ -1505,6 +1505,97 @@
     .skeleton-line.short  { width: 60%; }
     .skeleton-line.medium { width: 80%; }
 
+    /* ── Setup wizard panel (M3) ──────────────────────────────────── */
+    .setup-card-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 14px;
+    }
+    .setup-card {
+      padding: 16px; border-radius: 14px;
+      background: var(--bg-glass-card); border: 1px solid var(--border);
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .setup-card-head {
+      display: flex; align-items: center; gap: 10px;
+    }
+    .setup-card-icon {
+      width: 32px; height: 32px; flex-shrink: 0;
+    }
+    .setup-card-name {
+      font-size: 15px; font-weight: 600; color: var(--text); flex: 1;
+    }
+    .setup-status-badge {
+      display: inline-block; font-size: 10px; font-weight: 700;
+      letter-spacing: 0.4px; padding: 3px 8px; border-radius: 8px;
+      text-transform: uppercase;
+    }
+    .setup-status-badge.connected    { background: rgba(16,185,129,0.15);  color: #10b981; }
+    .setup-status-badge.configured   { background: rgba(124,58,237,0.15);  color: var(--brand-light); }
+    .setup-status-badge.not_configured { background: var(--bg-glass);     color: var(--text-muted); border: 1px solid var(--border); }
+    .setup-status-badge.error        { background: rgba(239,68,68,0.15);   color: #ef4444; }
+    .setup-card-actions {
+      display: flex; gap: 6px; flex-wrap: wrap;
+    }
+    .setup-card-actions .btn {
+      font-size: 12px; padding: 5px 10px; min-width: 0;
+    }
+    .setup-step-list {
+      font-size: 12px; color: var(--text-dim); line-height: 1.7;
+      background: var(--bg-glass); border-radius: 8px; padding: 8px 12px;
+      font-family: ui-monospace, "SF Mono", monospace;
+    }
+    .setup-step-line .running { color: #f59e0b; }
+    .setup-step-line .ok      { color: #10b981; }
+    .setup-step-line .failed  { color: #ef4444; }
+
+    /* Modal */
+    .setup-modal-backdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 1000; padding: 20px;
+    }
+    .setup-modal {
+      background: var(--bg-glass-card); border: 1px solid var(--border);
+      border-radius: 14px; width: 100%; max-width: 560px;
+      max-height: 86vh; overflow: hidden; display: flex; flex-direction: column;
+    }
+    .setup-modal-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 18px; border-bottom: 1px solid var(--border);
+    }
+    .setup-modal-body {
+      padding: 16px 18px; overflow-y: auto; flex: 1;
+    }
+    .setup-modal-body textarea {
+      width: 100%; min-height: 120px; resize: vertical;
+      background: var(--bg-glass); border: 1px solid var(--border);
+      color: var(--text); padding: 10px; border-radius: 8px;
+      font-family: ui-monospace, "SF Mono", monospace; font-size: 12px;
+    }
+    .setup-modal-drop {
+      border: 2px dashed var(--border); border-radius: 10px;
+      padding: 14px; text-align: center; color: var(--text-dim);
+      font-size: 12px; margin-top: 10px; cursor: pointer;
+    }
+    .setup-modal-drop.dragover { border-color: var(--brand-light); color: var(--text); }
+    .setup-modal-actions {
+      display: flex; justify-content: flex-end; gap: 8px;
+      padding: 14px 18px; border-top: 1px solid var(--border);
+    }
+
+    /* Detailed health table */
+    .detailed-health-table {
+      width: 100%; border-collapse: collapse; font-size: 12px;
+    }
+    .detailed-health-table th, .detailed-health-table td {
+      padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border);
+    }
+    .detailed-health-table th {
+      font-weight: 700; color: var(--text-dim); text-transform: uppercase;
+      font-size: 10px; letter-spacing: 0.5px;
+    }
+    .detailed-health-table tr:last-child td { border-bottom: none; }
+
     /* ── System Health panel ──────────────────────────────────────── */
     .health-grid {
       display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -2028,6 +2119,7 @@
             <button class="conv-memory-btn" onclick="openSettings()" title="Reconfigure agent" aria-label="Open settings to reconfigure the agent">⚙️ Settings</button>
             <button class="conv-memory-btn" onclick="toggleMemoryPanel()" title="What your agent has learned" aria-label="Open agent memories panel">🧠 Memories</button>
             <button class="conv-memory-btn" onclick="toggleHealthPanel()" title="Spend, provider health, uptime" aria-label="Open system health and operations panel">📊 Health</button>
+            <button class="conv-memory-btn" onclick="toggleSetupPanel()" title="Per-integration setup cards with Configure/Test/Reconnect" aria-label="Open integration setup wizard panel">🔌 Setup</button>
             <button class="conv-memory-btn" onclick="toggleTheme()" title="Switch between light and dark theme" aria-label="Toggle light/dark theme" id="themeToggleBtn">🌙</button>
           </div>
         </div>
@@ -2423,6 +2515,38 @@
         </div>
         <div id="healthPanelContent">
           <div style="color:var(--text-dim);font-size:14px">Loading…</div>
+        </div>
+      </div>
+
+      <!-- ════ SETUP WIZARD PANEL (M3) ════ -->
+      <!-- Structured per-integration cards: icon, status badge, Configure/Test/Reconnect/Disconnect.
+           Replaces chat-driven onboarding with a deterministic UI. -->
+      <div class="step-view" id="setup-panel" style="display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
+          <div>
+            <div class="step-eyebrow">Connections</div>
+            <h2 class="step-title" style="margin:0">🔌 Setup</h2>
+            <p class="step-subtitle" style="margin:4px 0 0">One card per integration. Click Test to run the full detect → validate → test → save → confirm → live-test pipeline.</p>
+          </div>
+          <button class="btn" onclick="toggleSetupPanel()" style="min-width:80px">← Back</button>
+        </div>
+        <div id="setupPanelContent">
+          <div style="color:var(--text-dim);font-size:14px">Loading integrations…</div>
+        </div>
+      </div>
+
+      <!-- Setup Wizard: Configure modal (shared across integrations) -->
+      <div id="setupConfigModal" class="setup-modal-backdrop" style="display:none" onclick="if(event.target===this)closeSetupConfigModal()">
+        <div class="setup-modal" role="dialog" aria-modal="true" aria-labelledby="setupModalTitle">
+          <div class="setup-modal-head">
+            <h3 id="setupModalTitle" style="margin:0;font-size:18px">Configure</h3>
+            <button class="btn" style="min-width:40px;padding:4px 10px" onclick="closeSetupConfigModal()">✕</button>
+          </div>
+          <div id="setupModalBody" class="setup-modal-body"></div>
+          <div class="setup-modal-actions">
+            <button class="btn" onclick="closeSetupConfigModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="runSetupPipelineFromModal()">Save &amp; Test</button>
+          </div>
         </div>
       </div>
 
@@ -5684,6 +5808,267 @@ let _healthRefreshTimer = null;
 // to a wizard step the user never visited → blank screen.
 let _healthOpenedFromLiveMode = false;
 
+// ═══════════════════════════════════════════════════════════════════════════
+// M3 — Setup wizard panel
+// Per-integration cards with Configure/Test/Reconnect/Disconnect. Test runs
+// the M2 self-healing pipeline via SSE and shows step-by-step progress.
+// ═══════════════════════════════════════════════════════════════════════════
+const SETUP_INTEGRATIONS = [
+  { id: 'gmail',           name: 'Gmail',           icon: 'gmail',
+    fields: [{ key: 'serviceAccountKey', label: 'Service account JSON key', kind: 'json',
+      hint: 'Paste the full JSON from Google Cloud → IAM → Service Accounts → Keys' }] },
+  { id: 'google_calendar', name: 'Google Calendar', icon: 'calendar',
+    fields: [{ key: 'serviceAccountKey', label: 'Service account JSON key', kind: 'json',
+      hint: 'Same key shape as Gmail — Domain-Wide Delegation must be enabled' }] },
+  { id: 'telegram',        name: 'Telegram',        icon: 'telegram',
+    fields: [{ key: 'botToken', label: 'Bot token', kind: 'text',
+      hint: 'From @BotFather — looks like 1234567890:ABCdef…' }] },
+  { id: 'whatsapp',        name: 'WhatsApp',        icon: 'whatsapp',
+    fields: [{ key: 'provider', label: 'Provider (web | waha | twilio)', kind: 'text',
+      hint: 'Most users: "web" (free, scan QR). Self-hosted: "waha". Business: "twilio"' }] },
+];
+
+let _setupPanelOpen = false;
+let _setupSavedStep = 1;
+let _setupOpenedFromLiveMode = false;
+let _setupActiveIntegrationId = null;
+let _setupModalForm = {};
+
+async function toggleSetupPanel() {
+  if (!_setupPanelOpen) {
+    const liveMode = document.getElementById('mainApp')?.classList.contains('live-mode');
+    _setupOpenedFromLiveMode = !!liveMode;
+    if (liveMode) document.getElementById('mainApp').classList.remove('live-mode');
+    else _setupSavedStep = state.step || 1;
+    _setupPanelOpen = true;
+    document.querySelectorAll('.step-view').forEach((el) => (el.style.display = 'none'));
+    document.getElementById('setup-panel').style.display = 'block';
+    await renderSetupPanel();
+    return;
+  }
+  _setupPanelOpen = false;
+  document.getElementById('setup-panel').style.display = 'none';
+  if (_setupOpenedFromLiveMode) activateLiveMode();
+  else showStep(_setupSavedStep || 1);
+  _setupOpenedFromLiveMode = false;
+}
+
+async function renderSetupPanel() {
+  const el = document.getElementById('setupPanelContent');
+  if (!el) return;
+  // Pull integration snapshot + detailed health in parallel
+  const [snapR, healthR] = await Promise.allSettled([
+    fetch('/api/integrations/snapshot').then((r) => r.ok ? r.json() : null).catch(() => null),
+    fetch('/api/health/detailed').then((r) => r.ok ? r.json() : null).catch(() => null),
+  ]);
+  const snap = snapR.status === 'fulfilled' ? snapR.value : null;
+  const detailed = healthR.status === 'fulfilled' ? healthR.value : null;
+  const snapshot = snap?.snapshot || {};
+  const detailedById = {};
+  for (const row of (detailed?.integrations || [])) detailedById[row.id] = row;
+
+  const cards = SETUP_INTEGRATIONS.map((cfg) => {
+    const live = snapshot[cfg.id]?.status?.status;
+    const det  = detailedById[cfg.id];
+    let badge = 'not_configured';
+    if (live === 'connected')   badge = 'connected';
+    else if (live === 'failed' || live === 'cooldown') badge = 'error';
+    else if (live && live !== 'disabled' && live !== 'unconfigured') badge = 'configured';
+    const errLine = det?.lastErrorMessage
+      ? `<div style="font-size:11px;color:#ef4444;margin-top:4px">⚠ ${escHtml(det.lastErrorMessage)}</div>`
+      : '';
+    const successLine = det?.lastSuccessTs
+      ? `<div style="font-size:11px;color:var(--text-dim);margin-top:2px">Last OK: ${escHtml(new Date(det.lastSuccessTs).toLocaleTimeString())}</div>`
+      : '';
+    return `
+      <div class="setup-card" data-integration="${cfg.id}">
+        <div class="setup-card-head">
+          <div class="setup-card-icon">${ICONS[cfg.icon] || ''}</div>
+          <div class="setup-card-name">${escHtml(cfg.name)}</div>
+          <span class="setup-status-badge ${badge}">${badge.replace('_', ' ')}</span>
+        </div>
+        ${errLine}${successLine}
+        <div class="setup-card-actions">
+          <button class="btn" onclick="openSetupConfigModal('${cfg.id}')">Configure</button>
+          <button class="btn btn-primary" onclick="runSetupPipelineUI('${cfg.id}')">Test</button>
+          <button class="btn" onclick="reconnectIntegration('${cfg.id}')">Reconnect</button>
+        </div>
+        <div class="setup-step-list" id="setup-steps-${cfg.id}" style="display:none"></div>
+      </div>
+    `;
+  }).join('');
+  el.innerHTML = `<div class="setup-card-grid">${cards}</div>`;
+}
+
+function openSetupConfigModal(integrationId) {
+  const cfg = SETUP_INTEGRATIONS.find((c) => c.id === integrationId);
+  if (!cfg) return;
+  _setupActiveIntegrationId = integrationId;
+  _setupModalForm = {};
+  document.getElementById('setupModalTitle').textContent = 'Configure ' + cfg.name;
+  const body = document.getElementById('setupModalBody');
+  body.innerHTML = cfg.fields.map((f) => {
+    const id = 'setup-field-' + f.key;
+    if (f.kind === 'json') {
+      return `
+        <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:4px">${escHtml(f.label)}</label>
+        <textarea id="${id}" placeholder="Paste JSON here…" oninput="setupAutoGrow(this); _setupModalForm['${f.key}']=this.value"></textarea>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">${escHtml(f.hint || '')}</div>
+        <div class="setup-modal-drop" id="${id}-drop"
+             ondragover="event.preventDefault();this.classList.add('dragover')"
+             ondragleave="this.classList.remove('dragover')"
+             ondrop="setupHandleDrop(event,'${f.key}')">
+          📎 Drag a .json or .txt file here, or click to pick
+          <input type="file" accept=".json,.txt,application/json,text/plain" style="display:none"
+                 onchange="setupHandleFilePick(event,'${f.key}')">
+        </div>
+      `;
+    }
+    return `
+      <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:4px;margin-top:10px">${escHtml(f.label)}</label>
+      <input id="${id}" type="text" oninput="_setupModalForm['${f.key}']=this.value"
+             style="width:100%;padding:8px 10px;background:var(--bg-glass);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px">
+      <div style="font-size:11px;color:var(--text-muted);margin-top:4px">${escHtml(f.hint || '')}</div>
+    `;
+  }).join('');
+  // Wire up drop-zone click → file picker
+  cfg.fields.forEach((f) => {
+    if (f.kind === 'json') {
+      const drop = document.getElementById('setup-field-' + f.key + '-drop');
+      if (drop) drop.addEventListener('click', () => drop.querySelector('input[type=file]')?.click());
+    }
+  });
+  document.getElementById('setupConfigModal').style.display = 'flex';
+}
+
+function closeSetupConfigModal() {
+  document.getElementById('setupConfigModal').style.display = 'none';
+  _setupActiveIntegrationId = null;
+  _setupModalForm = {};
+}
+
+function setupAutoGrow(textarea) {
+  textarea.style.height = 'auto';
+  textarea.style.height = Math.min(textarea.scrollHeight, 400) + 'px';
+}
+
+// Rule 61: split .json/.txt files from images before routing
+function setupHandleDrop(event, key) {
+  event.preventDefault();
+  const drop = event.currentTarget;
+  drop.classList.remove('dragover');
+  const files = Array.from(event.dataTransfer?.files || []);
+  for (const file of files) {
+    const isTextLike = file.type === 'application/json' || file.type === 'text/plain'
+                    || /\.(json|txt)$/i.test(file.name);
+    if (!isTextLike) {
+      showToast('Only .json or .txt files are accepted here.', 'warn');
+      continue;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const value = String(reader.result || '');
+      const ta = document.getElementById('setup-field-' + key);
+      if (ta) { ta.value = value; setupAutoGrow(ta); }
+      _setupModalForm[key] = value;
+    };
+    reader.readAsText(file);
+  }
+}
+
+function setupHandleFilePick(event, key) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  // Reuse drop handler logic by faking a dataTransfer payload
+  setupHandleDrop({ preventDefault: () => {}, currentTarget: event.target.closest('.setup-modal-drop'), dataTransfer: { files: [file] } }, key);
+}
+
+async function runSetupPipelineFromModal() {
+  if (!_setupActiveIntegrationId) return;
+  const id = _setupActiveIntegrationId;
+  const input = { ..._setupModalForm };
+  closeSetupConfigModal();
+  await runSetupPipelineUI(id, input);
+}
+
+async function runSetupPipelineUI(integrationId, input) {
+  const stepsEl = document.getElementById('setup-steps-' + integrationId);
+  if (stepsEl) {
+    stepsEl.style.display = 'block';
+    stepsEl.innerHTML = '<div style="color:var(--text-dim)">Starting pipeline…</div>';
+  }
+  const stepState = {};  // step name → { status, ms }
+  const renderSteps = () => {
+    if (!stepsEl) return;
+    stepsEl.innerHTML = Object.entries(stepState).map(([name, s]) => {
+      const icon = s.status === 'running' ? '⟳' : s.status === 'ok' ? '✓' : '✗';
+      const ms = s.ms != null ? ` <span style="color:var(--text-muted)">(${s.ms}ms)</span>` : '';
+      return `<div class="setup-step-line"><span class="${s.status}">${icon} ${escHtml(name)}</span>${ms}</div>`;
+    }).join('');
+  };
+
+  try {
+    const res = await fetch('/api/setup/pipeline/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ integration: integrationId, input: input || {} }),
+    });
+    if (!res.ok || !res.body) {
+      if (stepsEl) stepsEl.innerHTML = `<div style="color:#ef4444">⚠️ HTTP ${res.status}</div>`;
+      return;
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      // SSE framing: events separated by \n\n
+      const frames = buffer.split('\n\n');
+      buffer = frames.pop() || '';
+      for (const frame of frames) {
+        const eventLine = frame.split('\n').find((l) => l.startsWith('event:'));
+        const dataLine  = frame.split('\n').find((l) => l.startsWith('data:'));
+        if (!eventLine || !dataLine) continue;
+        const evt = eventLine.slice(6).trim();
+        let payload = {};
+        try { payload = JSON.parse(dataLine.slice(5).trim()); } catch {}
+        if (evt === 'step') {
+          stepState[payload.step] = { status: payload.status, ms: payload.ms };
+          renderSteps();
+        } else if (evt === 'done') {
+          renderSteps();
+          if (stepsEl) {
+            const tail = payload.success
+              ? `<div style="color:#10b981;margin-top:6px">✅ Pipeline succeeded (${payload.totalMs}ms)</div>`
+              : `<div style="color:#ef4444;margin-top:6px">❌ Pipeline failed at step "${escHtml(payload.stepReached || '?')}"<br>${escHtml(payload.error || '')}${payload.suggestedFix ? '<br><em style="color:var(--text-dim)">' + escHtml(payload.suggestedFix) + '</em>' : ''}</div>`;
+            stepsEl.innerHTML += tail;
+          }
+          // Refresh badges after pipeline completes
+          renderSetupPanel().catch(() => {});
+        } else if (evt === 'error') {
+          if (stepsEl) stepsEl.innerHTML += `<div style="color:#ef4444">⚠️ ${escHtml(payload.error || 'error')}</div>`;
+        }
+      }
+    }
+  } catch (err) {
+    if (stepsEl) stepsEl.innerHTML = `<div style="color:#ef4444">⚠️ ${escHtml(String(err))}</div>`;
+  }
+}
+
+async function reconnectIntegration(integrationId) {
+  try {
+    const r = await fetch('/api/integrations/' + encodeURIComponent(integrationId) + '/reset', { method: 'POST' });
+    const data = await r.json();
+    showToast(data.ok ? ('✓ ' + (data.message || 'Reconnected')) : ('⚠ ' + (data.message || 'Reset failed')),
+              data.ok ? 'ok' : 'warn');
+    renderSetupPanel().catch(() => {});
+  } catch (e) {
+    showToast('Reconnect failed: ' + e, 'warn');
+  }
+}
+
 async function toggleHealthPanel() {
   // Opening flow ----------------------------------------------------------
   if (!_healthPanelOpen) {
@@ -5924,14 +6309,162 @@ function renderHealthPanel({ budget, health, agent }) {
     </div>
   `;
 
+  // ── M3 detailed-health placeholder — populated async by loadDetailedHealth
+  const detailedHealthSection = `
+    <div class="health-section">
+      <h3>🔌 Per-integration health (last 1h)</h3>
+      <div style="font-size:13px;color:var(--text-dim);line-height:1.6;padding:0 4px;margin-bottom:8px">
+        Latency percentiles, retry counts, and last error per integration. Sourced from the rolling 1000-event window.
+      </div>
+      <div id="detailedIntegrationTable">
+        <div style="color:var(--text-dim);font-size:12px;padding:6px 4px">Loading…</div>
+      </div>
+    </div>
+    <div class="health-section">
+      <h3>📥 Recent webhooks (last 24h, capped at 50)</h3>
+      <div id="detailedWebhookLog">
+        <div style="color:var(--text-dim);font-size:12px;padding:6px 4px">Loading…</div>
+      </div>
+    </div>
+    <div class="health-section">
+      <h3>❌ Recent failed actions (last 24h, capped at 20)</h3>
+      <div id="detailedFailuresLog">
+        <div style="color:var(--text-dim);font-size:12px;padding:6px 4px">Loading…</div>
+      </div>
+    </div>
+  `;
+
+  // Kick off the async fetch — the placeholders above hydrate when it returns.
+  setTimeout(loadDetailedHealth, 0);
+
   return `
     <div class="health-grid">${statCards.join('')}</div>
     ${providerRows}
     ${spendRows}
+    ${detailedHealthSection}
     ${diagnostics}
     ${hints}
     ${backup}
   `;
+}
+
+async function loadDetailedHealth() {
+  let data = null;
+  try {
+    const r = await fetch('/api/health/detailed');
+    if (r.ok) data = await r.json();
+  } catch { /* fallthrough */ }
+
+  const tableEl = document.getElementById('detailedIntegrationTable');
+  if (tableEl) {
+    const rows = (data?.integrations || []);
+    if (!rows.length) {
+      tableEl.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:6px 4px">No integration activity recorded yet.</div>';
+    } else {
+      tableEl.innerHTML = `
+        <div style="overflow-x:auto">
+          <table class="detailed-health-table">
+            <thead><tr>
+              <th>Integration</th><th>Status</th><th>Last OK</th><th>p50</th><th>p95</th>
+              <th>Calls 1h</th><th>Retries 24h</th><th>Last error</th>
+            </tr></thead>
+            <tbody>
+              ${rows.map((r) => {
+                const lastOk = r.lastSuccessTs ? new Date(r.lastSuccessTs).toLocaleTimeString() : '—';
+                const err = r.lastErrorMessage
+                  ? `<span style="color:#ef4444" title="${escHtml(r.lastErrorMessage)}">${escHtml(String(r.lastErrorMessage).slice(0, 60))}${r.lastErrorMessage.length > 60 ? '…' : ''}</span>`
+                  : '<span style="color:var(--text-muted)">—</span>';
+                return `<tr>
+                  <td><strong>${escHtml(r.displayName)}</strong></td>
+                  <td>${escHtml(r.status?.status || 'unknown')}</td>
+                  <td>${escHtml(lastOk)}</td>
+                  <td>${r.p50LatencyMs}ms</td>
+                  <td>${r.p95LatencyMs}ms</td>
+                  <td>${r.callCount1h}</td>
+                  <td>${r.retryCount24h}</td>
+                  <td>${err}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+  }
+
+  const whEl = document.getElementById('detailedWebhookLog');
+  if (whEl) {
+    const log = data?.webhookLog || [];
+    if (!log.length) {
+      whEl.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:6px 4px">No webhook activity recorded.</div>';
+    } else {
+      whEl.innerHTML = `
+        <div style="overflow-x:auto">
+          <table class="detailed-health-table">
+            <thead><tr><th>Time</th><th>Integration</th><th>Source</th><th>Verified</th><th>Result</th></tr></thead>
+            <tbody>
+              ${log.map((w) => `
+                <tr>
+                  <td>${escHtml(new Date(w.ts).toLocaleTimeString())}</td>
+                  <td>${escHtml(w.integration)}</td>
+                  <td>${escHtml(w.source)}</td>
+                  <td>${w.verified ? '<span style="color:#10b981">✓ verified</span>' : '<span style="color:#ef4444">✗ rejected</span>'}</td>
+                  <td>${w.ok ? '<span style="color:#10b981">ok</span>' : '<span style="color:#ef4444">fail</span>'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+  }
+
+  const failEl = document.getElementById('detailedFailuresLog');
+  if (failEl) {
+    const failures = data?.failures || [];
+    if (!failures.length) {
+      failEl.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:6px 4px">No failed actions recorded.</div>';
+    } else {
+      failEl.innerHTML = `
+        <div style="overflow-x:auto">
+          <table class="detailed-health-table">
+            <thead><tr><th>Time</th><th>Integration</th><th>Source</th><th>Error</th><th></th></tr></thead>
+            <tbody>
+              ${failures.map((f, i) => `
+                <tr>
+                  <td>${escHtml(new Date(f.ts).toLocaleTimeString())}</td>
+                  <td>${escHtml(f.integration)}</td>
+                  <td>${escHtml(f.source)}</td>
+                  <td style="color:#ef4444">${escHtml(String(f.error).slice(0, 120))}${f.error.length > 120 ? '…' : ''}</td>
+                  <td><button class="btn" style="font-size:11px;padding:3px 8px" onclick="retryFailedAction('${escHtml(f.integration)}', ${i})">Retry</button></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+  }
+}
+
+async function retryFailedAction(integrationId, _idx) {
+  // The "retry" surface re-runs the integration's pipeline test (M2 self-heal)
+  // — the same code path used by Setup → Test. That's the closest thing to a
+  // structured retry given that the original action payload isn't replayable
+  // from the rolled-up event log alone.
+  try {
+    showToast('Re-running integration pipeline for ' + integrationId + '…', 'ok');
+    const res = await fetch('/api/setup/pipeline/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ integration: integrationId, input: {} }),
+    });
+    // Consume the SSE stream so the server's listeners fire correctly
+    if (res.body) { try { await res.body.getReader().read(); } catch {} }
+    loadDetailedHealth();
+  } catch (e) {
+    showToast('Retry failed: ' + e, 'warn');
+  }
 }
 
 // ── Live connection diagnostics — hits each integration's real endpoint ──
