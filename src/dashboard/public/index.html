@@ -4091,14 +4091,14 @@ function getGuideScripts(step) {
   const hi   = name ? `Hi **${name}**! ` : '';
   return {
     1: [
-      "👋 Hi! I'm **Vee**, your Vouza AI assistant. I'm here to help you set up your AI — and handle any office task once you're live.",
-      "Fill in your name and email above, then pick your AI model. **Claude Sonnet** is the best choice for most people.",
+      "👋 Hi! I'm **Vee**, your Vouza AI assistant. I'm here to help you set up — and handle any office task once you're live.",
+      "Just fill in your name and email above, then click Continue. I'll take care of the technical bits for you.",
       "Once you complete setup I can send emails, read documents, book meetings, transcribe voice notes, and more!",
     ],
     2: [
-      `${hi}Now let's connect your apps. 🔌 Paste your **AI API key** first — that's what powers my brain.`,
-      "Once your key is saved, type anything below and I'll respond as a real AI assistant — not just a script.",
-      "Also connect **Email** and **Telegram** — those two unlock the most powerful features, including mobile access from your phone.",
+      `${hi}Now let's connect your apps.`,
+      "Pick the apps you use most — **Email** and **Telegram** are the most popular. Telegram lets you chat with me from your phone, which is a game-changer.",
+      "Once anything is connected, type a message below and I'll respond as a real AI assistant — not just a script.",
     ],
     3: [
       `${hi}Great progress! ⚡ Now choose which tasks you want me to handle automatically.`,
@@ -4124,10 +4124,10 @@ function getDynamicTips(step) {
 
   switch (step) {
     case 1:
-      return ['What AI model is best for me?', 'What can you do once set up?', 'Is my data kept private?'];
+      return ['What can you do once I\'m set up?', 'How long does setup take?', 'Is my data kept private?'];
     case 2: {
       const tips = [];
-      if (!hasKey)      tips.push('How do I get an API key?');
+      if (!hasKey)      tips.push('Walk me through getting started →');
       if (!hasEmail)    tips.push('Help me connect Gmail →');
       if (!hasTelegram) tips.push('Set up my Telegram bot →');
       if (!hasCalendar) tips.push('Connect Google Calendar →');
