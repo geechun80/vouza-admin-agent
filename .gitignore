@@ -32,3 +32,6 @@ Thumbs.db
 # Editor
 .vscode/settings.json
 .idea/
+
+# Understand-Anything cache (per-dev, regenerate locally)
+.understand-anything/
