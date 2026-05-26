@@ -8,8 +8,10 @@
 
 export * from "./types.js";
 export { runPipeline } from "./runner.js";
+export { canonicalizeIntegrationName, knownCanonicalNames } from "./canonicalize.js";
 
 import type { Pipeline } from "./types.js";
+import { canonicalizeIntegrationName } from "./canonicalize.js";
 import { googlePipeline, makeGooglePipeline, type GoogleVariant } from "./pipelines/google.js";
 import { telegramPipeline, makeTelegramPipeline } from "./pipelines/telegram.js";
 import { whatsappPipeline, makeWhatsAppPipeline } from "./pipelines/whatsapp.js";
@@ -28,7 +30,10 @@ export {
  * share the Google pipeline — the caller must pass `variant` in the input.
  */
 export function getPipeline(integration: string): Pipeline | null {
-  switch (integration) {
+  // Try canonicalization first so casual aliases ("gcal", "Gmail",
+  // "whatsapp web") resolve to the same pipeline as the canonical key.
+  const canonical = canonicalizeIntegrationName(integration) ?? integration;
+  switch (canonical) {
     case "gmail":
     case "google_calendar":
       return googlePipeline;
@@ -43,9 +48,10 @@ export function getPipeline(integration: string): Pipeline | null {
   }
 }
 
-/** Map an integration id to the variant flag expected by the Google pipeline. */
+/** Map an integration id (or alias) to the Google pipeline variant flag. */
 export function googleVariantFor(integration: string): GoogleVariant | null {
-  if (integration === "gmail") return "gmail";
-  if (integration === "google_calendar") return "google_calendar";
+  const canonical = canonicalizeIntegrationName(integration) ?? integration;
+  if (canonical === "gmail") return "gmail";
+  if (canonical === "google_calendar") return "google_calendar";
   return null;
 }

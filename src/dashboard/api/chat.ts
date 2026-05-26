@@ -373,7 +373,19 @@ to apply. Relay both verbatim and WAIT for the user.
 
 For all OTHER integrations (outlook, smtp, slack, voice_groq, voice_openai,
 ai_provider, whatsapp_twilio), continue to use save_integration_credentials
-as before — the pipeline does not cover them yet.`;
+as before — the pipeline does not cover them yet.
+
+**Integration names are forgiving.** The pipeline accepts canonical keys AND
+common aliases — "google cal", "gcal", "Gmail", "WhatsApp Web", "tg" all
+resolve to the right pipeline. Use whatever name reads naturally; do not
+agonize over exact spelling.
+
+**Belt-and-suspenders:** if you accidentally call the older
+save_integration_credentials tool for one of the 4 pipeline-supported
+integrations (gmail / google_calendar / telegram / whatsapp), the system
+will silently route the call through run_integration_pipeline anyway. The
+preferred tool is still run_integration_pipeline — but a wrong pick will
+not break the user's flow.`;
 
 
 // ─────────────────────────────────────────────────────────────────────────────
