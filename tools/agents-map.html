@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Admin Agent — Agents & Skills Map</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+    background: radial-gradient(ellipse at top, #1a0b2e 0%, #080b16 60%);
+    color: #f1f5f9;
+    padding: 40px 36px;
+    min-height: 100vh;
+  }
+  header {
+    text-align: center;
+    margin-bottom: 32px;
+  }
+  h1 {
+    font-size: 30px;
+    font-weight: 700;
+    background: linear-gradient(135deg, #7c3aed, #a78bfa, #06b6d4);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    margin-bottom: 8px;
+  }
+  .subtitle {
+    font-size: 13px;
+    color: #94a3b8;
+  }
+  .total-pill {
+    display: inline-block;
+    margin-top: 10px;
+    padding: 4px 14px;
+    background: rgba(124,58,237,0.15);
+    border: 1px solid rgba(124,58,237,0.4);
+    border-radius: 999px;
+    font-size: 12px;
+    color: #a78bfa;
+    font-weight: 600;
+  }
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 24px;
+    max-width: 1380px;
+    margin: 0 auto;
+  }
+  .column {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 16px;
+    padding: 22px;
+  }
+  .col-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+  }
+  .col-title {
+    font-size: 16px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .col-count {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 999px;
+  }
+  .col-sub {
+    font-size: 11px;
+    color: #94a3b8;
+    margin-bottom: 18px;
+    line-height: 1.5;
+  }
+  .group {
+    margin-bottom: 16px;
+  }
+  .group-head {
+    font-size: 11px;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+  .chip {
+    font-size: 11px;
+    padding: 4px 9px;
+    border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.1);
+    background: rgba(255,255,255,0.04);
+    color: #cbd5e1;
+    line-height: 1.4;
+  }
+
+  /* Color themes per column */
+  .col-dev {
+    border-color: rgba(124,58,237,0.25);
+  }
+  .col-dev .col-count {
+    background: rgba(124,58,237,0.2);
+    color: #c4b5fd;
+    border: 1px solid rgba(124,58,237,0.4);
+  }
+  .col-dev .chip.highlight {
+    background: rgba(124,58,237,0.12);
+    border-color: rgba(124,58,237,0.35);
+    color: #ddd6fe;
+  }
+
+  .col-product {
+    border-color: rgba(16,185,129,0.25);
+  }
+  .col-product .col-count {
+    background: rgba(16,185,129,0.2);
+    color: #86efac;
+    border: 1px solid rgba(16,185,129,0.4);
+  }
+  .col-product .chip {
+    background: rgba(16,185,129,0.08);
+    border-color: rgba(16,185,129,0.2);
+    color: #d1fae5;
+  }
+
+  .col-plugin {
+    border-color: rgba(6,182,212,0.25);
+  }
+  .col-plugin .col-count {
+    background: rgba(6,182,212,0.2);
+    color: #67e8f9;
+    border: 1px solid rgba(6,182,212,0.4);
+  }
+  .col-plugin .chip {
+    background: rgba(6,182,212,0.08);
+    border-color: rgba(6,182,212,0.2);
+    color: #cffafe;
+  }
+  .col-plugin .chip code {
+    color: #67e8f9;
+    font-size: 10px;
+    background: none;
+  }
+  footer {
+    text-align: center;
+    margin-top: 28px;
+    font-size: 11px;
+    color: #475569;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🧠 Vouza Admin Agent — Agents &amp; Skills Map</h1>
+  <div class="subtitle">55 agents and skills across three runtime contexts</div>
+  <div class="total-pill">31 dev subagents · 16 product skills · 8 plugin skills</div>
+</header>
+
+<div class="layout">
+
+  <!-- COLUMN 1: Claude Code Subagents -->
+  <div class="column col-dev">
+    <div class="col-head">
+      <div class="col-title">🤖 Claude Code Subagents</div>
+      <div class="col-count">31</div>
+    </div>
+    <div class="col-sub">.claude/agents/ — invoked when Vouza devs work on this repo via Claude Code. Markdown personality definitions, no runtime code.</div>
+
+    <div class="group">
+      <div class="group-head">144 ai employees library · 10</div>
+      <div class="chips">
+        <span class="chip">accounts-payable-agent</span>
+        <span class="chip">customer-service</span>
+        <span class="chip">data-consolidation-agent</span>
+        <span class="chip">engineering-ai-engineer</span>
+        <span class="chip">engineering-backend-architect</span>
+        <span class="chip">engineering-devops-automator</span>
+        <span class="chip">engineering-senior-developer</span>
+        <span class="chip">engineering-technical-writer</span>
+        <span class="chip highlight">engineering-understand-anything</span>
+        <span class="chip">project-manager-senior</span>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="group-head">Specialists · 5</div>
+      <div class="chips">
+        <span class="chip">specialized-chief-of-staff</span>
+        <span class="chip">specialized-document-generator</span>
+        <span class="chip">specialized-mcp-builder</span>
+        <span class="chip">specialized-model-qa</span>
+        <span class="chip">specialized-workflow-architect</span>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="group-head">Support roles · 7</div>
+      <div class="chips">
+        <span class="chip">report-distribution-agent</span>
+        <span class="chip">support-analytics-reporter</span>
+        <span class="chip">support-executive-summary-generator</span>
+        <span class="chip">support-finance-tracker</span>
+        <span class="chip">support-infrastructure-maintainer</span>
+        <span class="chip">support-legal-compliance-checker</span>
+        <span class="chip">support-support-responder</span>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="group-head">Understand-Anything analysts · 9</div>
+      <div class="chips">
+        <span class="chip highlight">architecture-analyzer</span>
+        <span class="chip highlight">project-scanner</span>
+        <span class="chip highlight">tour-builder</span>
+        <span class="chip highlight">file-analyzer</span>
+        <span class="chip highlight">domain-analyzer</span>
+        <span class="chip highlight">article-analyzer</span>
+        <span class="chip highlight">graph-reviewer</span>
+        <span class="chip highlight">assemble-reviewer</span>
+        <span class="chip highlight">knowledge-graph-guide</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- COLUMN 2: Runtime Product Skills -->
+  <div class="column col-product">
+    <div class="col-head">
+      <div class="col-title">🛠️ Runtime Product Skills</div>
+      <div class="col-count">16</div>
+    </div>
+    <div class="col-sub">src/skills/bundled/ — auto-loaded at boot by src/skills/loader.ts. These are what your <b>customers' agents</b> use to execute business tasks.</div>
+
+    <div class="group">
+      <div class="group-head">Inbox &amp; messaging · 4</div>
+      <div class="chips">
+        <span class="chip">triage-email</span>
+        <span class="chip">draft-reply</span>
+        <span class="chip">follow-up-emails</span>
+        <span class="chip">handle-support</span>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="group-head">Calendar &amp; meetings · 2</div>
+      <div class="chips">
+        <span class="chip">schedule-meeting</span>
+        <span class="chip">meeting-notes</span>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="group-head">Reporting &amp; briefings · 4</div>
+      <div class="chips">
+        <span class="chip">daily-briefing</span>
+        <span class="chip">weekly-report</span>
+        <span class="chip">analytics-report</span>
+        <span class="chip">distribute-report</span>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="group-head">Finance &amp; data · 4</div>
+      <div class="chips">
+        <span class="chip">process-invoice</span>
+        <span class="chip">expense-tracking</span>
+        <span class="chip">consolidate-data</span>
+        <span class="chip">data-entry</span>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="group-head">Sales &amp; strategy · 2</div>
+      <div class="chips">
+        <span class="chip">lead-qualification</span>
+        <span class="chip">chief-of-staff</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- COLUMN 3: Understand-Anything Plugin Skills -->
+  <div class="column col-plugin">
+    <div class="col-head">
+      <div class="col-title">🌐 Plugin Slash Commands</div>
+      <div class="col-count">8</div>
+    </div>
+    <div class="col-sub">Understand-Anything plugin · installed globally at ~/.claude/plugins/marketplaces/understand-anything/. Slash commands available in Claude Code CLI after /plugin install.</div>
+
+    <div class="group">
+      <div class="group-head">Core analysis · 2</div>
+      <div class="chips">
+        <span class="chip"><code>/understand</code> — full graph build</span>
+        <span class="chip"><code>/understand-dashboard</code> — browser dashboard</span>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="group-head">Exploration · 3</div>
+      <div class="chips">
+        <span class="chip"><code>/understand-chat</code> — Q&amp;A grounded in graph</span>
+        <span class="chip"><code>/understand-explain</code> — deep-dive on file/function</span>
+        <span class="chip"><code>/understand-onboard</code> — guided tour</span>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="group-head">Change &amp; impact · 1</div>
+      <div class="chips">
+        <span class="chip"><code>/understand-diff</code> — uncommitted change impact</span>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="group-head">Domain mapping · 2</div>
+      <div class="chips">
+        <span class="chip"><code>/understand-domain</code> — business-domain view</span>
+        <span class="chip"><code>/understand-knowledge</code> — analyze knowledge bases</span>
+      </div>
+    </div>
+
+    <div class="group" style="margin-top: 22px; padding: 12px; background: rgba(6,182,212,0.05); border: 1px dashed rgba(6,182,212,0.3); border-radius: 8px;">
+      <div style="font-size: 11px; color: #67e8f9; line-height: 1.5;">
+        <b>First-pass scan ran:</b> 250 files, 106 source · classified <b>large</b> · biggest module <code style="background:none;color:#cffafe">src/tools/ (25 files)</code>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<footer>
+  Vouza Admin Agent · 319/319 tests · 0 npm audit vulns · generated 2026-05-28 · commit d950a56
+</footer>
+
+</body>
+</html>
