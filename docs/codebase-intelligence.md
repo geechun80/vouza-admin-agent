@@ -10,19 +10,39 @@ This doc explains **how we use it** across three contexts.
 
 ## Install (one-time, per dev)
 
+### Already pre-installed on geechun80's machine (2026-05-28)
+
+The marketplace is **already registered globally** at `~/.claude/plugins/known_marketplaces.json` and cloned to `~/.claude/plugins/marketplaces/understand-anything/` with the core package pre-built. Skip to "Activate" below.
+
+### Fresh machine
+
 Inside any Claude Code session:
 
 ```
 /plugin marketplace add Lum1104/Understand-Anything
-/plugin install understand-anything
+/plugin install understand-anything@understand-anything
 ```
 
 Restart Claude Code after install. The plugin then exposes its slash commands and the analysis pipeline.
 
+### Activate (if marketplace is already registered)
+
+```
+/plugin install understand-anything@understand-anything
+```
+
+Restart Claude Code. The slash commands (`/understand`, `/understand-chat`, `/understand-dashboard`, `/understand-diff`, `/understand-explain`, `/understand-onboard`, `/understand-domain`, `/understand-knowledge`) become available.
+
 **Other CLIs / IDEs:**
 - Cursor / VS Code + Copilot — auto-discovers when this repo's tree is open
-- Codex / OpenCode / Gemini CLI / others — use the shell installer at `~/.understand-anything/repo/install.sh <platform>`
+- Codex / OpenCode / Gemini CLI / others — use the shell installer at `~/.claude/plugins/marketplaces/understand-anything/install.sh <platform>`
 - Full table: see [Platform Compatibility](https://github.com/Lum1104/Understand-Anything#platform-compatibility)
+
+### Why no project-level `.claude/skills/` mirror
+
+The plugin's skill scripts import from `packages/core/dist/` via relative paths — they only resolve correctly inside the plugin's workspace at `~/.claude/plugins/marketplaces/understand-anything/`. Mirroring the skills into the project's `.claude/skills/` would let Claude Code discover them but execution would fail. Better to let the plugin runtime serve them.
+
+The 10 plugin agents (`.claude/agents/architecture-analyzer.md`, `tour-builder.md`, etc.) ARE mirrored locally — those are pure markdown personality definitions with no script dependencies, useful as per-project context.
 
 ---
 
