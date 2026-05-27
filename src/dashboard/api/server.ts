@@ -239,7 +239,20 @@ export async function startDashboard(port = 3456): Promise<void> {
 
   const app = express();
   app.use(express.json({ limit: "30mb" })); // 30 MB to accommodate base64 audio uploads
-  app.use(express.static(PUBLIC_DIR));
+  // Static files — force HTML to revalidate on every load so dashboard updates
+  // are picked up immediately after `git pull && npm run build`. Without this,
+  // browsers cache index.html indefinitely and users see stale UI (Aerick bug,
+  // 2026-05-28: M1 chat-ordering fix wasn't visible because the browser kept
+  // serving cached HTML). Other static assets (images, fonts) keep default caching.
+  app.use(express.static(PUBLIC_DIR, {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith(".html")) {
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+        res.setHeader("Pragma", "no-cache");
+        res.setHeader("Expires", "0");
+      }
+    },
+  }));
 
   // ── Dashboard auth (active only in remote-access mode) ─────────────────────
   // Localhost-only mode (default): middleware is a no-op — OS already isolates loopback.
@@ -1596,7 +1609,11 @@ export async function startDashboard(port = 3456): Promise<void> {
   });
 
   // --- Serve SPA ---
+  // Always send fresh HTML — see static-files block above for the Aerick bug context.
   app.get("*", (_req, res) => {
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
     res.sendFile(join(PUBLIC_DIR, "index.html"));
   });
 
