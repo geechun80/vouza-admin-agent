@@ -5897,7 +5897,133 @@ async function renderSetupPanel() {
       </div>
     `;
   }).join('');
-  el.innerHTML = `<div class="setup-card-grid">${cards}</div>`;
+  el.innerHTML = `<div class="setup-card-grid">${cards}</div>` + folderAccessCardHTML();
+  refreshFolderGrants();
+  loadFolderSuggestions();
+}
+
+// ─── Folder Access (Phase 1 — opt-in grants outside the workspace) ──────────
+// The agent can only see folders the USER grants here. Grant/revoke happens
+// only through these local-origin endpoints — the agent has no tool for it.
+
+let _folderGrants = [];
+
+function folderAccessCardHTML() {
+  return `
+    <div class="setup-card" id="folderAccessCard" style="margin-top:16px">
+      <div class="setup-card-head">
+        <div class="setup-card-icon" style="font-size:20px">📂</div>
+        <div class="setup-card-name">Folder Access</div>
+      </div>
+      <p style="font-size:12px;color:var(--text-dim);margin:10px 0 12px;line-height:1.5">
+        The agent can only see folders you grant. <strong>Deletion is never allowed outside the workspace.</strong>
+        Read-only grants allow listing, reading, and searching; read &amp; write also allows creating and renaming files.
+      </p>
+      <div id="folderGrantList" style="margin-bottom:12px">
+        <div style="font-size:12px;color:var(--text-dim)">Loading…</div>
+      </div>
+      <div id="folderQuickAdd" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input id="folderGrantPath" type="text" placeholder="C:\\Users\\you\\Downloads"
+               style="flex:1;min-width:220px;padding:8px 10px;background:var(--bg-glass);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px">
+        <select id="folderGrantMode"
+                style="padding:8px 10px;background:var(--bg-glass);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px">
+          <option value="read">Read-only</option>
+          <option value="readwrite">Read &amp; write</option>
+        </select>
+        <button class="btn btn-primary" onclick="addFolderGrant()">Grant access</button>
+      </div>
+      <div id="folderGrantError" style="display:none;font-size:12px;color:#ef4444;margin-top:8px"></div>
+    </div>
+  `;
+}
+
+async function refreshFolderGrants() {
+  const list = document.getElementById('folderGrantList');
+  if (!list) return;
+  try {
+    const r = await fetch('/api/folder-grants');
+    const data = r.ok ? await r.json() : { grants: [] };
+    _folderGrants = data.grants || [];
+  } catch { _folderGrants = []; }
+
+  if (_folderGrants.length === 0) {
+    list.innerHTML = '<div style="font-size:12px;color:var(--text-dim)">No folders granted yet — the agent only sees its workspace folder.</div>';
+    return;
+  }
+  list.innerHTML = _folderGrants.map((g, i) => {
+    const badge = g.mode === 'readwrite'
+      ? '<span class="setup-status-badge connected">read &amp; write</span>'
+      : '<span class="setup-status-badge configured">read-only</span>';
+    return `
+      <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;background:var(--bg-glass)">
+        <span style="flex:1;font-size:12px;color:var(--text);word-break:break-all">${escHtml(g.path)}</span>
+        ${badge}
+        <button class="btn" style="min-width:0;padding:4px 10px;font-size:12px" onclick="removeFolderGrant(${i})">Remove</button>
+      </div>
+    `;
+  }).join('');
+}
+
+async function loadFolderSuggestions() {
+  const box = document.getElementById('folderQuickAdd');
+  if (!box) return;
+  try {
+    const r = await fetch('/api/folder-grants/suggestions');
+    if (!r.ok) return;
+    const data = await r.json();
+    window._folderSuggestions = data.suggestions || [];
+    box.innerHTML = window._folderSuggestions.map((s, i) =>
+      `<button class="btn" style="min-width:0;padding:5px 12px;font-size:12px" onclick="quickFillFolder(${i})">+ ${escHtml(s.label)}</button>`
+    ).join('');
+  } catch { /* suggestions are optional */ }
+}
+
+function quickFillFolder(i) {
+  const s = (window._folderSuggestions || [])[i];
+  if (!s) return;
+  const input = document.getElementById('folderGrantPath');
+  if (input) { input.value = s.path; input.focus(); }
+}
+
+async function addFolderGrant() {
+  const input = document.getElementById('folderGrantPath');
+  const mode  = document.getElementById('folderGrantMode')?.value === 'readwrite' ? 'readwrite' : 'read';
+  const errEl = document.getElementById('folderGrantError');
+  const path  = (input?.value || '').trim();
+  if (errEl) errEl.style.display = 'none';
+  if (!path) { showToast('Enter a folder path first.', 'warn'); return; }
+  try {
+    const r = await fetch('/api/folder-grants', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, mode }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      if (errEl) { errEl.textContent = data.error || 'Could not grant access to that folder.'; errEl.style.display = 'block'; }
+      return;
+    }
+    if (input) input.value = '';
+    showToast('Folder access granted ✓', 'success');
+    refreshFolderGrants();
+  } catch (e) {
+    if (errEl) { errEl.textContent = 'Request failed: ' + e; errEl.style.display = 'block'; }
+  }
+}
+
+async function removeFolderGrant(i) {
+  const g = _folderGrants[i];
+  if (!g) return;
+  try {
+    await fetch('/api/folder-grants', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: g.path }),
+    });
+    showToast('Folder access removed', 'success');
+  } catch { /* refresh shows truth either way */ }
+  refreshFolderGrants();
 }
 
 function openSetupConfigModal(integrationId) {

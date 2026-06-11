@@ -425,6 +425,65 @@ export async function startDashboard(port = 3456): Promise<void> {
     }
   });
 
+  // --- Folder Access Grants (Phase 1 — opt-in folders outside the workspace) ---
+  // SECURITY: grant/revoke happens ONLY here, behind requireLocalOrigin.
+  // There is deliberately NO agent-callable tool that adds grants — the agent
+  // can never grant itself folder access.
+  app.get("/api/folder-grants", requireLocalOrigin, async (_req, res) => {
+    try {
+      const { loadGrants } = await import("../../files/folderGrants.js");
+      res.json({ grants: loadGrants() });
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  // Resolved quick-add suggestions — the server resolves %USERPROFILE% so the
+  // client never has to guess Windows paths.
+  app.get("/api/folder-grants/suggestions", requireLocalOrigin, async (_req, res) => {
+    try {
+      const home = os.homedir();
+      res.json({
+        suggestions: [
+          { label: "Downloads", path: join(home, "Downloads") },
+          { label: "Desktop",   path: join(home, "Desktop") },
+          { label: "Documents", path: join(home, "Documents") },
+        ],
+      });
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  app.post("/api/folder-grants", requireLocalOrigin, async (req, res) => {
+    try {
+      const { addGrant } = await import("../../files/folderGrants.js");
+      const { path, mode } = req.body || {};
+      if (!path || typeof path !== "string") {
+        return res.status(400).json({ error: "Folder path is required." });
+      }
+      const grant = addGrant(path, mode === "readwrite" ? "readwrite" : "read");
+      res.json({ ok: true, grant });
+    } catch (err) {
+      // Validation errors carry specific, user-facing messages → 400
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.delete("/api/folder-grants", requireLocalOrigin, async (req, res) => {
+    try {
+      const { removeGrant } = await import("../../files/folderGrants.js");
+      const { path } = req.body || {};
+      if (!path || typeof path !== "string") {
+        return res.status(400).json({ error: "Folder path is required." });
+      }
+      const removed = removeGrant(path);
+      res.json({ ok: true, removed });
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
   // --- Unified Integration Snapshot (Tier 1 Connection Foundation) ---
   // Returns a single snapshot of every registered integration's status +
   // recent probe history + auto-recovery state. The dashboard reads this

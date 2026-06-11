@@ -25,6 +25,7 @@ import { readSpreadsheetTool, writeSpreadsheetTool, searchSpreadsheetTool } from
 // Slack listener deferred — Bolt SDK + Socket Mode not yet implemented
 // import { sendSlackMessageTool, readSlackMessagesTool, listSlackChannelsTool } from "../tools/messenger.js";
 import { listFilesTool, readFileTool, readExcelFileTool, writeFileTool, organizeFilesTool, deleteFileTool, copyFileTool, renameFileTool } from "../tools/fileManager.js";
+import { readPdfTool, searchLocalFilesTool } from "../tools/documents.js";
 import { sendTelegramMessageTool, readTelegramUpdatesTool, getTelegramBotInfoTool, forwardTelegramMessageTool } from "../tools/telegram.js";
 import { sendWhatsAppMessageTool, readWhatsAppMessagesTool } from "../tools/whatsapp.js";
 import {
@@ -139,6 +140,10 @@ export async function launchAgent(): Promise<AgentInstance> {
   registry.register(deleteFileTool as any);
   registry.register(copyFileTool as any);
   registry.register(renameFileTool as any);
+
+  // Document intelligence — PDF text + capped local search (Phase 1)
+  registry.register(readPdfTool as any);
+  registry.register(searchLocalFilesTool as any);
 
   // Memory tools — local file store
   registry.register(saveMemoryTool as any);
