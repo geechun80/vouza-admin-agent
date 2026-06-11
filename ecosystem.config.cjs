@@ -15,6 +15,11 @@
 //   pm2 set pm2-logrotate:retain 7
 // =============================================================================
 
+// Load the operator key from .env (gitignored). NEVER hard-code keys here —
+// this file is committed, and a published repo gets the key revoked by
+// secret scanning within minutes (happened 2026-05-28).
+require("dotenv").config();
+
 module.exports = {
   apps: [
     {
@@ -48,17 +53,14 @@ module.exports = {
       merge_logs:      false,   // keep stdout and stderr in separate files
 
       // ── Environment ──────────────────────────────────────────────────────
+      // Operator API key comes from .env (loaded by dotenv above). The key is
+      // never exposed to end-users; only hasDefaultKey:true is sent to the UI.
       env: {
         NODE_ENV: "production",
-
-        // Operator API key — powers the bot for every customer install.
-        // Never exposed to end-users; only hasDefaultKey:true is sent to UI.
-        // .env is gitignored — these vars ensure PM2 always has the key even
-        // after a fresh git clone or git pull wipes the .env file.
-        VOUZA_API_KEY:      "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",
-        VOUZA_API_PROVIDER: "openrouter",
-        VOUZA_API_MODEL:    "google/gemini-2.5-flash-lite",   // balanced default via OpenRouter
-        VOUZA_BRAND_NAME:   "Vouza",
+        VOUZA_API_KEY:      process.env.VOUZA_API_KEY      || "",
+        VOUZA_API_PROVIDER: process.env.VOUZA_API_PROVIDER || "openrouter",
+        VOUZA_API_MODEL:    process.env.VOUZA_API_MODEL    || "google/gemini-2.5-flash-lite",
+        VOUZA_BRAND_NAME:   process.env.VOUZA_BRAND_NAME   || "Vouza",
       },
     },
   ],
