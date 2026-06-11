@@ -15,34 +15,82 @@ import { join, extname, basename, dirname, resolve, sep } from "path";
 import { createRequire } from "module";
 import type { VisionContentBlock } from "../types/index.js";
 import { scanFile } from "./security.js";
+import { resolveAccess, workspaceDir } from "../files/folderGrants.js";
+import { logger } from "../util/logger.js";
 
 // ---------------------------------------------------------------------------
-// Workspace path guard — confines all file operations to the workspace dir.
-// This prevents external channel messages from being used to read/write
-// arbitrary host files (e.g. ~/.ssh, /etc/passwd, C:\Windows\System32).
+// Path guard — workspace stays full-access; folders the USER has explicitly
+// granted via the dashboard (Settings → Folder Access) get mode-checked
+// access; everything else is rejected. This prevents external channel
+// messages from being used to read/write arbitrary host files
+// (e.g. ~/.ssh, /etc/passwd, C:\Windows\System32).
+//
+// Per-operation enforcement:
+//   read   → allowed in workspace + any granted folder ("read" or "readwrite")
+//   write  → allowed in workspace + "readwrite" grants (write/create/rename)
+//   delete → WORKSPACE ONLY, always — deletion is never allowed in granted
+//            folders regardless of permission level.
+//
+// Every access outside the workspace is audit-logged via the structured
+// logger ({ tool, path, grantRoot, mode }).
 //
 // The workspace directory is created automatically on first use.
-// To give the agent access to a file, copy it into workspace/.
 // ---------------------------------------------------------------------------
 
-const WORKSPACE_DIR = resolve(process.cwd(), "workspace");
+const WORKSPACE_DIR = workspaceDir();
 // Ensure workspace exists on module load (non-fatal if it fails)
 mkdir(WORKSPACE_DIR, { recursive: true }).catch(() => {});
 
-/**
- * Resolve `inputPath` to an absolute path and verify it is inside WORKSPACE_DIR.
- * Returns the resolved path on success, or null if the path escapes the sandbox.
- */
-function safePath(inputPath: string): string | null {
-  const abs = resolve(WORKSPACE_DIR, inputPath);
-  return abs.startsWith(WORKSPACE_DIR + sep) || abs === WORKSPACE_DIR
-    ? abs
-    : null;
-}
-
 const WORKSPACE_ERROR = (p: string) =>
   `Path "${p}" is outside the agent workspace. ` +
-  `Copy the file to the workspace/ folder first, or use a relative path inside workspace/.`;
+  `Copy the file to the workspace/ folder first, use a relative path inside workspace/, ` +
+  `or ask the user to grant access to that folder in the dashboard (Settings → Folder Access).`;
+
+const DELETE_ERROR =
+  "Deletion is only allowed inside the workspace folder for safety. " +
+  "Files in granted folders can be read (and written with a readwrite grant) but never deleted by the agent.";
+
+type FileOp = "read" | "write" | "delete";
+
+type GuardResult = { ok: true; path: string } | { ok: false; error: string };
+
+/**
+ * Resolve `inputPath` and enforce the per-operation access policy.
+ * Returns the resolved absolute path on success, or a friendly error.
+ */
+function guardPath(tool: string, inputPath: string, op: FileOp): GuardResult {
+  const access = resolveAccess(inputPath);
+
+  if (!access.allowed) {
+    return { ok: false, error: WORKSPACE_ERROR(inputPath) };
+  }
+
+  // Workspace → full access, no audit needed (sandbox default)
+  if (access.mode === "workspace") {
+    return { ok: true, path: access.resolvedPath };
+  }
+
+  // Granted folder — per-operation enforcement
+  if (op === "delete") {
+    return { ok: false, error: DELETE_ERROR };
+  }
+  if (op === "write" && access.mode !== "readwrite") {
+    return {
+      ok: false,
+      error:
+        `Folder "${access.grantRoot}" is granted as read-only. ` +
+        `Writing requires a readwrite grant — the user can change this in the dashboard (Settings → Folder Access).`,
+    };
+  }
+
+  // Audit every access outside the workspace (Rule: structured logger)
+  logger.info(
+    { event: "granted_folder_access", tool, path: access.resolvedPath, grantRoot: access.grantRoot, mode: op },
+    "File tool accessed a user-granted folder"
+  );
+
+  return { ok: true, path: access.resolvedPath };
+}
 
 // CommonJS interop for pdf-parse and adm-zip (no ESM export)
 const require = createRequire(import.meta.url);
@@ -240,9 +288,10 @@ export const readFileTool = buildTool({
   }),
   async call(input): Promise<any> {
     try {
-      // ── Workspace path guard ───────────────────────────────────────────────
-      const safe = safePath(input.filePath);
-      if (!safe) return { success: false, error: WORKSPACE_ERROR(input.filePath) };
+      // ── Path guard (workspace + user-granted folders) ──────────────────────
+      const guard = guardPath("read_file", input.filePath, "read");
+      if (!guard.ok) return { success: false, error: guard.error };
+      const safe = guard.path;
 
       // ── Security scan before any parsing ──────────────────────────────────
       const scan = await scanFile(safe);
@@ -343,8 +392,9 @@ export const readExcelFileTool = buildTool({
   }),
   async call(input): Promise<any> {
     try {
-      const safe = safePath(input.filePath);
-      if (!safe) return { success: false, error: WORKSPACE_ERROR(input.filePath) };
+      const guard = guardPath("read_excel_file", input.filePath, "read");
+      if (!guard.ok) return { success: false, error: guard.error };
+      const safe = guard.path;
 
       if (input.listSheetsOnly) {
         const ExcelJS = await import("exceljs");
@@ -391,9 +441,9 @@ export const listFilesTool = buildTool({
   }),
   async call(input) {
     try {
-      const safeDir = safePath(input.directory);
-      if (!safeDir) return { success: false, error: WORKSPACE_ERROR(input.directory) };
-      const files = await listDir(safeDir, input.recursive ?? false, input.extension);
+      const guard = guardPath("list_files", input.directory, "read");
+      if (!guard.ok) return { success: false, error: guard.error };
+      const files = await listDir(guard.path, input.recursive ?? false, input.extension);
       return { success: true, data: { count: files.length, files } };
     } catch (err) {
       return { success: false, error: `Failed to list files: ${err}` };
@@ -416,8 +466,9 @@ export const writeFileTool = buildTool({
   }),
   async call(input) {
     try {
-      const safe = safePath(input.filePath);
-      if (!safe) return { success: false, error: WORKSPACE_ERROR(input.filePath) };
+      const guard = guardPath("write_file", input.filePath, "write");
+      if (!guard.ok) return { success: false, error: guard.error };
+      const safe = guard.path;
       await mkdir(dirname(safe), { recursive: true });
       await writeFile(safe, input.content, input.encoding as BufferEncoding);
       return { success: true, data: { filePath: safe, bytesWritten: input.content.length } };
@@ -448,16 +499,20 @@ export const organizeFilesTool = buildTool({
   }),
   async call(input) {
     try {
-      const safeSource = safePath(input.sourceDir);
-      if (!safeSource) return { success: false, error: WORKSPACE_ERROR(input.sourceDir) };
-      const files = await listDir(safeSource, false);
+      // Moving files = rename → requires write access on the source folder
+      const guard = guardPath("organize_files", input.sourceDir, "write");
+      if (!guard.ok) return { success: false, error: guard.error };
+      const files = await listDir(guard.path, false);
       const actions: Array<{ file: string; from: string; to: string }> = [];
 
       for (const file of files) {
         for (const rule of input.rules) {
           if (matchPattern(file.name, rule.pattern)) {
-            const dest = join(rule.targetDir, file.name);
-            actions.push({ file: file.name, from: file.path, to: dest });
+            // Destination must ALSO pass the guard — without this a rule's
+            // targetDir could move files anywhere on disk.
+            const destGuard = guardPath("organize_files", join(rule.targetDir, file.name), "write");
+            if (!destGuard.ok) return { success: false, error: destGuard.error };
+            actions.push({ file: file.name, from: file.path, to: destGuard.path });
             break;
           }
         }
@@ -493,10 +548,11 @@ export const deleteFileTool = buildTool({
   }),
   async call(input) {
     try {
-      const safe = safePath(input.filePath);
-      if (!safe) return { success: false, error: WORKSPACE_ERROR(input.filePath) };
-      await unlink(safe);
-      return { success: true, data: { deleted: safe } };
+      // Deletion is workspace-only — never allowed in granted folders.
+      const guard = guardPath("delete_file", input.filePath, "delete");
+      if (!guard.ok) return { success: false, error: guard.error };
+      await unlink(guard.path);
+      return { success: true, data: { deleted: guard.path } };
     } catch (err) {
       return { success: false, error: `Failed to delete file: ${err}` };
     }
@@ -518,10 +574,12 @@ export const copyFileTool = buildTool({
   }),
   async call(input) {
     try {
-      const safeSrc  = safePath(input.sourcePath);
-      if (!safeSrc)  return { success: false, error: WORKSPACE_ERROR(input.sourcePath) };
-      const safeDest = safePath(input.destPath);
-      if (!safeDest) return { success: false, error: WORKSPACE_ERROR(input.destPath) };
+      const srcGuard  = guardPath("copy_file", input.sourcePath, "read");
+      if (!srcGuard.ok)  return { success: false, error: srcGuard.error };
+      const destGuard = guardPath("copy_file", input.destPath, "write");
+      if (!destGuard.ok) return { success: false, error: destGuard.error };
+      const safeSrc  = srcGuard.path;
+      const safeDest = destGuard.path;
 
       // Check destination exists
       if (!input.overwrite) {
@@ -529,6 +587,18 @@ export const copyFileTool = buildTool({
           await stat(safeDest);
           return { success: false, error: `Destination already exists: ${safeDest}. Set overwrite=true to replace it.` };
         } catch { /* doesn't exist — safe to proceed */ }
+      } else {
+        // Destructive copy (overwriting an existing file) stays workspace-only.
+        const inWorkspace = guardPath("copy_file", input.destPath, "delete").ok;
+        if (!inWorkspace) {
+          try {
+            await stat(safeDest);
+            return {
+              success: false,
+              error: "Overwriting existing files outside the workspace is not allowed for safety. Copy to a new filename instead.",
+            };
+          } catch { /* destination doesn't exist — plain create, allowed */ }
+        }
       }
       await mkdir(dirname(safeDest), { recursive: true });
       await fsCopyFile(safeSrc, safeDest);
@@ -553,13 +623,13 @@ export const renameFileTool = buildTool({
   }),
   async call(input) {
     try {
-      const safeOld = safePath(input.oldPath);
-      if (!safeOld) return { success: false, error: WORKSPACE_ERROR(input.oldPath) };
-      const safeNew = safePath(input.newPath);
-      if (!safeNew) return { success: false, error: WORKSPACE_ERROR(input.newPath) };
-      await mkdir(dirname(safeNew), { recursive: true });
-      await rename(safeOld, safeNew);
-      return { success: true, data: { from: safeOld, to: safeNew } };
+      const oldGuard = guardPath("rename_file", input.oldPath, "write");
+      if (!oldGuard.ok) return { success: false, error: oldGuard.error };
+      const newGuard = guardPath("rename_file", input.newPath, "write");
+      if (!newGuard.ok) return { success: false, error: newGuard.error };
+      await mkdir(dirname(newGuard.path), { recursive: true });
+      await rename(oldGuard.path, newGuard.path);
+      return { success: true, data: { from: oldGuard.path, to: newGuard.path } };
     } catch (err) {
       return { success: false, error: `Failed to rename file: ${err}` };
     }

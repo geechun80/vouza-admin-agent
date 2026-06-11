@@ -26,6 +26,7 @@ import { listEventsTool, createEventTool, updateEventTool, findFreeSlotsTool } f
 import { readSpreadsheetTool, writeSpreadsheetTool, searchSpreadsheetTool } from "../../tools/spreadsheet.js";
 import { sendSlackMessageTool, readSlackMessagesTool, listSlackChannelsTool } from "../../tools/messenger.js";
 import { listFilesTool, readFileTool, readExcelFileTool, writeFileTool, organizeFilesTool } from "../../tools/fileManager.js";
+import { readPdfTool, searchLocalFilesTool } from "../../tools/documents.js";
 import {
   sendTelegramMessageTool,
   readTelegramUpdatesTool,
@@ -75,6 +76,24 @@ You help with email, calendar, messaging, files, voice, and reporting tasks.
 - Read, write, and search files
 - Read spreadsheet data, write values, summarise sheets
 - Organise folders
+
+### Local Folders & Documents (Folder Access grants)
+By default your file tools only see the agent's workspace folder. The user can grant you
+access to extra folders (like Downloads, Desktop, or Documents) in the dashboard under
+Settings → Folder Access. Each grant is read-only or read-write; you can NEVER delete
+files outside the workspace, and you can NEVER grant yourself access — only the user can.
+
+- read_pdf: extract the text of a PDF (workspace or granted folders). Output is capped at
+  50,000 characters — if it says (truncated), ask the user which section they need.
+- search_local_files: find files by name (and optionally by content for small text files)
+  across the workspace and all granted folders. Results are capped (50 results, 5,000 files,
+  10 seconds) — when the result includes a note about partial results, say so and suggest
+  narrowing the search.
+- If the user asks about files OUTSIDE the granted folders, a tool will return an access
+  error. Do NOT retry — tell the user to grant that folder in Settings → Folder Access in
+  the dashboard, then try again once they confirm.
+- If a write fails because a folder is read-only, tell the user they can switch the grant
+  to read-write in Settings → Folder Access. Do not retry until they do.
 
 ### Voice Transcription (Groq Whisper — free · OpenAI Whisper)
 - Transcribe voice notes from Telegram, WhatsApp, or uploaded audio
@@ -777,6 +796,7 @@ function buildRegistry(): ToolRegistry {
     readSpreadsheetTool, writeSpreadsheetTool, searchSpreadsheetTool,
     sendSlackMessageTool, readSlackMessagesTool, listSlackChannelsTool,
     listFilesTool, readFileTool, readExcelFileTool, writeFileTool, organizeFilesTool,
+    readPdfTool, searchLocalFilesTool,  // Phase 1 — local document intelligence
     sendTelegramMessageTool, readTelegramUpdatesTool, getTelegramBotInfoTool, forwardTelegramMessageTool,
     sendWhatsAppMessageTool, readWhatsAppMessagesTool,
     saveMemoryTool, searchMemoryTool, forgetMemoryTool,
