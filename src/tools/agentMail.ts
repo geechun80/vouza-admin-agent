@@ -8,7 +8,7 @@
 //   4. Create additional dedicated inboxes (for sub-agents)
 //
 // All tools read context.config.tools.agentmail.apiKey.
-// Pattern mirrors messenger.ts (buildTool, category, isReadOnly, inputSchema).
+// Pattern mirrors the standard tool shape (buildTool, category, isReadOnly, inputSchema).
 // =============================================================================
 
 import { z } from "zod";

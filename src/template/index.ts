@@ -25,7 +25,8 @@ import { TaskScheduler } from "../tasks/scheduler.js";
 import { readEmailsTool, sendEmailTool, draftEmailTool, triageEmailsTool } from "../tools/email.js";
 import { listEventsTool, createEventTool, updateEventTool, findFreeSlotsTool } from "../tools/calendar.js";
 import { readSpreadsheetTool, writeSpreadsheetTool, searchSpreadsheetTool } from "../tools/spreadsheet.js";
-import { sendSlackMessageTool, readSlackMessagesTool, listSlackChannelsTool } from "../tools/messenger.js";
+// Slack tools removed — listener deferred (Bolt SDK not yet implemented).
+// Reference copy of the old tools lives in docs/reference/messenger.ts.txt.
 import { listFilesTool, readFileTool, readExcelFileTool, writeFileTool, organizeFilesTool } from "../tools/fileManager.js";
 import { sendTelegramMessageTool, readTelegramUpdatesTool, getTelegramBotInfoTool, forwardTelegramMessageTool } from "../tools/telegram.js";
 import { sendWhatsAppMessageTool, readWhatsAppMessagesTool } from "../tools/whatsapp.js";
@@ -38,7 +39,6 @@ const TOOL_CATALOG: Record<string, any[]> = {
   calendar: [listEventsTool, createEventTool, updateEventTool, findFreeSlotsTool],
   spreadsheet: [readSpreadsheetTool, writeSpreadsheetTool, searchSpreadsheetTool],
   messaging: [
-    sendSlackMessageTool, readSlackMessagesTool, listSlackChannelsTool,
     sendTelegramMessageTool, readTelegramUpdatesTool, getTelegramBotInfoTool, forwardTelegramMessageTool,
     sendWhatsAppMessageTool, readWhatsAppMessagesTool,
   ],

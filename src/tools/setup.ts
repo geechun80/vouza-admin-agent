@@ -3,7 +3,14 @@
 //
 // get_setup_status         — check what's configured vs. missing, with full
 //                            step-by-step guides for every supported integration
-// save_integration_credentials — persist credentials to config.json + live ctx
+// save_integration_credentials — persist credentials to config.json + live ctx.
+//                            gmail / google_calendar / telegram / whatsapp (and
+//                            anything canonicalizing to them, incl. "smtp") are
+//                            routed to the M2 pipeline BEFORE the legacy switch;
+//                            only non-pipeline integrations use the direct save.
+// run_integration_pipeline — preferred entry point for the 4 pipeline-backed
+//                            integrations (detect → validate → test → save →
+//                            confirm → live-test in one call)
 //
 // Supported integrations:
 //   Email     : Gmail, Microsoft Outlook/365, custom SMTP
@@ -800,8 +807,9 @@ function validateCredentials(c: Record<string, string>): string | null {
 // ── Service-to-listener mapping — which ServiceManager service to restart ─────
 // Only listener-based services need a restart; tool-only integrations (email,
 // calendar, sheets) are immediately usable via context.config patching.
+// (telegram was removed in Phase 5: it routes to the pipeline before the
+// legacy switch, so hotPatchAgent never sees integration === "telegram".)
 const SERVICE_RESTART_MAP: Partial<Record<string, string>> = {
-  telegram:        "telegram",
   whatsapp_waha:   "whatsapp",    // Baileys listener (waha uses webhooks — no restart needed)
 };
 
@@ -917,9 +925,16 @@ export const saveIntegrationCredentialsTool = buildTool({
       // pipeline (gmail / google_calendar / telegram / whatsapp), delegate
       // there. Same code path, same StepResult, same suggestedFix UX — so
       // the user gets the proper self-healing flow even when the model
-      // chose the wrong tool name. For everything else (outlook, smtp,
-      // slack, voice_*, ai_provider, twilio), fall through to the original
-      // direct-save switch below — pipelines don't cover those yet.
+      // chose the wrong tool name. Because this routing runs BEFORE the
+      // switch below, the legacy gmail / google_calendar / telegram cases
+      // were unreachable since 79bd7ee and were deleted (Phase 5).
+      // NOTE: "smtp" also canonicalizes to "gmail" (alias map), so the smtp
+      // case below is currently unreachable as well — it is KEPT, not
+      // deleted, because routing arbitrary-host SMTP credentials into the
+      // Gmail pipeline is a questionable alias that needs revisiting.
+      // Everything else (outlook, slack, voice_*, ai_provider,
+      // whatsapp_waha, whatsapp_twilio) falls through to the legacy
+      // direct-save switch — pipelines don't cover those yet.
       const canonical = canonicalizeIntegrationName(integration);
       if (canonical && PIPELINE_SUPPORTED.has(canonical)) {
         const log = childLogger({ component: "tools.setup" });
@@ -945,17 +960,9 @@ export const saveIntegrationCredentialsTool = buildTool({
 
       switch (integration) {
 
-        case "gmail": {
-          if (!c.gmailUser || !c.gmailPass)
-            return { success: false, error: "gmailUser and gmailPass are both required." };
-          cfg.credentials.gmailUser = c.gmailUser;
-          cfg.credentials.gmailPass = c.gmailPass;
-          cfg.tools.gmail = { user: c.gmailUser, appPassword: c.gmailPass, emailAddress: c.gmailUser };
-          hotTools.gmail = cfg.tools.gmail;
-          // Also patch the chat session's context so the test works immediately
-          if (ctx?.config?.tools) ctx.config.tools.gmail = cfg.tools.gmail;
-          break;
-        }
+        // gmail / google_calendar / telegram cases removed (Phase 5) — they
+        // canonicalize into PIPELINE_SUPPORTED and are routed to
+        // executePipeline() above before this switch is ever reached.
 
         case "outlook": {
           if (!c.outlookClientId || !c.outlookSecret || !c.outlookTenant)
@@ -974,6 +981,10 @@ export const saveIntegrationCredentialsTool = buildTool({
         }
 
         case "smtp": {
+          // NOTE: currently unreachable — canonicalizeIntegrationName("smtp")
+          // resolves to "gmail" and routes to the pipeline above. Kept until
+          // the "smtp"→gmail alias is revisited (non-Gmail SMTP hosts should
+          // arguably land here, not in the Gmail pipeline).
           if (!c.smtpHost || !c.smtpUser || !c.smtpPass)
             return { success: false, error: "smtpHost, smtpUser, and smtpPass are all required." };
           cfg.credentials.smtpHost = c.smtpHost;
@@ -982,71 +993,6 @@ export const saveIntegrationCredentialsTool = buildTool({
           cfg.credentials.smtpPass = c.smtpPass;
           cfg.tools.smtp = { host: c.smtpHost, port: c.smtpPort || "587", user: c.smtpUser, pass: c.smtpPass };
           hotTools.smtp = cfg.tools.smtp;
-          break;
-        }
-
-        case "google_calendar": {
-          if (!c.googleSaKey) {
-            return {
-              success: false,
-              error: "Missing googleSaKey. Ask the user to paste the FULL contents of the service-account .json file they downloaded from Google Cloud Console. Do not retry — wait for the user to provide it.",
-            };
-          }
-          // Try to parse and validate the SA JSON structure. Give a SPECIFIC
-          // error per failure mode so the bot doesn't burn turns guessing.
-          let parsed: any;
-          try { parsed = JSON.parse(c.googleSaKey); } catch (e) {
-            return {
-              success: false,
-              error: "googleSaKey is not valid JSON. Likely cause: the user pasted only a fragment, or pasted a screenshot/image (which we can't read). Ask them to OPEN the .json file in a text editor and paste the entire contents. Do not retry until they re-send.",
-            };
-          }
-          // Reject OAuth2 client JSONs (common confusion — user downloads the
-          // "OAuth client ID" file instead of a service-account key).
-          if (parsed?.installed || parsed?.web) {
-            return {
-              success: false,
-              error: "This looks like an OAuth Client ID file (has 'installed' or 'web' key), not a Service Account key. The agent needs a SERVICE ACCOUNT key. Tell the user: in Google Cloud Console → IAM & Admin → Service Accounts → create or select one → Keys tab → Add Key → JSON. Paste THAT file's contents.",
-            };
-          }
-          // Check the required SA fields and report which are missing
-          const required = ["type", "project_id", "private_key", "client_email"];
-          const missing = required.filter((f) => !parsed?.[f]);
-          if (missing.length > 0) {
-            return {
-              success: false,
-              error: `Service account JSON is missing required fields: ${missing.join(", ")}. Ask the user to re-download a fresh key from Google Cloud Console (Service Accounts → Keys → Add Key → JSON).`,
-            };
-          }
-          if (parsed.type !== "service_account") {
-            return {
-              success: false,
-              error: `The JSON has type="${parsed.type}", but we need type="service_account". The user likely downloaded the wrong file type.`,
-            };
-          }
-          cfg.credentials.googleSaKey = c.googleSaKey;
-          cfg.tools.google = {
-            credentialsJson: c.googleSaKey,
-            scopes: [
-              "https://www.googleapis.com/auth/calendar",
-              "https://www.googleapis.com/auth/gmail.modify",
-              "https://www.googleapis.com/auth/spreadsheets",
-              "https://www.googleapis.com/auth/drive",
-            ],
-          };
-          hotTools.google = cfg.tools.google;
-          if (ctx?.config?.tools) ctx.config.tools.google = cfg.tools.google;
-          break;
-        }
-
-        case "telegram": {
-          if (!c.telegramToken)
-            return { success: false, error: "telegramToken is required." };
-          cfg.credentials.telegramToken = c.telegramToken;
-          cfg.tools.telegram = { botToken: c.telegramToken };
-          hotTools.telegram = cfg.tools.telegram;
-          if (ctx?.config?.tools)  ctx.config.tools.telegram = cfg.tools.telegram;
-          if (ctx?.config)        (ctx.config as any).telegramToken = c.telegramToken;
           break;
         }
 
@@ -1136,23 +1082,19 @@ export const saveIntegrationCredentialsTool = buildTool({
 
       // ── Hot-patch the running main agent ──────────────────────────────────────
       // This propagates the new credentials into the live agent's in-memory context
-      // AND restarts listener-based services (Telegram, Baileys WhatsApp) so messages
-      // start flowing immediately without a full agent restart.
-      const patch = await hotPatchAgent(integration, hotTools, hotCreds);
+      // AND restarts listener-based services so messages start flowing immediately
+      // without a full agent restart. (Result no longer inspected — the only
+      // consumer was the telegram activationNote branch, removed in Phase 5.)
+      await hotPatchAgent(integration, hotTools, hotCreds);
 
       // ── Build response ────────────────────────────────────────────────────────
       const guide = INTEGRATION_GUIDES[integration];
       const name  = guide?.name ?? integration;
 
       // Honest messaging: distinguish "works now" from "needs agent restart"
+      // (telegram branch removed in Phase 5 — pipeline-routed, never reaches here)
       let activationNote = "";
-      if (integration === "telegram") {
-        activationNote = patch.restarted
-          ? "✅ Telegram listener restarted — your bot is now live and receiving messages."
-          : patch.restartError
-            ? `⚠️ Saved to disk, but the Telegram listener couldn't restart automatically (${patch.restartError}). Click "Restart Agent" in the dashboard or restart the server.`
-            : "💾 Saved. The agent needs to be launched (or restarted) before Telegram messages will flow.";
-      } else if (integration === "whatsapp_waha") {
+      if (integration === "whatsapp_waha") {
         activationNote = "💾 Saved. WAHA uses webhooks — make sure the webhook URL (http://localhost:3456/api/whatsapp/webhook) is set in WAHA's dashboard.";
       } else if (integration === "ai_provider") {
         activationNote = "✅ AI provider updated — your key is now active for this chat session and saved for future sessions.";

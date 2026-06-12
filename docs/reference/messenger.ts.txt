@@ -1,4 +1,16 @@
 // =============================================================================
+// REFERENCE ONLY — moved out of src/ in Phase 5 housekeeping (2026-06-12).
+//
+// These Slack tools were never wired to a live listener (Slack support is
+// deferred until the Bolt SDK + Socket Mode listener ships — see Build Rules,
+// "Slack (Deferred)" section). They were imported by chat.ts / template/index.ts
+// but represented a capability the agent couldn't actually deliver end-to-end,
+// so they were unwired and parked here. The .txt suffix keeps tsc from
+// compiling this file. When the Bolt listener lands, restore this as
+// src/tools/messenger.ts and re-register the tools.
+// =============================================================================
+
+// =============================================================================
 // Messenger Tool — Slack integration for team communication
 // =============================================================================
 
