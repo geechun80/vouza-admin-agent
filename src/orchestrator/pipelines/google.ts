@@ -94,6 +94,27 @@ export function makeGooglePipeline(deps: GoogleDeps = {}): Pipeline {
         }
       }
 
+      // Custom-SMTP shaped credentials are not a Google credential at all —
+      // they belong to the "smtp" integration's direct save in
+      // save_integration_credentials. Fail fast with a redirect rather than
+      // the generic "could not figure out" message below (Rule 56).
+      if (
+        creds.smtpHost !== undefined ||
+        creds.smtpUser !== undefined ||
+        creds.smtpPass !== undefined
+      ) {
+        return {
+          ok: false,
+          error:
+            "These look like custom SMTP credentials (smtpHost/smtpUser/smtpPass), not a Gmail or Google credential.",
+          suggestedFix:
+            "For a non-Gmail provider (Yahoo, Zoho, custom domain), save them with " +
+            'save_integration_credentials using integration="smtp". ' +
+            "For Gmail itself, send gmailUser + a 16-character App Password instead.",
+          doNotRetry: true,
+        };
+      }
+
       // Service account / OAuth path. The SA JSON may arrive as a string or
       // as a parsed object — normalize.
       const rawKey = creds.googleSaKey ?? creds.serviceAccountJson ?? creds.saKey;

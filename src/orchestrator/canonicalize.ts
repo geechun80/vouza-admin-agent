@@ -20,7 +20,11 @@ const ALIAS_MAP: Record<string, string> = {
   "google mail":  "gmail",
   "googlemail":   "gmail",
   "email":        "gmail",   // ambiguous, but Gmail is the most common intent
-  "smtp":         "gmail",   // App Password path is SMTP under the hood
+  // "smtp" is deliberately NOT aliased here: it is its own enum value in
+  // save_integration_credentials with a dedicated direct-save branch for
+  // arbitrary-host SMTP (Yahoo / Zoho / custom domains). Aliasing it to
+  // gmail routed those credentials into the Gmail pipeline, whose detect
+  // step doesn't understand smtpHost/smtpUser/smtpPass.
 
   // calendar family
   "google calendar": "google_calendar",

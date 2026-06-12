@@ -96,6 +96,47 @@ describe("save_integration_credentials — legacy tool routing", () => {
     assert.equal(result.doNotRetry, true);
   });
 
+  it("integration 'smtp' with custom-host creds → legacy direct-save, NOT the gmail pipeline", async () => {
+    // Regression: "smtp" used to alias to "gmail" in canonicalize.ts, which
+    // routed Yahoo/Zoho/custom-domain SMTP credentials into the Gmail
+    // pipeline — whose detect step doesn't understand smtpHost/smtpUser/
+    // smtpPass. The alias was removed; this must hit the dedicated case.
+    const result: any = await saveIntegrationCredentialsTool.call(
+      {
+        integration: "smtp" as any,
+        credentials: {
+          smtpHost: "smtp.mail.yahoo.com",
+          smtpPort: "465",
+          smtpUser: "me@yahoo.com",
+          smtpPass: "app-password-here",
+        },
+      },
+      {} as any,
+    );
+    assert.equal(wentThroughPipeline(result), false,
+      "smtp must take the legacy direct-save path — the gmail pipeline cannot handle smtpHost credentials");
+    assert.equal(result.success, true, result.error ?? "");
+    assert.equal(result.data.slug, "smtp");
+    // The credentials actually landed in config.json via the direct save.
+    const saved = JSON.parse(await readFile(CONFIG_PATH, "utf-8"));
+    assert.equal(saved.credentials.smtpHost, "smtp.mail.yahoo.com");
+    assert.equal(saved.tools.smtp.user, "me@yahoo.com");
+    assert.equal(saved.tools.smtp.port, "465");
+  });
+
+  it("integration 'smtp' missing smtpPass → legacy error shape, not pipeline", async () => {
+    const result: any = await saveIntegrationCredentialsTool.call(
+      {
+        integration: "smtp" as any,
+        credentials: { smtpHost: "smtp.zoho.com", smtpUser: "me@zoho.com" },
+      },
+      {} as any,
+    );
+    assert.equal(wentThroughPipeline(result), false);
+    assert.equal(result.success, false);
+    assert.match(result.error, /smtpPass/);
+  });
+
   it("integration 'slack' (no pipeline) → falls through to legacy direct-save", async () => {
     // slack is in the enum but has no pipeline → original switch case runs.
     // Without slackToken it returns the legacy { success: false, error } shape

@@ -60,6 +60,25 @@ describe("google pipeline — wrong file (OAuth client)", () => {
   });
 });
 
+describe("google pipeline — custom SMTP creds rejected at detect", () => {
+  it("smtpHost-shaped credentials fail fast with a redirect to integration=smtp", async () => {
+    const p = makeGooglePipeline({});
+    const r = await runPipeline(
+      p,
+      {
+        credentials: { smtpHost: "smtp.mail.yahoo.com", smtpUser: "me@yahoo.com", smtpPass: "x" },
+        variant: "gmail",
+      },
+      { integration: "gmail", logger: silent, config: {} as any },
+    );
+    assert.equal(r.success, false);
+    assert.equal(r.stepReached, "detect");
+    assert.equal(r.doNotRetry, true);
+    assert.match(r.error!, /custom SMTP credentials/);
+    assert.match(r.suggestedFix!, /integration="smtp"/);
+  });
+});
+
 describe("google pipeline — missing private_key", () => {
   it("fails at validate listing the missing field", async () => {
     const broken = { ...VALID_SA } as any;
