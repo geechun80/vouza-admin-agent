@@ -39,6 +39,17 @@ import { transcribeAudioTool, transcribeAndSummarizeTool } from "../tools/voice.
 import { getSetupStatusTool, saveIntegrationCredentialsTool } from "../tools/setup.js";
 import { webSearchTool } from "../tools/webSearch.js";
 import { runShellCommandTool } from "../tools/shell.js";
+// Browser tools (Phase 4) — main agent can browse allowlisted sites.
+// Playwright is lazily imported inside the browser manager; if it isn't
+// installed the tools return a clear, actionable error instead of crashing.
+import {
+  browserNavigateTool,
+  browserClickTool,
+  browserFillTool,
+  browserExtractTextTool,
+  browserScreenshotTool,
+  browserWaitForTool,
+} from "../tools/browser/index.js";
 
 export interface AgentInstance {
   context:        AgentContext;
@@ -154,6 +165,16 @@ export async function launchAgent(): Promise<AgentInstance> {
 
   // Web search — falls back to free providers if no API key
   registry.register(webSearchTool as any);
+
+  // Browser tools (Phase 4) — SSRF-allowlisted Playwright browsing.
+  // Registered here so the dashboard chat AND every channel listener
+  // (Telegram / WhatsApp / AgentMail receive this same registry) can browse.
+  registry.register(browserNavigateTool as any);
+  registry.register(browserClickTool as any);
+  registry.register(browserFillTool as any);
+  registry.register(browserExtractTextTool as any);
+  registry.register(browserScreenshotTool as any);
+  registry.register(browserWaitForTool as any);
 
   // Setup & onboarding — always needed for wizard flow
   registry.register(getSetupStatusTool as any);

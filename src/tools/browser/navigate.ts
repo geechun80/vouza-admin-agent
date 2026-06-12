@@ -1,6 +1,6 @@
 import { z }                  from "zod";
 import { buildTool }           from "../registry.js";
-import { getBrowserPage, checkDomainAllowed } from "./manager.js";
+import { getBrowserPage, checkDomainAllowed, configuredBrowserDomains } from "./manager.js";
 
 export const browserNavigateTool = buildTool({
   name: "browser_navigate",
@@ -19,7 +19,7 @@ export const browserNavigateTool = buildTool({
   }),
 
   async call(input, context): Promise<any> {
-    const guard = checkDomainAllowed(input.url);
+    const guard = checkDomainAllowed(input.url, configuredBrowserDomains(context));
     if (!guard.allowed) {
       return { success: false, error: guard.reason };
     }

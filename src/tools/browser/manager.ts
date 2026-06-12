@@ -18,8 +18,12 @@
 import { EventEmitter } from "events";
 
 // ── Domain allowlist ─────────────────────────────────────────────────────────
-// Only these domains are reachable via browser tools. Operators may extend via
-// BROWSER_ALLOWED_DOMAINS env var (comma-separated extra domains).
+// Only these domains are reachable via browser tools. The list can be extended
+// two ways (merged with the defaults, deny-by-default otherwise):
+//   • BROWSER_ALLOWED_DOMAINS env var (comma-separated extra domains)
+//   • config.tools.browser.allowedDomains (array in data/config.json) — Phase 4
+// localhost / private-IP targets are HARD-blocked regardless of any allowlist
+// entry: the hard block runs before the allowlist is even consulted.
 
 const CORE_ALLOWED: readonly string[] = [
   "google.com", "accounts.google.com", "console.cloud.google.com",
@@ -35,28 +39,79 @@ const CORE_ALLOWED: readonly string[] = [
   "openrouter.ai",
 ];
 
-function buildAllowlist(): string[] {
-  const extra = (process.env.BROWSER_ALLOWED_DOMAINS || "")
+/**
+ * Merge the default allowlist with the BROWSER_ALLOWED_DOMAINS env var and any
+ * config-provided extra domains. Exported for tests.
+ */
+export function buildAllowlist(configDomains?: string[]): string[] {
+  const fromEnv = (process.env.BROWSER_ALLOWED_DOMAINS || "")
     .split(",")
     .map(d => d.trim().toLowerCase())
     .filter(Boolean);
-  return [...CORE_ALLOWED, ...extra];
+  const fromConfig = (configDomains ?? [])
+    .filter((d): d is string => typeof d === "string")
+    .map(d => d.trim().toLowerCase())
+    .filter(Boolean);
+  return [...new Set([...CORE_ALLOWED, ...fromEnv, ...fromConfig])];
 }
 
-export function checkDomainAllowed(url: string): { allowed: boolean; reason?: string } {
-  // Block bare localhost / 127.0.0.1 (SSRF)
+/**
+ * Read the user-configured extra browser domains off an AgentContext.
+ * Returns [] for missing/malformed values — never throws.
+ */
+export function configuredBrowserDomains(context: any): string[] {
+  const arr = context?.config?.tools?.browser?.allowedDomains;
+  return Array.isArray(arr) ? arr.filter((d: any) => typeof d === "string") : [];
+}
+
+/**
+ * SSRF hard block — these hosts can NEVER be navigated to, even if a user adds
+ * them to config.tools.browser.allowedDomains or BROWSER_ALLOWED_DOMAINS.
+ */
+function isHardBlockedHost(host: string): boolean {
+  if (host === "localhost" || host === "::1" || host === "[::1]" || host.endsWith(".local")) {
+    return true;
+  }
+  // IPv4 loopback / private / link-local / unspecified ranges
+  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (m) {
+    const a = Number(m[1]);
+    const b = Number(m[2]);
+    if (a === 127 || a === 10 || a === 0) return true;            // loopback, 10/8, 0.0.0.0
+    if (a === 172 && b >= 16 && b <= 31) return true;             // 172.16/12
+    if (a === 192 && b === 168) return true;                      // 192.168/16
+    if (a === 169 && b === 254) return true;                      // link-local
+  }
+  // IPv6 loopback / unique-local / link-local
+  const h6 = host.replace(/^\[|\]$/g, "");
+  if (h6 === "::" || h6 === "::1") return true;
+  if (/^(fc|fd|fe8|fe9|fea|feb)/i.test(h6) && h6.includes(":")) return true;
+  return false;
+}
+
+export function checkDomainAllowed(url: string, configDomains?: string[]): { allowed: boolean; reason?: string } {
   try {
     const parsed = new URL(url);
     const host   = parsed.hostname.toLowerCase();
-    if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host.endsWith(".local")) {
-      return { allowed: false, reason: `Navigation to ${host} is blocked (SSRF prevention)` };
+    // Hard block FIRST — wins over every allowlist source (SSRF prevention)
+    if (isHardBlockedHost(host)) {
+      return {
+        allowed: false,
+        reason:
+          `Navigation to ${host} is blocked (SSRF prevention). ` +
+          "localhost and private network addresses can never be allowlisted.",
+      };
     }
-    const allowlist = buildAllowlist();
+    const allowlist = buildAllowlist(configDomains);
     const permitted = allowlist.some(d => host === d || host.endsWith(`.${d}`));
     if (!permitted) {
       return {
         allowed: false,
-        reason: `Domain "${host}" is not in the browser allowlist. Add it to BROWSER_ALLOWED_DOMAINS if needed.`,
+        reason:
+          `Domain "${host}" is not in the browser allowlist. ` +
+          "The user can allow it by adding the domain to tools.browser.allowedDomains " +
+          "in data/config.json (or to the BROWSER_ALLOWED_DOMAINS line in .env) and " +
+          "restarting the agent. Do not retry until the user confirms they added it.",
       };
     }
     return { allowed: true };

@@ -268,6 +268,16 @@ export async function loadConfigFromJson(): Promise<AgentConfig> {
       };
     }
 
+    // Browser tool allowlist extension (Phase 4) — extra domains the browser
+    // tools may visit, merged with defaults + BROWSER_ALLOWED_DOMAINS env var.
+    // localhost / private IPs remain hard-blocked regardless of this list.
+    const browserDomains = saved.tools?.browser?.allowedDomains;
+    if (Array.isArray(browserDomains) && browserDomains.length > 0) {
+      baseConfig.tools.browser = {
+        allowedDomains: browserDomains.filter((d: any) => typeof d === "string"),
+      };
+    }
+
     if (saved.selfImproveIntervalHours) {
       baseConfig.selfImproveIntervalHours = saved.selfImproveIntervalHours;
     }

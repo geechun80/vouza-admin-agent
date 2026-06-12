@@ -244,6 +244,14 @@ export interface AgentConfig {
       /** Optional email allowlist — if non-empty, only these senders can trigger the agent */
       allowedSenders?: string[];
     };
+    browser?: {
+      /**
+       * Extra domains the browser tools may navigate to, merged with the
+       * built-in defaults and BROWSER_ALLOWED_DOMAINS env var.
+       * localhost / private IPs stay hard-blocked regardless of this list.
+       */
+      allowedDomains?: string[];
+    };
   };
   /** Raw credentials bag — stores provider creds not covered by tools above */
   credentials?: Record<string, string>;
