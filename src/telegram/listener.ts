@@ -18,6 +18,8 @@
 // =============================================================================
 
 import { randomUUID, createHash } from "crypto";
+import { readFile, writeFile, mkdir } from "fs/promises";
+import { join } from "path";
 import chalk from "chalk";
 import type { AgentContext } from "../types/index.js";
 import type { ToolRegistry } from "../tools/registry.js";
@@ -93,6 +95,55 @@ export function getTelegramListenerState(): {
 // Polling-mode running flag + offset
 let _polling      = false;
 let updateOffset  = 0;
+
+// ---------------------------------------------------------------------------
+// Owner chat persistence — needed for PROACTIVE sends (briefings/reports).
+// A bot cannot initiate a conversation: we can only message a chat that has
+// messaged us before. The FIRST chat that ever talks to the bot is recorded
+// as the owner (the user who set the bot up) and persisted across restarts.
+// First-seen wins — a stranger messaging the bot later never becomes "owner".
+// ---------------------------------------------------------------------------
+
+const TELEGRAM_STATE_PATH = join(process.cwd(), "data", "telegram-state.json");
+let _ownerChatId: number | null = null;
+let _ownerLoaded = false;
+
+async function loadOwnerChatId(): Promise<void> {
+  if (_ownerLoaded) return;
+  _ownerLoaded = true;
+  try {
+    const raw = JSON.parse(await readFile(TELEGRAM_STATE_PATH, "utf-8"));
+    if (typeof raw?.ownerChatId === "number") _ownerChatId = raw.ownerChatId;
+  } catch { /* no state yet */ }
+}
+
+async function recordOwnerChat(chatId: number): Promise<void> {
+  await loadOwnerChatId();
+  if (_ownerChatId !== null) return; // first-seen wins
+  _ownerChatId = chatId;
+  try {
+    await mkdir(join(process.cwd(), "data"), { recursive: true });
+    await writeFile(TELEGRAM_STATE_PATH, JSON.stringify({ ownerChatId: chatId }, null, 2), "utf-8");
+  } catch { /* persistence is best-effort */ }
+}
+
+/** The owner's chat id (first chat that ever messaged the bot), or null. */
+export async function getTelegramOwnerChatId(): Promise<number | null> {
+  await loadOwnerChatId();
+  return _ownerChatId;
+}
+
+/**
+ * Proactive outbound send (scheduled briefings/reports).
+ * Reuses the direct-reply path: Markdown first, plain-text fallback.
+ */
+export async function sendTelegramProactive(
+  token:  string,
+  chatId: number,
+  text:   string
+): Promise<void> {
+  await sendDirectReply(token, chatId, text);
+}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -275,6 +326,8 @@ async function dispatchUpdate(
   if (!msg) return;
 
   const chatId:   number = msg.chat.id;
+  // Record the first chat as the owner for proactive scheduled delivery
+  recordOwnerChat(chatId).catch(() => {});
   const fromName: string = [msg.from?.first_name, msg.from?.last_name]
     .filter(Boolean).join(" ") || "User";
 

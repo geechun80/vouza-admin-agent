@@ -2391,6 +2391,43 @@
 
         <div class="review-grid" id="reviewGrid"></div>
 
+        <!-- ── Proactive updates — opt-out scheduled briefings ── -->
+        <div id="proactiveCard" style="margin-top:20px;background:var(--bg-glass);border:1px solid var(--border);border-radius:14px;padding:18px 20px">
+          <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px">🔔 Proactive updates</div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:14px;line-height:1.5">
+            Your AI checks in without being asked — delivered to Telegram or WhatsApp. Toggle off anytime; your choice is remembered.
+          </div>
+          <div id="proactiveRows" style="display:grid;gap:10px">
+            <div class="skill-card enabled" id="proactive-morning-briefing" data-sched-id="morning-briefing" style="margin:0">
+              <div class="skill-icon">🌅</div>
+              <div class="skill-body">
+                <div class="skill-name">Morning briefing</div>
+                <div class="skill-desc">Daily summary of your day ahead</div>
+              </div>
+              <div class="skill-sched">
+                <input type="time" value="08:00" onchange="updateProactiveSchedule('morning-briefing',{time:this.value})"
+                  onclick="event.stopPropagation()"
+                  style="padding:5px 10px;font-size:12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)">
+              </div>
+              <div class="skill-toggle" onclick="toggleProactiveSchedule('morning-briefing')"></div>
+            </div>
+            <div class="skill-card enabled" id="proactive-weekly-report" data-sched-id="weekly-report" style="margin:0">
+              <div class="skill-icon">📊</div>
+              <div class="skill-body">
+                <div class="skill-name">Weekly report</div>
+                <div class="skill-desc">Friday wrap-up of the week's work</div>
+              </div>
+              <div class="skill-sched">
+                <input type="time" value="17:00" onchange="updateProactiveSchedule('weekly-report',{time:this.value})"
+                  onclick="event.stopPropagation()"
+                  style="padding:5px 10px;font-size:12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)">
+              </div>
+              <div class="skill-toggle" onclick="toggleProactiveSchedule('weekly-report')"></div>
+            </div>
+          </div>
+          <div id="proactiveStatus" style="display:none;font-size:12px;margin-top:10px;padding:7px 12px;border-radius:8px"></div>
+        </div>
+
         <div class="go-live-center" id="goLiveCenter" style="display:none">
           <div class="go-live-icon">🚀</div>
           <div class="go-live-title">Your AI is Ready!</div>
@@ -4042,6 +4079,68 @@ function renderReview() {
     </div>`;
 
   document.getElementById('termSkillCount').textContent = skills.length;
+  loadProactiveSchedules();
+}
+
+// ============================================================
+// Proactive updates — opt-out scheduled briefings (Phase 2)
+// ============================================================
+
+async function loadProactiveSchedules() {
+  try {
+    const res = await fetch('/api/schedules');
+    const data = await res.json();
+    if (!data.success || !Array.isArray(data.schedules)) return;
+    for (const s of data.schedules) {
+      const card = document.getElementById(`proactive-${s.id}`);
+      if (!card) continue;
+      card.classList.toggle('enabled', !!s.enabled);
+      const timeInput = card.querySelector('input[type="time"]');
+      if (timeInput && s.time) timeInput.value = s.time;
+    }
+  } catch (e) { /* card keeps its defaults */ }
+}
+
+function proactiveStatusMsg(text, ok) {
+  const box = document.getElementById('proactiveStatus');
+  if (!box) return;
+  box.style.display = 'block';
+  box.style.background = ok ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)';
+  box.style.color = ok ? 'var(--success)' : '#f87171';
+  box.textContent = text;
+  clearTimeout(box._hideTimer);
+  box._hideTimer = setTimeout(() => { box.style.display = 'none'; }, 4000);
+}
+
+async function updateProactiveSchedule(id, patch) {
+  try {
+    const res  = await fetch(`/api/schedules/${id}`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(patch),
+    });
+    const data = await res.json();
+    if (!data.success) {
+      proactiveStatusMsg(`⚠️ ${data.error || 'Could not save schedule'}`, false);
+      loadProactiveSchedules(); // revert UI to server truth
+      return;
+    }
+    const card = document.getElementById(`proactive-${id}`);
+    if (card && data.record) {
+      card.classList.toggle('enabled', !!data.record.enabled);
+    }
+    proactiveStatusMsg('✓ Saved — your AI will follow this schedule', true);
+  } catch (e) {
+    proactiveStatusMsg('⚠️ Could not reach the server', false);
+  }
+}
+
+function toggleProactiveSchedule(id) {
+  const card = document.getElementById(`proactive-${id}`);
+  if (!card) return;
+  const next = !card.classList.contains('enabled');
+  card.classList.toggle('enabled', next); // optimistic
+  updateProactiveSchedule(id, { enabled: next });
 }
 
 function revealGoLive() {
