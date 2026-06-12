@@ -44,6 +44,15 @@ import {
 import { testCredentialTool } from "../../tools/setupValidator.js";
 import { webSearchTool } from "../../tools/webSearch.js";
 import { runShellCommandTool } from "../../tools/shell.js";
+// Browser tools (Phase 4) — main agent can browse allowlisted sites
+import {
+  browserNavigateTool,
+  browserClickTool,
+  browserFillTool,
+  browserExtractTextTool,
+  browserScreenshotTool,
+  browserWaitForTool,
+} from "../../tools/browser/index.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Chat system prompt — full office agent capabilities
@@ -104,6 +113,23 @@ files outside the workspace, and you can NEVER grant yourself access — only th
 - Search the internet for current news, prices, company info, research
 - Use when the user asks about anything recent or real-time
 - Call web_search with a specific query — show titles, URLs, and key snippets
+
+### Web Browsing (Playwright — allowlisted domains only)
+You can drive a real browser with browser_navigate, browser_click, browser_fill,
+browser_extract_text, browser_screenshot, and browser_wait_for.
+- Use these when the user asks you to check, open, or read a SPECIFIC website
+  ("check this site for me", "what does my GitHub page say"). For general
+  questions or research, web_search is still the right tool — it's faster.
+- Only allowlisted domains can be opened (Google, Slack, Telegram, GitHub,
+  OpenAI, Anthropic, and similar provider sites, plus any extra domains the
+  user has configured).
+- If browser_navigate returns a "not in the browser allowlist" error, do NOT
+  retry. Tell the user they can allow the site by adding its domain to
+  tools.browser.allowedDomains in data/config.json (or to the
+  BROWSER_ALLOWED_DOMAINS line in .env), then restarting the agent. Wait for
+  them to confirm before trying again.
+- localhost and private network addresses are permanently blocked for security.
+  They can never be allowlisted — do not suggest workarounds.
 
 ### Shell Assistant (Sandboxed — Project Root Only)
 You can run whitelisted shell commands directly to help users fix problems or check status.
@@ -766,6 +792,14 @@ function buildToolsConfig(saved: any): AgentConfig["tools"] {
     tools.telegram = { botToken: creds.telegramToken || creds.telegramBotToken };
   }
 
+  // Browser allowlist extension (Phase 4)
+  const browserDomains = saved?.tools?.browser?.allowedDomains;
+  if (Array.isArray(browserDomains) && browserDomains.length > 0) {
+    tools.browser = {
+      allowedDomains: browserDomains.filter((d: any) => typeof d === "string"),
+    };
+  }
+
   // WhatsApp
   const waProvider = channels.whatsapp?.provider;
   if (waProvider) {
@@ -788,7 +822,7 @@ function buildToolsConfig(saved: any): AgentConfig["tools"] {
 }
 
 
-function buildRegistry(): ToolRegistry {
+export function buildRegistry(): ToolRegistry {
   const registry = new ToolRegistry();
   const allTools = [
     readEmailsTool, sendEmailTool, draftEmailTool, triageEmailsTool,
@@ -804,6 +838,9 @@ function buildRegistry(): ToolRegistry {
     getSetupStatusTool, saveIntegrationCredentialsTool, runIntegrationPipelineTool, testCredentialTool,
     webSearchTool,
     runShellCommandTool,  // Phase 0.5 — sandboxed shell for setup help
+    // Phase 4 — SSRF-allowlisted Playwright browsing for the main agent
+    browserNavigateTool, browserClickTool, browserFillTool,
+    browserExtractTextTool, browserScreenshotTool, browserWaitForTool,
   ];
   for (const tool of allTools) registry.register(tool as any);
   return registry;
