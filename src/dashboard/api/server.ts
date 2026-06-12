@@ -1091,6 +1091,37 @@ export async function startDashboard(port = 3456): Promise<void> {
     }
   });
 
+  // ── Proactive schedules (Phase 2) ──────────────────────────────────────────
+  // Backed by data/scheduled-tasks.json — works whether or not the agent is
+  // running. When the agent IS running, updates re-register live cron jobs.
+
+  app.get("/api/schedules", requireLocalOrigin, async (_req, res) => {
+    try {
+      const { listSchedules } = await import("../../tasks/proactive.js");
+      res.json({ success: true, schedules: await listSchedules() });
+    } catch (err) {
+      res.json({ success: false, error: String(err) });
+    }
+  });
+
+  app.post("/api/schedules/:id", requireLocalOrigin, async (req, res) => {
+    try {
+      const id = req.params.id as string;
+      if (!/^[a-zA-Z0-9_-]{1,64}$/.test(id)) {
+        return res.status(400).json({ success: false, error: "Invalid schedule id" });
+      }
+      const { enabled, time } = (req.body ?? {}) as { enabled?: unknown; time?: unknown };
+      const { updateSchedule } = await import("../../tasks/proactive.js");
+      const result = await updateSchedule(id, { enabled, time });
+      if (!result.success) {
+        return res.status(400).json({ success: false, error: result.error });
+      }
+      res.json({ success: true, record: result.record });
+    } catch (err) {
+      res.json({ success: false, error: String(err) });
+    }
+  });
+
   app.post("/api/agent/task", requireLocalOrigin, async (req, res) => {
     if (!agentInstance) {
       return res.json({ success: false, error: "Agent not running. Launch it first." });

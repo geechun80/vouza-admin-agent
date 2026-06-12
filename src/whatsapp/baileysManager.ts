@@ -71,6 +71,7 @@ const statusListeners: Set<StatusListener> = new Set();
 
 let _worker:       ChildProcess | null = null;
 let _connected     = false;
+let _ownerJid:     string | null = null;  // linked account JID, set on "connected" status
 let _baseCtx:      AgentContext | null = null;
 let _registry:     ToolRegistry | null = null;
 let _stopped       = false;   // true after an intentional stopBaileysListener() call
@@ -114,6 +115,15 @@ export function onBaileysStatus(fn: StatusListener): () => void {
 /** True while the WhatsApp session is authenticated and online. */
 export function isBaileysConnected(): boolean {
   return _connected;
+}
+
+/**
+ * The owner JID of the linked WhatsApp account (e.g. "6591234567@s.whatsapp.net"),
+ * or null until the worker reports a successful connection. Proactive scheduled
+ * messages are delivered here ("message yourself" thread).
+ */
+export function getBaileysOwnerJid(): string | null {
+  return _connected ? _ownerJid : null;
 }
 
 /**
@@ -328,6 +338,11 @@ function _handleWorkerMessage(msg: any): void {
 
       if (status === "connected") {
         _restartCount = 0; // reset backoff on success
+        // Worker includes the linked account's JID (device suffix stripped) —
+        // used as the proactive-delivery target ("message yourself").
+        if (typeof msg.ownerJid === "string" && msg.ownerJid) {
+          _ownerJid = msg.ownerJid;
+        }
         console.log(chalk.green("  [WhatsApp] Connected via Baileys worker!"));
       } else {
         console.log(chalk.yellow(`  [WhatsApp] Status: ${status}`));

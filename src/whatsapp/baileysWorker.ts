@@ -157,7 +157,9 @@ async function connect(): Promise<void> {
     if (connection === "open") {
       _connected    = true;
       _reconnecting = false;
-      ipc({ type: "status", status: "connected" });
+      // Include the linked account's JID so the manager can target proactive
+      // scheduled messages at the owner ("message yourself" thread).
+      ipc({ type: "status", status: "connected", ownerJid: getOwnerJid() });
     }
 
     if (connection === "close") {

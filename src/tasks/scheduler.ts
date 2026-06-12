@@ -9,9 +9,20 @@ import type { TaskEntry, AgentContext, SkillDefinition } from "../types/index.js
 import { ToolRegistry } from "../tools/registry.js";
 import { agentLoop } from "../agent/loop.js";
 
+/**
+ * Optional per-task hooks (used by proactive schedules):
+ *  - buildPrompt: produce a fresh prompt at execution time (e.g. nag throttle)
+ *  - onOutput: receive the accumulated text output after a successful run
+ */
+export interface TaskHooks {
+  buildPrompt?: () => string | Promise<string>;
+  onOutput?: (output: string) => Promise<void>;
+}
+
 interface ScheduledJob {
   task: TaskEntry;
   cronJob: cron.ScheduledTask;
+  hooks?: TaskHooks;
 }
 
 export class TaskScheduler {
@@ -33,7 +44,7 @@ export class TaskScheduler {
   /**
    * Schedule a recurring task based on a cron expression.
    */
-  schedule(task: Omit<TaskEntry, "id" | "status" | "retryCount">): string {
+  schedule(task: Omit<TaskEntry, "id" | "status" | "retryCount">, hooks?: TaskHooks): string {
     const id = randomUUID().slice(0, 12);
     const entry: TaskEntry = {
       ...task,
@@ -48,10 +59,10 @@ export class TaskScheduler {
     }
 
     const cronJob = cron.schedule(task.schedule, async () => {
-      await this.executeTask(entry);
+      await this.executeTask(entry, hooks);
     });
 
-    this.jobs.set(id, { task: entry, cronJob });
+    this.jobs.set(id, { task: entry, cronJob, hooks });
     this.context.taskQueue.push(entry);
 
     console.log(`📋 Scheduled "${entry.name}" with cron: ${entry.schedule}`);
@@ -65,7 +76,7 @@ export class TaskScheduler {
     // Check if it's a scheduled task
     const job = this.jobs.get(taskOrSkillName);
     if (job) {
-      await this.executeTask(job.task);
+      await this.executeTask(job.task, job.hooks);
       return job.task;
     }
 
@@ -122,15 +133,17 @@ export class TaskScheduler {
 
   // --- Private ---
 
-  private async executeTask(task: TaskEntry): Promise<void> {
+  private async executeTask(task: TaskEntry, hooks?: TaskHooks): Promise<void> {
     task.status = "running";
     task.lastRun = Date.now();
     console.log(`\n▶️  Running task: ${task.name}`);
 
     try {
-      // Build the prompt from the skill or description
+      // Build the prompt from the hook, skill, or description
       let prompt: string;
-      if (task.skillName) {
+      if (hooks?.buildPrompt) {
+        prompt = await hooks.buildPrompt();
+      } else if (task.skillName) {
         const skill = this.skills.get(task.skillName);
         if (skill) {
           prompt = `Execute the "${skill.displayName}" skill.\n\n${skill.prompt}`;
@@ -156,6 +169,16 @@ export class TaskScheduler {
       task.result = { success: true, data: output.slice(0, 500) };
       task.retryCount = 0;
       console.log(`✅ Task completed: ${task.name}`);
+
+      // Route output onward (e.g. proactive delivery to Telegram/WhatsApp).
+      // Failures here must not mark the task itself as failed.
+      if (hooks?.onOutput) {
+        try {
+          await hooks.onOutput(output);
+        } catch (err) {
+          console.log(`⚠️  Task output delivery failed: ${task.name} — ${err}`);
+        }
+      }
     } catch (err) {
       task.retryCount++;
       const message = err instanceof Error ? err.message : String(err);

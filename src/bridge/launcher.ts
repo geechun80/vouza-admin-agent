@@ -242,6 +242,14 @@ export async function launchAgent(): Promise<AgentInstance> {
 
   await svcMgr.startAll(context, registry);
 
+  // ── Proactive schedules (Phase 2 — opt-out, not opt-in) ──────────────────
+  // Seeds the default morning-briefing + weekly-report tasks when at least
+  // one outbound channel (Telegram/WhatsApp) is configured, then registers
+  // cron jobs for every enabled record. User edits/disables are respected
+  // forever (records persist in data/scheduled-tasks.json). Never throws.
+  const { initProactiveSchedules } = await import("../tasks/proactive.js");
+  await initProactiveSchedules(scheduler, context, skills);
+
   // ── Register integrations with the unified registry ──────────────────────
   // Each adapter implements the Integration interface so the HealthMonitor
   // can probe + auto-recover them uniformly. This is the new pattern
@@ -316,6 +324,8 @@ export async function launchAgent(): Promise<AgentInstance> {
       hm.stop();
       await svcMgr.stopAll();
       scheduler.stopAll();
+      const { resetProactiveRuntime } = await import("../tasks/proactive.js");
+      resetProactiveRuntime();
       await memory.save();
       console.log(chalk.cyan(`\n  ${config.name} stopped. Memory saved.\n`));
     },
