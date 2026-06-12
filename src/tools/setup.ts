@@ -5,9 +5,9 @@
 //                            step-by-step guides for every supported integration
 // save_integration_credentials — persist credentials to config.json + live ctx.
 //                            gmail / google_calendar / telegram / whatsapp (and
-//                            anything canonicalizing to them, incl. "smtp") are
-//                            routed to the M2 pipeline BEFORE the legacy switch;
-//                            only non-pipeline integrations use the direct save.
+//                            anything canonicalizing to them) are routed to the
+//                            M2 pipeline BEFORE the legacy switch; everything
+//                            else (incl. custom "smtp") uses the direct save.
 // run_integration_pipeline — preferred entry point for the 4 pipeline-backed
 //                            integrations (detect → validate → test → save →
 //                            confirm → live-test in one call)
@@ -928,13 +928,12 @@ export const saveIntegrationCredentialsTool = buildTool({
       // chose the wrong tool name. Because this routing runs BEFORE the
       // switch below, the legacy gmail / google_calendar / telegram cases
       // were unreachable since 79bd7ee and were deleted (Phase 5).
-      // NOTE: "smtp" also canonicalizes to "gmail" (alias map), so the smtp
-      // case below is currently unreachable as well — it is KEPT, not
-      // deleted, because routing arbitrary-host SMTP credentials into the
-      // Gmail pipeline is a questionable alias that needs revisiting.
-      // Everything else (outlook, slack, voice_*, ai_provider,
+      // Everything else (outlook, smtp, slack, voice_*, ai_provider,
       // whatsapp_waha, whatsapp_twilio) falls through to the legacy
-      // direct-save switch — pipelines don't cover those yet.
+      // direct-save switch — pipelines don't cover those yet. ("smtp"
+      // used to alias to gmail and skip its own case; the alias was
+      // removed because arbitrary-host SMTP credentials don't belong in
+      // the Gmail pipeline — see canonicalize.ts.)
       const canonical = canonicalizeIntegrationName(integration);
       if (canonical && PIPELINE_SUPPORTED.has(canonical)) {
         const log = childLogger({ component: "tools.setup" });
@@ -981,10 +980,6 @@ export const saveIntegrationCredentialsTool = buildTool({
         }
 
         case "smtp": {
-          // NOTE: currently unreachable — canonicalizeIntegrationName("smtp")
-          // resolves to "gmail" and routes to the pipeline above. Kept until
-          // the "smtp"→gmail alias is revisited (non-Gmail SMTP hosts should
-          // arguably land here, not in the Gmail pipeline).
           if (!c.smtpHost || !c.smtpUser || !c.smtpPass)
             return { success: false, error: "smtpHost, smtpUser, and smtpPass are all required." };
           cfg.credentials.smtpHost = c.smtpHost;

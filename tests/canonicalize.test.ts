@@ -91,6 +91,10 @@ describe("canonicalizeIntegrationName — rejects garbage", () => {
     assert.equal(canonicalizeIntegrationName("gmial"), null);
     assert.equal(canonicalizeIntegrationName("telegrm"), null);
   });
+  it("'smtp' → null (own enum value with a dedicated direct-save case — must NOT alias to gmail)", () => {
+    assert.equal(canonicalizeIntegrationName("smtp"), null);
+    assert.equal(canonicalizeIntegrationName("SMTP"), null);
+  });
 });
 
 describe("knownCanonicalNames — exposes the dedup'd target set", () => {
