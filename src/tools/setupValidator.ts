@@ -12,20 +12,40 @@
 //   • Means save_integration_credentials is only ever called with known-good keys
 //
 // Integrations supported:
-//   telegram      — getMe API call, returns bot username
+//   telegram      — DELEGATED to the M2 telegram pipeline (detect→validate→test)
+//   gmail_smtp    — DELEGATED to the M2 google pipeline, gmail variant
+//   google_sa     — DELEGATED to the M2 google pipeline, google_calendar variant
+//                   (now does a LIVE JWT token exchange, not just a field check)
 //   slack         — auth.test API call, returns workspace + bot name
-//   gmail_smtp    — nodemailer verify() (STARTTLS handshake, no email sent)
-//   google_sa     — parse JSON + field check + optional Calendar list call
 //   ai_provider   — /models or equivalent for every supported AI provider
 //   waha          — GET /api/sessions reachability check
 //   groq_voice    — list Groq models (same key as AI provider)
 //   openai_voice  — list OpenAI models (same key as AI provider)
 //   agentmail     — GET /inboxes
+//
+// Phase 3 (simplification): the telegram / gmail / google-SA validators were
+// duplicated, weaker copies of the orchestrator pipelines (no per-step
+// timeouts, no transport close, generic errors). They now delegate to
+// executePipeline(..., { testOnly: true }) — which runs detect → validate →
+// test and STOPS before save/confirm/live-test, preserving this tool's
+// "never writes anything" contract. The return shape is unchanged.
 // =============================================================================
 
 import { z }         from "zod";
 import { buildTool } from "./registry.js";
-import nodemailer     from "nodemailer";
+import { executePipeline } from "./setup.js";
+
+// ── Pipeline executor seam ────────────────────────────────────────────────────
+// Tests inject a fake executor to assert delegation without hitting the
+// network. Production always uses the real executePipeline from setup.ts.
+
+type PipelineExecutor = typeof executePipeline;
+let _pipelineExecutor: PipelineExecutor = executePipeline;
+
+/** Test seam — pass null to restore the real executor. */
+export function _setPipelineExecutorForTests(fn: PipelineExecutor | null): void {
+  _pipelineExecutor = fn ?? executePipeline;
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -54,21 +74,59 @@ async function safeFetch(
 
 type ValidationResult = { valid: boolean; detail: string; meta?: Record<string, string | number> };
 
-async function validateTelegram(token: string): Promise<ValidationResult> {
-  token = token.trim();
-  if (!/^\d{7,12}:[A-Za-z0-9_-]{35,}$/.test(token)) {
-    return { valid: false, detail: "Token format is wrong — should be numbers:letters (e.g. 123456789:ABCdefGhIJKlmNoPQRstuVWXyz)" };
-  }
-  const r = await safeFetch(`https://api.telegram.org/bot${token}/getMe`);
-  if (!r.ok || !r.body?.ok) {
-    const desc = r.body?.description ?? `HTTP ${r.status}`;
-    return { valid: false, detail: `Telegram rejected the token: ${desc}` };
-  }
-  const bot = r.body.result;
+// ── Pipeline-delegated validators (telegram / gmail / google SA) ─────────────
+// Each runs the orchestrator pipeline in testOnly mode (detect → validate →
+// test, then STOP — no save, no confirm, no live-test) and maps the
+// PipelineResult onto the legacy ValidationResult shape so the tool's
+// contract with the system prompt / UI is unchanged.
+
+function pipelineFailureDetail(r: { error?: string; suggestedFix?: string }): string {
+  const parts = [r.error ?? "Validation failed."];
+  if (r.suggestedFix) parts.push(r.suggestedFix);
+  return parts.join(" — ");
+}
+
+async function validateTelegram(token: string, ctx: unknown): Promise<ValidationResult> {
+  const r = await _pipelineExecutor(
+    "telegram",
+    { telegramToken: token.trim() },
+    ctx,
+    { testOnly: true },
+  );
+  if (!r.success) return { valid: false, detail: pipelineFailureDetail(r) };
+  const username = String(r.data?.botUsername ?? "");
   return {
     valid: true,
-    detail: `✅ Token valid — bot is @${bot.username} ("${bot.first_name}")`,
-    meta:   { username: bot.username, botId: bot.id },
+    detail: `✅ Token valid — bot is @${username || "(unknown)"}`,
+    meta:   username ? { username } : {},
+  };
+}
+
+async function validateGmailSmtp(user: string, pass: string, ctx: unknown): Promise<ValidationResult> {
+  const r = await _pipelineExecutor(
+    "gmail",
+    { gmailUser: user.trim(), gmailPass: pass },
+    ctx,
+    { testOnly: true },
+  );
+  if (!r.success) return { valid: false, detail: pipelineFailureDetail(r) };
+  return { valid: true, detail: `✅ Gmail SMTP verified for ${user.trim()}` };
+}
+
+async function validateGoogleSA(saKeyJson: string, ctx: unknown): Promise<ValidationResult> {
+  const r = await _pipelineExecutor(
+    "google_calendar",
+    { googleSaKey: saKeyJson },
+    ctx,
+    { testOnly: true },
+  );
+  if (!r.success) return { valid: false, detail: pipelineFailureDetail(r) };
+  // The pipeline's detect step carries the parsed SA JSON forward.
+  const sa: any = r.data?.saJson ?? {};
+  return {
+    valid: true,
+    detail: `✅ Service account key verified live — project: ${sa.project_id ?? "(unknown)"}, account: ${sa.client_email ?? "(unknown)"}`,
+    meta:   { projectId: String(sa.project_id ?? ""), clientEmail: String(sa.client_email ?? "") },
   };
 }
 
@@ -87,52 +145,6 @@ async function validateSlack(token: string): Promise<ValidationResult> {
     valid: true,
     detail: `✅ Slack connected — workspace: ${r.body.team}, bot: ${r.body.bot_id}`,
     meta:   { team: r.body.team, userId: r.body.user_id },
-  };
-}
-
-async function validateGmailSmtp(
-  user: string, pass: string,
-): Promise<ValidationResult> {
-  try {
-    const transport = nodemailer.createTransport({
-      host: "smtp.gmail.com",
-      port: 587,
-      secure: false,
-      auth: { user: user.trim(), pass: pass.replace(/\s/g, "") },
-    });
-    await (transport as any).verify();
-    return { valid: true, detail: `✅ Gmail SMTP verified for ${user}` };
-  } catch (e: any) {
-    const msg = String(e?.message ?? e);
-    if (msg.includes("535") || msg.includes("Username and Password not accepted")) {
-      return { valid: false, detail: "Gmail rejected the App Password — make sure 2-Step Verification is ON and you generated the password from myaccount.google.com/apppasswords" };
-    }
-    if (msg.includes("ENOTFOUND") || msg.includes("ETIMEDOUT")) {
-      return { valid: false, detail: "Could not reach smtp.gmail.com — check your internet connection" };
-    }
-    return { valid: false, detail: `SMTP error: ${msg.slice(0, 200)}` };
-  }
-}
-
-async function validateGoogleSA(saKeyJson: string): Promise<ValidationResult> {
-  let parsed: any;
-  try {
-    parsed = JSON.parse(saKeyJson.trim());
-  } catch {
-    return { valid: false, detail: "Could not parse as JSON — paste the full contents of the downloaded .json key file" };
-  }
-  const required = ["type", "project_id", "client_email", "private_key", "token_uri"];
-  const missing  = required.filter(k => !parsed[k]);
-  if (missing.length) {
-    return { valid: false, detail: `Missing required fields in the key file: ${missing.join(", ")}` };
-  }
-  if (parsed.type !== "service_account") {
-    return { valid: false, detail: `Expected type "service_account", got "${parsed.type}" — make sure you downloaded a Service Account key, not an OAuth client key` };
-  }
-  return {
-    valid: true,
-    detail: `✅ Service account key looks valid — project: ${parsed.project_id}, account: ${parsed.client_email}`,
-    meta:   { projectId: parsed.project_id, clientEmail: parsed.client_email },
   };
 }
 
@@ -286,14 +298,14 @@ export const testCredentialTool = buildTool({
     ),
   }),
 
-  async call(input): Promise<any> {
+  async call(input, ctx): Promise<any> {
     const { type, credentials: c } = input;
     let result: ValidationResult;
 
     try {
       switch (type) {
         case "telegram":
-          result = await validateTelegram(c.token ?? "");
+          result = await validateTelegram(c.token ?? "", ctx);
           break;
 
         case "slack":
@@ -303,13 +315,13 @@ export const testCredentialTool = buildTool({
         case "gmail_smtp":
           if (!c.user || !c.pass)
             return { success: false, error: "gmail_smtp requires: user (Gmail address) and pass (App Password)" };
-          result = await validateGmailSmtp(c.user, c.pass);
+          result = await validateGmailSmtp(c.user, c.pass, ctx);
           break;
 
         case "google_sa":
           if (!c.saKeyJson)
             return { success: false, error: "google_sa requires: saKeyJson (full JSON content of the key file)" };
-          result = await validateGoogleSA(c.saKeyJson);
+          result = await validateGoogleSA(c.saKeyJson, ctx);
           break;
 
         case "ai_provider":

@@ -37,11 +37,24 @@ import { childLogger } from "../util/logger.js";
 
 const PIPELINE_SUPPORTED = new Set(["gmail", "google_calendar", "telegram", "whatsapp"]);
 
+/**
+ * Slice a pipeline down to its non-mutating prefix: detect → validate → test.
+ * Used by test_credential (Phase 3) — it must PROVE a credential works without
+ * saving anything or firing live-test side effects. If the pipeline has no
+ * "test" step, the full pipeline is returned unchanged (defensive — every
+ * current pipeline has one).
+ */
+export function testOnlySlice<T extends { steps: { name: string }[] }>(pipeline: T): T {
+  const testIdx = pipeline.steps.findIndex((s) => s.name === "test");
+  if (testIdx < 0) return pipeline;
+  return { ...pipeline, steps: pipeline.steps.slice(0, testIdx + 1) };
+}
+
 export async function executePipeline(
   integration: string,
   credentials: Record<string, unknown> | undefined,
   ctx: any,
-  opts: { chatId?: string | number } = {},
+  opts: { chatId?: string | number; testOnly?: boolean } = {},
 ): Promise<{
   success: boolean;
   data?: any;
@@ -50,7 +63,7 @@ export async function executePipeline(
   suggestedFix?: string;
   doNotRetry?: boolean;
 }> {
-  const pipeline = getPipeline(integration);
+  let pipeline = getPipeline(integration);
   if (!pipeline) {
     return {
       success: false,
@@ -58,6 +71,11 @@ export async function executePipeline(
       doNotRetry: true,
     };
   }
+
+  // testOnly: run only detect → validate → test. Nothing is persisted and no
+  // live-test side effects fire — used by test_credential which must keep its
+  // "never writes anything" contract.
+  if (opts.testOnly) pipeline = testOnlySlice(pipeline);
 
   const variant = googleVariantFor(integration);
   const pipelineInput: any = {
