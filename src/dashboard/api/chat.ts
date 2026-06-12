@@ -24,7 +24,8 @@ import { checkBudget, recordSpend, isVouzaFallbackKey } from "../../agent/budget
 import { readEmailsTool, sendEmailTool, draftEmailTool, triageEmailsTool } from "../../tools/email.js";
 import { listEventsTool, createEventTool, updateEventTool, findFreeSlotsTool } from "../../tools/calendar.js";
 import { readSpreadsheetTool, writeSpreadsheetTool, searchSpreadsheetTool } from "../../tools/spreadsheet.js";
-import { sendSlackMessageTool, readSlackMessagesTool, listSlackChannelsTool } from "../../tools/messenger.js";
+// Slack tools removed — listener deferred (Bolt SDK not yet implemented).
+// Reference copy of the old tools lives in docs/reference/messenger.ts.txt.
 import { listFilesTool, readFileTool, readExcelFileTool, writeFileTool, organizeFilesTool } from "../../tools/fileManager.js";
 import { readPdfTool, searchLocalFilesTool } from "../../tools/documents.js";
 import {
@@ -75,10 +76,8 @@ You help with email, calendar, messaging, files, voice, and reporting tasks.
 - Book meetings, create invites
 - Update or cancel events
 
-### Messaging (Telegram · Slack · WhatsApp)
+### Messaging (Telegram · WhatsApp)
 - Send and read Telegram messages
-- Send Slack notifications to channels or DMs
-- Read Slack channel history
 - Send WhatsApp messages (via WAHA or Twilio)
 
 ### Files & Spreadsheets (Google Drive · Local files · Google Sheets)
@@ -228,7 +227,7 @@ If the user pastes an API key for OpenRouter, Anthropic, OpenAI, Groq, etc. in t
   - Open Telegram and message [@BotFather](https://t.me/BotFather) → send /newbot → copy the token it gives you
   - After saving: tell the user to open their new bot and send /start from their phone — that activates full mobile control
 - **Slack**: go to [api.slack.com/apps](https://api.slack.com/apps) → Create New App → OAuth scopes: channels:read, chat:write, channels:history
-  - After saving: call read_slack_messages and list channels
+  - After saving: credentials are stored and verified — Slack send/read tools arrive with the upcoming Bolt listener, so don't promise live Slack actions yet
 - **WhatsApp** — three paths, recommended in this order:
   1. **Baileys (built-in, free, NO Docker needed)** — RECOMMENDED for almost everyone.
      The dashboard's WhatsApp card shows a QR code automatically. Tell the user:
@@ -828,7 +827,6 @@ export function buildRegistry(): ToolRegistry {
     readEmailsTool, sendEmailTool, draftEmailTool, triageEmailsTool,
     listEventsTool, createEventTool, updateEventTool, findFreeSlotsTool,
     readSpreadsheetTool, writeSpreadsheetTool, searchSpreadsheetTool,
-    sendSlackMessageTool, readSlackMessagesTool, listSlackChannelsTool,
     listFilesTool, readFileTool, readExcelFileTool, writeFileTool, organizeFilesTool,
     readPdfTool, searchLocalFilesTool,  // Phase 1 — local document intelligence
     sendTelegramMessageTool, readTelegramUpdatesTool, getTelegramBotInfoTool, forwardTelegramMessageTool,

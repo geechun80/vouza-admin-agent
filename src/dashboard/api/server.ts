@@ -244,9 +244,20 @@ export async function startDashboard(port = 3456): Promise<void> {
   // browsers cache index.html indefinitely and users see stale UI (Aerick bug,
   // 2026-05-28: M1 chat-ordering fix wasn't visible because the browser kept
   // serving cached HTML). Other static assets (images, fonts) keep default caching.
+  //
+  // Rule 64 extension (Phase 5): the SPA was split into index.html + app.css +
+  // app.js. The split assets MUST also revalidate — otherwise users get fresh
+  // HTML referencing stale cached JS/CSS (the same stale-UI bug class, one
+  // layer down). They're tiny files served from localhost, so no-cache costs
+  // nothing; staleness costs hours of support. (The ?v=2 query param in
+  // index.html is the belt; these headers are the suspenders.)
+  // NOTE: endsWith(sep + "app.js") — a bare endsWith("app.js") would also
+  // match e.g. "whatsapp.js".
+  const isSpaAsset = (p: string) =>
+    p.endsWith(`${sep}app.js`) || p.endsWith(`${sep}app.css`);
   app.use(express.static(PUBLIC_DIR, {
     setHeaders: (res, filePath) => {
-      if (filePath.endsWith(".html")) {
+      if (filePath.endsWith(".html") || isSpaAsset(filePath)) {
         res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
         res.setHeader("Pragma", "no-cache");
         res.setHeader("Expires", "0");
