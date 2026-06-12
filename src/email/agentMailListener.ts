@@ -11,7 +11,7 @@
 //               URL-encoded when used in path segments
 //   email     — same as inbox_id
 //
-// Pattern mirrors baileysListener.ts: idempotent start/stop, per-thread
+// Pattern mirrors baileysManager.ts: idempotent start/stop, per-thread
 // isolated AgentContext, session map with 2-hour prune, state persisted to
 // data/agentmail-state.json so seen message IDs survive restarts.
 // =============================================================================

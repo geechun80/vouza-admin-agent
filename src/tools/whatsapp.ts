@@ -5,7 +5,41 @@
 
 import { z } from "zod";
 import { buildTool } from "./registry.js";
-import { sendBaileysMessage, isBaileysConnected } from "../whatsapp/baileysListener.js";
+import { sendBaileysMessage, isBaileysConnected } from "../whatsapp/baileysManager.js";
+
+// ---------------------------------------------------------------------------
+// Baileys bridge — single WhatsApp path (Phase 3)
+//
+// Sends route through baileysManager (the child-process worker supervisor),
+// which owns the SAME socket that receives incoming messages. The legacy
+// in-process baileysListener.ts was deleted — it held a separate (usually
+// dead) socket, so agent sends could silently go nowhere.
+//
+// The bridge is injectable so tests can verify routing without forking a
+// real worker process.
+// ---------------------------------------------------------------------------
+
+interface BaileysBridge {
+  send: (chatId: string, text: string) => Promise<void>;
+  isConnected: () => boolean;
+}
+
+const DEFAULT_BAILEYS_BRIDGE: BaileysBridge = {
+  send: sendBaileysMessage,
+  isConnected: isBaileysConnected,
+};
+
+let _baileys: BaileysBridge = DEFAULT_BAILEYS_BRIDGE;
+
+/** Test seam — pass null to restore the real manager-backed bridge. */
+export function _setBaileysBridgeForTests(bridge: BaileysBridge | null): void {
+  _baileys = bridge ?? DEFAULT_BAILEYS_BRIDGE;
+}
+
+/** Test seam — inspect the active bridge (verifies default = manager exports). */
+export function _getBaileysBridgeForTests(): BaileysBridge {
+  return _baileys;
+}
 
 // --- Send WhatsApp Message ---
 
@@ -157,13 +191,13 @@ async function sendViaWaha(to: string, message: string, config: Record<string, s
   return { success: false, error: data.message || "WAHA send failed" };
 }
 
-// --- WhatsApp Web (Baileys — native WS protocol) ---
+// --- WhatsApp Web (Baileys — native WS protocol, via baileysManager) ---
 async function sendViaWhatsAppWeb(to: string, message: string, _config: Record<string, string>) {
-  if (!isBaileysConnected()) {
+  if (!_baileys.isConnected()) {
     return { success: false, error: "WhatsApp not connected. Open the dashboard and scan the QR code first." };
   }
   const chatId = to.replace(/[^0-9]/g, "") + "@c.us";
-  await sendBaileysMessage(chatId, message);
+  await _baileys.send(chatId, message);
   return { success: true, data: { chatId } };
 }
 

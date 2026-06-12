@@ -14,7 +14,8 @@
 //   • Maintain per-chat isolated AgentContext (same isolation as before)
 //   • FIFO per-chat queue from Phase 1 (ChannelQueues)
 //
-// Public API  (identical to baileysListener.ts — callers need no changes)
+// Public API  (same surface as the deleted in-process baileysListener.ts —
+// this manager is now the ONLY WhatsApp implementation)
 // ────────────────────────────────────────────────────────────────────────
 //   startBaileysListener(ctx, registry)
 //   stopBaileysListener()
@@ -59,7 +60,7 @@ type QRListener     = (qr: string)        => void;
 type StatusListener = (s: BaileysStatus)  => void;
 
 // ---------------------------------------------------------------------------
-// Listener sets (same EventEmitter-lite pattern as baileysListener.ts)
+// Listener sets (EventEmitter-lite pattern)
 // ---------------------------------------------------------------------------
 
 const qrListeners:     Set<QRListener>     = new Set();
@@ -80,7 +81,7 @@ let _restartCount  = 0;
 const BASE_DELAY_MS = 2_000;
 const MAX_DELAY_MS  = 30_000;
 
-// Per-chat FIFO queue (Phase 1 logic, moved here from baileysListener.ts)
+// Per-chat FIFO queue (Phase 1 logic)
 const chatQueues = new ChannelQueues();
 
 // Per-chat isolated agent contexts — keyed by WhatsApp chatId
