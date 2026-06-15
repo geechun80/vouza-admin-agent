@@ -447,7 +447,12 @@ function tryGoStep(n) {
 // Navigation
 // ============================================================
 function showStep(n) {
-  document.querySelectorAll('.step-view').forEach(el => el.classList.remove('active'));
+  // Clear any inline display:none left by toggleSetupPanel / toggleHealthPanel
+  // before adding the active class — inline styles beat CSS class rules.
+  document.querySelectorAll('.step-view').forEach(el => {
+    el.style.display = '';
+    el.classList.remove('active');
+  });
   const el = document.getElementById(`step-${n}`);
   if (el) el.classList.add('active');
   state.step = n;
