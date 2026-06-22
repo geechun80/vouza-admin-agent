@@ -498,7 +498,10 @@ function goNext() {
     const key    = keyEl?.value?.trim();
     const hasSaved     = (keyEl?.placeholder || '').includes('Already saved');
     const hasConnected = !!state.connStatus['ai-provider'] || !!state.connStatus['openrouter'];
-    const hasOperator  = !!state.operatorDefaults?.hasDefaultKey;
+    // Only a WORKING operator key counts — a revoked/expired one (status
+    // 'invalid') must not let the user sail past Step 2 into a broken bot.
+    const hasOperator  = !!state.operatorDefaults?.hasDefaultKey
+                      && state.operatorDefaults?.defaultKeyStatus !== 'invalid';
 
     if (!key && !hasSaved && !hasConnected && !hasOperator) {
       toast('🔑 An AI API key is required — without it the bot cannot respond', 'error');
@@ -923,9 +926,14 @@ function renderAIKeySection() {
   const connected = state.connStatus[statusKey];
   const op = state.operatorDefaults || {};
   const hasOperatorKey = !!op.hasDefaultKey;
+  // A present operator key is only USABLE if the provider didn't reject it.
+  // 'valid' / 'unchecked' → treat as usable (don't block on transient network
+  // failures); 'invalid' → confirmed bad (revoked/expired), do not rely on it.
+  const operatorBroken = hasOperatorKey && op.defaultKeyStatus === 'invalid';
+  const operatorUsable = hasOperatorKey && !operatorBroken;
   // User has their own saved key if the placeholder says "Already saved"
   const hasSavedKey = connected || (document.getElementById('aiProviderKey')?.placeholder || '').includes('Already saved');
-  const usingOperator = hasOperatorKey && !connected && !hasSavedKey;
+  const usingOperator = operatorUsable && !connected && !hasSavedKey;
   const brandName = op.brandName || 'Vouza';
 
   let html = '';
@@ -943,14 +951,28 @@ function renderAIKeySection() {
           <span class="glass-card-badge badge-connected">Ready</span>
         </div>
       </div>`;
+  } else if (operatorBroken && !connected && !hasSavedKey) {
+    // The shared key exists but the provider rejected it (revoked/expired).
+    // Be honest: scripted guidance still works, but real AI needs a valid key.
+    html += `
+      <div class="glass-card" style="border:1px solid rgba(245,158,11,0.4);background:rgba(245,158,11,0.07);margin-bottom:16px">
+        <div class="glass-card-header" style="margin-bottom:0">
+          <div class="glass-card-icon" style="font-size:22px;background:rgba(245,158,11,0.14);border-radius:10px;padding:6px">⚠️</div>
+          <div style="flex:1">
+            <div class="glass-card-title" style="color:#f59e0b">${brandName} Guide Bot — limited mode</div>
+            <div style="font-size:12px;color:var(--text-dim);margin-top:2px">${brandName} Guide Bot is available for basic chat. Additional AI features require a valid API key configuration.</div>
+          </div>
+          <span class="glass-card-badge badge-pending">Key needed</span>
+        </div>
+      </div>`;
   }
 
-  // ── User's own API key (required when no operator key; optional otherwise) ─
-  const isRequired = !hasOperatorKey;
+  // ── User's own API key — required unless a WORKING operator key exists ─────
+  const isRequired = !operatorUsable;
   const requiredBadge = isRequired
     ? `<span style="color:var(--error);font-size:11px;font-weight:700;background:rgba(239,68,68,0.12);padding:2px 7px;border-radius:10px;margin-left:6px">Required</span>`
     : `<span style="color:var(--text-muted);font-size:11px;background:var(--bg-glass);border:1px solid var(--border);padding:2px 7px;border-radius:10px;margin-left:6px">Optional</span>`;
-  const cardTitle = hasOperatorKey
+  const cardTitle = operatorUsable
     ? 'Use Your Own API Key'
     : `${provName} API Key`;
 
@@ -961,7 +983,7 @@ function renderAIKeySection() {
         <div class="glass-card-title">${cardTitle}</div>
         <span class="glass-card-badge ${connected?'badge-success':'badge-pending'}" id="status-${statusKey}">${connected?'✓ Connected':'Not Connected'}</span>
       </div>
-      ${hasOperatorKey ? `
+      ${operatorUsable ? `
         <div style="font-size:12px;color:var(--text-dim);margin-bottom:12px;line-height:1.5">
           Bring your own key to use a different model, bypass shared usage limits, or keep full control of your AI spending.
         </div>
@@ -1821,7 +1843,8 @@ function getDynamicTips(step) {
   const hasCalendar = cs.calendar || cs['calendar-google'] || cs['calendar-outlook'];
   const hasKey      = !!(document.getElementById('aiProviderKey')?.value?.trim() ||
                          (document.getElementById('aiProviderKey')?.placeholder || '').includes('saved') ||
-                         state.operatorDefaults?.hasDefaultKey);
+                         (state.operatorDefaults?.hasDefaultKey &&
+                          state.operatorDefaults?.defaultKeyStatus !== 'invalid'));
 
   switch (step) {
     case 1:
@@ -2044,7 +2067,7 @@ async function renderSetupStatusPanel() {
     !!creds.googleApiKey || !!creds.googleAiApiKey || !!creds.openrouterApiKey ||
     !!creds.xaiApiKey || !!creds.deepseekApiKey || !!creds.moonshotApiKey ||
     !!creds.alibabaApiKey || !!creds.dashscopeApiKey;
-  const hasOperatorKey = !!op.hasDefaultKey;
+  const hasOperatorKey = !!op.hasDefaultKey && op.defaultKeyStatus !== 'invalid';
 
   const ITEMS = [
     { id:'ai',          name:'AI Model',            icon:'🤖', test: () => hasAnyUserAiKey || hasOperatorKey, ask: 'I want to add or change my AI API key. Please walk me through it.' },
