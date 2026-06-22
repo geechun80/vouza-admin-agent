@@ -8,6 +8,19 @@ import { join, extname } from "path";
 import matter from "gray-matter";
 import type { SkillDefinition } from "../types/index.js";
 
+// SECURITY NOTE (GHSA-h67p-54hq-rp68 — js-yaml merge-key quadratic DoS, moderate):
+// gray-matter@4.0.3 pins js-yaml@3.x, which carries this advisory. We intentionally
+// do NOT "fix" it because:
+//   • The only YAML this app parses is front-matter in trusted, bundled skill files
+//     under ./src/skills/bundled (shipped with the app, never user-uploaded). There
+//     is no path — including Phase 1 folder grants / read_pdf / search_local_files —
+//     by which an attacker-controlled .md reaches gray-matter, so the DoS has no
+//     real attack surface here.
+//   • `npm audit fix --force` downgrades gray-matter 4.x → 2.0.1 (feature loss), and
+//     overriding js-yaml to 4.x breaks gray-matter (it calls yaml.safeLoad/safeDump,
+//     both removed in js-yaml 4). Neither is worth it for a non-exploitable moderate.
+// Revisit if skill loading ever accepts untrusted .md input.
+
 /**
  * Load all skills from a directory of markdown files.
  * Each .md file = one skill with YAML frontmatter for metadata.
