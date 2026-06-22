@@ -180,7 +180,7 @@ pause
       "@anthropic-ai/sdk": "^0.74.0",
       express: "^4.21.0",
       googleapis: "^144.0.0",
-      nodemailer: "^8.0.7",
+      nodemailer: "^9.0.1",
       "node-cron": "^3.0.3",
       "gray-matter": "^4.0.3",
       zod: "^3.23.0",
