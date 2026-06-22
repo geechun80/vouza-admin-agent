@@ -219,6 +219,60 @@ function safeConvPath(id: string, convDir: string): string | null {
   return resolved;
 }
 
+// ── Operator key live-verification (cached) ─────────────────────────────────
+// Verifies VOUZA_API_KEY against the provider's /models endpoint so the
+// dashboard reports honest status. Cached to avoid hammering the provider on
+// every poll. A 401/403 means the key is genuinely bad (revoked/expired); a
+// network error means we simply couldn't check (don't punish the operator for
+// being briefly offline — report "unchecked", not "invalid").
+type OperatorKeyStatus = "valid" | "invalid" | "unchecked";
+let _opKeyCache: { status: OperatorKeyStatus; detail?: string; checkedAt: number } | null = null;
+const OP_KEY_TTL_MS = 5 * 60 * 1000; // re-verify at most once every 5 minutes
+
+async function verifyOperatorKey(): Promise<{ status: OperatorKeyStatus; detail?: string }> {
+  const key = (process.env.VOUZA_API_KEY || "").trim();
+  if (!key) return { status: "unchecked", detail: "No operator key set" };
+
+  if (_opKeyCache && Date.now() - _opKeyCache.checkedAt < OP_KEY_TTL_MS) {
+    return { status: _opKeyCache.status, detail: _opKeyCache.detail };
+  }
+
+  const provider = process.env.VOUZA_API_PROVIDER || "openrouter";
+  // IMPORTANT: validate against an AUTH-GATED endpoint. OpenRouter's /v1/models
+  // is PUBLIC — it returns 200 even for a revoked key, producing a false
+  // "valid". /v1/key requires the key and returns 401 when it's bad. Anthropic
+  // and OpenAI /v1/models are auth-gated; Google's models endpoint takes ?key=.
+  const baseUrl = provider === "anthropic" ? "https://api.anthropic.com/v1/models"
+                : provider === "openrouter" ? "https://openrouter.ai/api/v1/key"
+                : provider === "google" ? `https://generativelanguage.googleapis.com/v1beta/models?key=${key}`
+                : provider === "openai" ? "https://api.openai.com/v1/models"
+                : `https://api.${provider}.com/v1/models`;
+  const headers: Record<string, string> = {};
+  if (provider === "anthropic") { headers["x-api-key"] = key; headers["anthropic-version"] = "2023-06-01"; }
+  else if (provider !== "google") { headers["Authorization"] = `Bearer ${key}`; }
+
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 8000);
+  let result: { status: OperatorKeyStatus; detail?: string };
+  try {
+    const r = await fetch(baseUrl, { headers, signal: ctrl.signal });
+    if (r.ok) {
+      result = { status: "valid" };
+    } else if (r.status === 401 || r.status === 403) {
+      result = { status: "invalid", detail: `Provider rejected the operator key (HTTP ${r.status})` };
+    } else {
+      result = { status: "unchecked", detail: `Provider returned HTTP ${r.status} — could not verify` };
+    }
+  } catch {
+    result = { status: "unchecked", detail: "Could not reach provider to verify the key" };
+  } finally {
+    clearTimeout(t);
+  }
+
+  _opKeyCache = { ...result, checkedAt: Date.now() };
+  return result;
+}
+
 export async function startDashboard(port = 3456): Promise<void> {
   // ── Ensure data/ directory and a baseline config always exist ─────────────
   // Prevents "No API key found" errors on fresh installs or after accidental
@@ -302,14 +356,27 @@ export async function startDashboard(port = 3456): Promise<void> {
   });
 
   // --- Operator Defaults API ---
-  // Tells the wizard whether a default (Vouza-supplied) API key is configured.
-  // The actual key is NEVER exposed — only hasDefaultKey: true/false.
+  // Tells the wizard whether a default (Vouza-supplied) API key is configured
+  // AND whether that key actually works. The actual key is NEVER exposed.
   // Set VOUZA_API_KEY (and optionally VOUZA_API_PROVIDER, VOUZA_API_MODEL, VOUZA_BRAND_NAME)
   // as environment variables in start.bat or ecosystem.config.cjs.
-  app.get("/api/operator-defaults", (_req, res) => {
+  //
+  // defaultKeyStatus: "valid" | "invalid" | "unchecked"
+  //   The mere presence of VOUZA_API_KEY does NOT mean it works — a revoked or
+  //   expired key is still a non-empty string. Reporting "ready" off presence
+  //   alone produced a confusing UX where the banner said Ready but every chat
+  //   failed with "Invalid API key" (the shared key was revoked when the repo
+  //   went public). We now verify the key against the provider (cached) so the
+  //   dashboard can tell the truth.
+  app.get("/api/operator-defaults", async (_req, res) => {
     const hasDefaultKey = !!(process.env.VOUZA_API_KEY || "").trim();
+    const { status, detail } = hasDefaultKey
+      ? await verifyOperatorKey()
+      : { status: "unchecked" as const, detail: undefined as string | undefined };
     res.json({
       hasDefaultKey,
+      defaultKeyStatus: status,
+      defaultKeyDetail: detail,
       defaultProvider: process.env.VOUZA_API_PROVIDER || "openrouter",
       defaultModel:    process.env.VOUZA_API_MODEL    || "google/gemini-2.5-flash-lite",
       brandName:       process.env.VOUZA_BRAND_NAME   || "Vouza",
@@ -599,9 +666,12 @@ export async function startDashboard(port = 3456): Promise<void> {
 
     results.push(await time(`AI Provider (${activeProvider})`, async () => {
       if (!activeKey) throw new Error("No API key found — neither user nor operator key is set");
-      // Hit /models endpoint — universal across OpenRouter/OpenAI/Anthropic-compat
+      // Hit an AUTH-GATED endpoint so a revoked key actually fails. NOTE:
+      // OpenRouter's /v1/models is PUBLIC (200 even with a bad key) — use
+      // /v1/key, which is auth-gated, or the health check reports a dead key as
+      // healthy. Anthropic/OpenAI /v1/models require auth; Google takes ?key=.
       const baseUrl = activeProvider === "anthropic" ? "https://api.anthropic.com/v1/models"
-                    : activeProvider === "openrouter" ? "https://openrouter.ai/api/v1/models"
+                    : activeProvider === "openrouter" ? "https://openrouter.ai/api/v1/key"
                     : activeProvider === "google" ? `https://generativelanguage.googleapis.com/v1beta/models?key=${activeKey}`
                     : activeProvider === "openai" ? "https://api.openai.com/v1/models"
                     : `https://api.${activeProvider}.com/v1/models`;
