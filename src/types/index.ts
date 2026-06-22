@@ -231,7 +231,7 @@ export interface AgentConfig {
       tenantId: string;
       email?: string;
     };
-    smtp?: { host: string; port: string; user: string; pass: string };
+    smtp?: { host: string; port: string; user: string; pass: string; imapHost?: string; imapPort?: string };
     slack?: { botToken: string };
     telegram?: { botToken: string; webhookUrl?: string };
     whatsapp?: {

@@ -6,6 +6,8 @@ import { z } from "zod";
 import { buildTool } from "./registry.js";
 import nodemailer from "nodemailer";
 import { google } from "googleapis";
+import { ImapFlow } from "imapflow";
+import { simpleParser } from "mailparser";
 
 // --- Read Emails ---
 
@@ -60,7 +62,78 @@ export const readEmailsTool = buildTool({
 
       return { success: true, data: { count: emails.length, emails } };
     } catch (err) {
-      return { success: false, error: `Failed to read emails: ${err}` };
+      // Fallback to IMAP if Custom IMAP or App Password exists and OAuth failed/missing
+      const smtpCfg = context.config.tools.smtp;
+      const gmailCfg = context.config.tools.gmail;
+      
+      let imapHost = "imap.gmail.com";
+      let imapPort = 993;
+      let user = "";
+      let pass = "";
+      
+      if (smtpCfg && smtpCfg.imapHost && smtpCfg.user && smtpCfg.pass) {
+        imapHost = smtpCfg.imapHost;
+        imapPort = parseInt(smtpCfg.imapPort || "993", 10);
+        user = smtpCfg.user;
+        pass = smtpCfg.pass;
+      } else if (gmailCfg && gmailCfg.user && gmailCfg.appPassword) {
+        user = gmailCfg.user;
+        pass = gmailCfg.appPassword;
+      } else {
+        return { success: false, error: `Failed to read emails: ${err}. No Custom IMAP or Gmail App Password configured.` };
+      }
+
+      const client = new ImapFlow({
+        host: imapHost,
+        port: imapPort,
+        secure: true,
+        auth: { user, pass },
+        logger: false,
+      });
+
+      try {
+        await client.connect();
+        const lock = await client.getMailboxLock("INBOX");
+        try {
+          const query = input.query.toLowerCase();
+          const searchOpts: any = {};
+          if (query.includes("is:unread")) searchOpts.unseen = true;
+          else if (query.includes("is:read")) searchOpts.seen = true;
+          else searchOpts.all = true;
+
+          const seqs = await client.search(searchOpts);
+          if (!seqs || seqs.length === 0) return { success: true, data: { count: 0, emails: [] } };
+
+          const limit = input.maxResults || 10;
+          const limitedSeqs = seqs.slice(-limit).reverse(); // Newest first
+
+          const emails = [];
+          for await (const message of client.fetch(limitedSeqs, { envelope: true, source: input.includeBody })) {
+            let body = "";
+            if (input.includeBody && message.source) {
+              const parsed = await simpleParser(message.source);
+              body = parsed.text || parsed.html || "";
+            }
+            emails.push({
+              id: message.uid.toString(),
+              from: message.envelope?.from?.map((f: any) => f.address).join(", ") || "",
+              to: message.envelope?.to?.map((t: any) => t.address).join(", ") || "",
+              subject: message.envelope?.subject || "",
+              date: message.envelope?.date ? message.envelope.date.toISOString() : "",
+              snippet: body ? body.substring(0, 100) : "",
+              labels: message.flags ? Array.from(message.flags) : [],
+              body: input.includeBody ? body : undefined,
+            });
+          }
+          return { success: true, data: { count: emails.length, emails } };
+        } finally {
+          lock.release();
+        }
+      } catch (imapErr) {
+        return { success: false, error: `Failed to read emails via IMAP fallback: ${imapErr}` };
+      } finally {
+        await client.logout();
+      }
     }
   },
 });
@@ -85,16 +158,33 @@ export const sendEmailTool = buildTool({
   }),
   async call(input, context) {
     try {
-      const cfg = context.config.tools.gmail;
-      if (!cfg) return { success: false, error: "Gmail not configured" };
+      const smtpCfg = context.config.tools.smtp;
+      const gmailCfg = context.config.tools.gmail;
+      if (!smtpCfg && !gmailCfg) return { success: false, error: "Email (SMTP or Gmail) not configured" };
 
-      const transporter = nodemailer.createTransport({
-        service: "gmail",
-        auth: { user: cfg.user, pass: cfg.appPassword },
-      });
+      let transporterOptions: any;
+      let fromAddress = "";
+      
+      if (smtpCfg && smtpCfg.host && smtpCfg.user && smtpCfg.pass) {
+        transporterOptions = {
+          host: smtpCfg.host,
+          port: parseInt(smtpCfg.port || "587", 10),
+          secure: smtpCfg.port === "465",
+          auth: { user: smtpCfg.user, pass: smtpCfg.pass },
+        };
+        fromAddress = smtpCfg.user;
+      } else {
+        transporterOptions = {
+          service: "gmail",
+          auth: { user: gmailCfg!.user, pass: gmailCfg!.appPassword },
+        };
+        fromAddress = gmailCfg!.user;
+      }
+
+      const transporter = nodemailer.createTransport(transporterOptions);
 
       const mailOptions: nodemailer.SendMailOptions = {
-        from: cfg.user,
+        from: fromAddress,
         to: input.to,
         subject: input.subject,
         cc: input.cc,
@@ -275,8 +365,9 @@ export const replyEmailTool = buildTool({
   }),
   async call(input, context) {
     try {
-      const cfg = context.config.tools.gmail;
-      if (!cfg) return { success: false, error: "Gmail not configured" };
+      const smtpCfg = context.config.tools.smtp;
+      const gmailCfg = context.config.tools.gmail;
+      if (!smtpCfg && !gmailCfg) return { success: false, error: "Email (SMTP or Gmail) not configured" };
 
       const subject = input.subject || "Re: (your message)";
       const raw = Buffer.from(
@@ -298,13 +389,29 @@ export const replyEmailTool = buildTool({
         });
         return { success: true, data: { messageId: res.data.id, threadId: input.threadId } };
       } catch {
-        // Fallback: nodemailer + app password
-        const transporter = nodemailer.createTransport({
-          service: "gmail",
-          auth: { user: cfg.user, pass: cfg.appPassword },
-        });
+        // Fallback: nodemailer + app password or custom smtp
+        let transporterOptions: any;
+        let fromAddress = "";
+        
+        if (smtpCfg && smtpCfg.host && smtpCfg.user && smtpCfg.pass) {
+          transporterOptions = {
+            host: smtpCfg.host,
+            port: parseInt(smtpCfg.port || "587", 10),
+            secure: smtpCfg.port === "465",
+            auth: { user: smtpCfg.user, pass: smtpCfg.pass },
+          };
+          fromAddress = smtpCfg.user;
+        } else {
+          transporterOptions = {
+            service: "gmail",
+            auth: { user: gmailCfg!.user, pass: gmailCfg!.appPassword },
+          };
+          fromAddress = gmailCfg!.user;
+        }
+
+        const transporter = nodemailer.createTransport(transporterOptions);
         const result = await transporter.sendMail({
-          from: cfg.user,
+          from: fromAddress,
           to: input.to,
           subject,
           text: input.body,

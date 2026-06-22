@@ -213,23 +213,38 @@ const INTEGRATION_GUIDES: Record<string, {
   },
 
   smtp: {
-    name:     "Custom SMTP (any email provider)",
+    name:     "Custom Email (IMAP + SMTP)",
     emoji:    "✉️",
     category: "Email",
     link:     "https://support.google.com/mail/answer/7126229",
     requiredFields: [
       {
+        key:   "imapHost",
+        label: "IMAP Server Host (for reading emails)",
+        example: "imap.yourprovider.com",
+        howTo:
+          "The IMAP server address from your email provider.\n" +
+          "  Common examples:\n" +
+          "  • Yahoo Mail:     imap.mail.yahoo.com\n" +
+          "  • Zoho Mail:      imap.zoho.com\n" +
+          "  • Custom domain:  imap.yourdomain.com",
+      },
+      {
+        key:   "imapPort",
+        label: "IMAP Port",
+        example: "993",
+        howTo: "Usually 993 (SSL). Use 993 if unsure.",
+      },
+      {
         key:   "smtpHost",
-        label: "SMTP Server Host",
+        label: "SMTP Server Host (for sending emails)",
         example: "smtp.yourprovider.com",
         howTo:
           "The SMTP server address from your email provider.\n" +
           "  Common examples:\n" +
-          "  • Gmail:          smtp.gmail.com (use the Gmail setup instead)\n" +
           "  • Yahoo Mail:     smtp.mail.yahoo.com\n" +
           "  • Zoho Mail:      smtp.zoho.com\n" +
-          "  • Custom domain:  mail.yourdomain.com\n" +
-          "  Check your provider's help docs for 'SMTP settings'.",
+          "  • Custom domain:  mail.yourdomain.com",
       },
       {
         key:   "smtpPort",
@@ -239,13 +254,13 @@ const INTEGRATION_GUIDES: Record<string, {
       },
       {
         key:   "smtpUser",
-        label: "SMTP Username / Email",
+        label: "Username / Email",
         example: "yourname@yourdomain.com",
-        howTo: "Your full email address or the SMTP login username.",
+        howTo: "Your full email address or login username.",
       },
       {
         key:   "smtpPass",
-        label: "SMTP Password or App Password",
+        label: "Password or App Password",
         example: "your-password",
         howTo:
           "Your email password, or a special app password if your provider requires it.\n" +
@@ -253,7 +268,7 @@ const INTEGRATION_GUIDES: Record<string, {
           "  For Zoho:  generate at accounts.zoho.com → Security → App Passwords",
       },
     ],
-    testTip: "After saving, I'll send a test email to confirm the SMTP connection works.",
+    testTip: "After saving, I'll test the connection to ensure I can read and send emails.",
   },
 
   // ── CALENDAR ───────────────────────────────────────────────────────────────
@@ -891,7 +906,7 @@ export const saveIntegrationCredentialsTool = buildTool({
         "as a single string, OR (b) a parsed object. The tool normalizes both. " +
         "gmail: {gmailUser, gmailPass} | " +
         "outlook: {outlookClientId, outlookSecret, outlookTenant, outlookEmail?} | " +
-        "smtp: {smtpHost, smtpPort?, smtpUser, smtpPass} | " +
+        "smtp: {smtpHost, smtpPort?, imapHost?, imapPort?, smtpUser, smtpPass} | " +
         "google_calendar: {googleSaKey} — paste the WHOLE .json file content here | " +
         "telegram: {telegramToken} | " +
         "slack: {slackToken} | " +
@@ -986,7 +1001,16 @@ export const saveIntegrationCredentialsTool = buildTool({
           cfg.credentials.smtpPort = c.smtpPort || "587";
           cfg.credentials.smtpUser = c.smtpUser;
           cfg.credentials.smtpPass = c.smtpPass;
-          cfg.tools.smtp = { host: c.smtpHost, port: c.smtpPort || "587", user: c.smtpUser, pass: c.smtpPass };
+          if (c.imapHost) cfg.credentials.imapHost = c.imapHost;
+          if (c.imapPort) cfg.credentials.imapPort = c.imapPort;
+          cfg.tools.smtp = { 
+            host: c.smtpHost, 
+            port: c.smtpPort || "587", 
+            user: c.smtpUser, 
+            pass: c.smtpPass,
+            imapHost: c.imapHost,
+            imapPort: c.imapPort || "993"
+          };
           hotTools.smtp = cfg.tools.smtp;
           break;
         }
