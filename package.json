@@ -4,7 +4,7 @@
   "description": "Self-improving AI agent framework — multi-provider, template-ready, inspired by Claude Code architecture",
   "type": "module",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.19.0"
   },
   "scripts": {
     "build": "tsc && node -e \"const fs=require('fs');fs.cpSync('src/dashboard/public','dist/dashboard/public',{recursive:true,force:true});console.log('✓ public/ copied to dist/')\"",
@@ -18,7 +18,7 @@
     "@anthropic-ai/sdk": "^0.74.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@whiskeysockets/baileys": "7.0.0-rc13",
-    "adm-zip": "^0.5.17",
+    "adm-zip": "^0.6.0",
     "chalk": "^5.3.0",
     "dotenv": "^16.4.0",
     "exceljs": "^4.4.0",
@@ -38,7 +38,8 @@
     "zod": "^3.23.0"
   },
   "overrides": {
-    "uuid": "^11.1.1"
+    "uuid": "^11.1.1",
+    "html-to-text": "10.0.1"
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.8",
