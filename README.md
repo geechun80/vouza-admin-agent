@@ -6,7 +6,7 @@
 
 Email · Calendar · WhatsApp · Telegram · Files · Voice · Web search — all in one agent.
 
-[![Tests](https://img.shields.io/badge/tests-275%2F275-brightgreen)](#)
+[![Tests](https://img.shields.io/badge/tests-402%2F402-brightgreen)](#)
 [![Node](https://img.shields.io/badge/node-20.19%2B-blue)](https://nodejs.org)
 [![Audit](https://img.shields.io/badge/npm%20audit-0%20vulnerabilities-brightgreen)](#)
 [![License](https://img.shields.io/badge/license-private-lightgrey)](#)
