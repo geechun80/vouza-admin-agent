@@ -18,6 +18,7 @@ import { promises as fs } from "fs";
 import { join } from "path";
 import { logger } from "../util/logger.js";
 import type { McpServerConfig, McpConnectionStatus, McpToolDescriptor } from "./types.js";
+import { readSealedJson, writeSealedJson } from "../security/secretStore.js";
 
 const CONFIG_PATH = join(process.cwd(), "data", "mcp-servers.json");
 
@@ -39,8 +40,8 @@ class McpClientManagerImpl {
 
   async loadFromDisk(): Promise<void> {
     try {
-      const raw = await fs.readFile(CONFIG_PATH, "utf-8");
-      const parsed = JSON.parse(raw);
+      // Server env vars (API keys, tokens) are encrypted on disk.
+      const parsed = await readSealedJson<any>(CONFIG_PATH, null);
       if (!Array.isArray(parsed?.servers)) return;
       for (const s of parsed.servers as McpServerConfig[]) {
         if (s?.id && s?.command) {
@@ -60,12 +61,9 @@ class McpClientManagerImpl {
 
   private async saveToDisk(): Promise<void> {
     try {
-      await fs.mkdir(join(process.cwd(), "data"), { recursive: true });
       const payload = { version: 1, servers: Array.from(this.servers.values()) };
-      // Write-then-rename for atomicity
-      const tmp = CONFIG_PATH + ".tmp";
-      await fs.writeFile(tmp, JSON.stringify(payload, null, 2), "utf-8");
-      await fs.rename(tmp, CONFIG_PATH);
+      // Encrypts secret env values; write-then-rename for atomicity.
+      await writeSealedJson(CONFIG_PATH, payload);
     } catch (err) {
       logger.error({ event: "mcp_servers_save_failed", err: String(err) }, "Could not save mcp-servers.json");
     }

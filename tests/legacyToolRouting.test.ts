@@ -18,6 +18,7 @@ import path from "path";
 import { mkdir, writeFile, rm, readFile } from "fs/promises";
 import { existsSync } from "fs";
 import { saveIntegrationCredentialsTool } from "../src/tools/setup.js";
+import { readSealedJson } from "../src/security/secretStore.js";
 
 // Pipeline routing returns this shape (success/error/stepReached/doNotRetry).
 // Legacy direct-save returns { success, data?, error? } with NO stepReached.
@@ -117,8 +118,10 @@ describe("save_integration_credentials — legacy tool routing", () => {
       "smtp must take the legacy direct-save path — the gmail pipeline cannot handle smtpHost credentials");
     assert.equal(result.success, true, result.error ?? "");
     assert.equal(result.data.slug, "smtp");
-    // The credentials actually landed in config.json via the direct save.
-    const saved = JSON.parse(await readFile(CONFIG_PATH, "utf-8"));
+    // The credentials actually landed in config.json via the direct save —
+    // encrypted on disk (secretStore.ts), readable once opened.
+    assert.doesNotMatch(await readFile(CONFIG_PATH, "utf-8"), /app-password-here/);
+    const saved: any = await readSealedJson(CONFIG_PATH, null);
     assert.equal(saved.credentials.smtpHost, "smtp.mail.yahoo.com");
     assert.equal(saved.tools.smtp.user, "me@yahoo.com");
     assert.equal(saved.tools.smtp.port, "465");

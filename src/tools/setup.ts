@@ -32,6 +32,7 @@ import {
   canonicalizeIntegrationName,
 } from "../orchestrator/index.js";
 import { childLogger } from "../util/logger.js";
+import { readSealedJson, writeSealedJson } from "../security/secretStore.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared pipeline executor — used by both run_integration_pipeline (the
@@ -116,16 +117,15 @@ function dashboardWebhookUrl(): string {
   return `http://localhost:${port}/api/whatsapp/webhook`;
 }
 
+// Keys and passwords are encrypted on disk (security/secretStore.ts).
 async function readConfig(): Promise<any> {
   if (!existsSync(CONFIG_PATH)) return {};
-  try { return JSON.parse(await readFile(CONFIG_PATH, "utf-8")); }
+  try { return await readSealedJson(CONFIG_PATH, {}); }
   catch { return {}; }
 }
 
 async function writeConfig(cfg: any): Promise<void> {
-  const dir = path.dirname(CONFIG_PATH);
-  if (!existsSync(dir)) await mkdir(dir, { recursive: true });
-  await writeFile(CONFIG_PATH, JSON.stringify(cfg, null, 2), "utf-8");
+  await writeSealedJson(CONFIG_PATH, cfg);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

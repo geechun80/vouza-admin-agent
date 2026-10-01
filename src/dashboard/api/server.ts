@@ -5,7 +5,7 @@
 
 import express from "express";
 import { readFile, writeFile, mkdir, readdir, unlink, access } from "fs/promises";
-import { join, dirname, resolve, sep } from "path";
+import { join, dirname, resolve, sep, basename } from "path";
 import { fileURLToPath } from "url";
 import { exec } from "child_process";
 import { promisify } from "util";
@@ -15,6 +15,7 @@ const execAsync = promisify(exec);
 import {
   getModelCatalogForUI,
   DEFAULT_MODEL,
+  DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_PROVIDER,
   DEFAULT_OPERATOR_PROVIDER,
   DEFAULT_OPERATOR_MODEL,
@@ -57,6 +58,8 @@ import {
   stopAgentMailListener,
   getAgentMailInbox,
 } from "../../email/agentMailListener.js";
+import { readSealedJson, writeSealedJson, migrateJsonFile, getMasterKey } from "../../security/secretStore.js";
+import { listOpenRouterModels, listProviderModels, isValidModelId } from "../../config/liveModels.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = join(process.cwd(), "data", "config.json");
@@ -308,6 +311,12 @@ export async function startDashboard(port = 3456): Promise<void> {
     console.warn("  ⚠ Could not initialize data/config.json:", e);
   }
 
+  // Unlock the master key now (Windows DPAPI goes through PowerShell, which
+  // can take seconds) and upgrade any file still holding plain-text secrets.
+  getMasterKey()
+    .then(() => encryptSecretsAtRest())
+    .catch((err) => console.warn(`  ⚠ Could not unlock the secret key: ${err}`));
+
   // Every outgoing connection is recorded for the Network view (Health panel).
   installFetchLogger();
 
@@ -375,6 +384,33 @@ export async function startDashboard(port = 3456): Promise<void> {
   // --- Model Catalog API ---
   app.get("/api/models", (_req, res) => {
     res.json(getModelCatalogForUI());
+  });
+
+  // --- Every model a provider offers (fetched only when asked) ---
+  // OpenRouter's catalog is public; other providers are listed with the
+  // SAVED key (it never comes from the browser). Cached 6 h.
+  app.get("/api/models/live", requireLocalOrigin, async (req, res) => {
+    const provider = String(req.query.provider || "") as AIProvider;
+    if (!(provider in DEFAULT_MODEL_BY_PROVIDER) || provider === "ollama") {
+      return res.status(400).json({ ok: false, error: "Unknown provider" });
+    }
+    try {
+      if (provider === "openrouter") {
+        return res.json({ ok: true, provider, models: await listOpenRouterModels() });
+      }
+      const cfg   = await loadSetupConfig();
+      const creds: Record<string, string> = (cfg.credentials || {}) as any;
+      const key = creds[`${provider}ApiKey`]
+        || (provider === "google"  ? creds.googleAiApiKey   : "")
+        || (provider === "alibaba" ? creds.dashscopeApiKey  : "")
+        || "";
+      if (!key || key.length < 8) {
+        return res.json({ ok: false, needsKey: true, error: "Save your key for this provider first, then the full list appears here." });
+      }
+      res.json({ ok: true, provider, models: await listProviderModels(provider, key) });
+    } catch (err: any) {
+      res.json({ ok: false, error: String(err?.message || err) });
+    }
   });
 
   // --- Operator Defaults API ---
@@ -1024,11 +1060,9 @@ export async function startDashboard(port = 3456): Promise<void> {
         // If there's no current config, nothing to back up — that's fine.
       }
 
-      // 3. Write the restored config atomically (write-then-rename via fs)
-      const tmpPath = CONFIG_PATH + ".restoring";
-      await writeFile(tmpPath, JSON.stringify(bundle.config, null, 2), "utf8");
-      const fsPromises = await import("fs/promises");
-      await fsPromises.rename(tmpPath, CONFIG_PATH);
+      // 3. Write the restored config atomically, secrets encrypted for THIS
+      //    computer (a backup carries them readable so it can move machines).
+      await writeSealedJson(CONFIG_PATH, bundle.config);
 
       // 4. Best-effort memory restore — failures don't fail the whole import
       let memoriesRestored = 0;
@@ -1155,6 +1189,11 @@ export async function startDashboard(port = 3456): Promise<void> {
   app.post("/api/config", requireLocalOrigin, async (req, res) => {
     try {
       const updates: Partial<SetupConfig> = req.body;
+      // Model ids come from a free-text box now — keep them to id characters.
+      const ids = [updates?.agent?.model, ...Object.values(updates?.agent?.openrouterTiers ?? {})].filter((v) => v !== undefined && v !== "");
+      if (ids.some((v) => !isValidModelId(v))) {
+        return res.status(400).json({ success: false, error: "That doesn't look like a model ID (letters, numbers and . _ : / @ + - only)." });
+      }
       const current = await loadSetupConfig();
       const merged = deepMerge(current, updates);
       await saveSetupConfig(merged);
@@ -1941,18 +1980,39 @@ export async function startDashboard(port = 3456): Promise<void> {
 
 // --- Helpers ---
 
+// Keys, passwords and tokens are encrypted on disk (security/secretStore.ts).
 async function loadSetupConfig(): Promise<SetupConfig> {
   try {
-    const raw = await readFile(CONFIG_PATH, "utf-8");
-    return JSON.parse(raw);
+    return await readSealedJson<SetupConfig>(CONFIG_PATH, { ...DEFAULT_CONFIG });
   } catch {
     return { ...DEFAULT_CONFIG };
   }
 }
 
 async function saveSetupConfig(config: SetupConfig): Promise<void> {
-  await mkdir(dirname(CONFIG_PATH), { recursive: true });
-  await writeFile(CONFIG_PATH, JSON.stringify(config, null, 2), "utf-8");
+  await writeSealedJson(CONFIG_PATH, config);
+}
+
+/**
+ * One-time upgrade for installs from before encryption: re-save every file
+ * that still holds a key or password in plain text.
+ */
+async function encryptSecretsAtRest(): Promise<void> {
+  const dataDir = dirname(CONFIG_PATH);
+  const files = [CONFIG_PATH, join(dataDir, "mcp-servers.json")];
+  try {
+    const { readdir } = await import("fs/promises");
+    for (const f of await readdir(dataDir)) {
+      if (f.startsWith("config.json.before-restore-") && f.endsWith(".bak")) files.push(join(dataDir, f));
+    }
+  } catch { /* no data dir yet */ }
+  for (const f of files) {
+    try {
+      if (await migrateJsonFile(f)) console.log(`  🔒 Encrypted saved keys and passwords in ${basename(f)}`);
+    } catch (err) {
+      console.warn(`  ⚠ Could not encrypt secrets in ${f}: ${err}`);
+    }
+  }
 }
 
 function maskKey(key: string): string {

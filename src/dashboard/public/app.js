@@ -198,6 +198,9 @@ const state = {
   selectedProvider: 'anthropic',
   modelCatalog: [],
   orTiers: {},
+  // Live model lists, loaded only when asked: provider → { loading, models, error, needsKey }
+  liveModels: {},
+  liveFilter: { q: '', toolsOnly: true, freeOnly: false },
   // Operator-supplied default key (set by Vouza, invisible to end-users)
   // null = loading, {} = no default key, {hasDefaultKey:true,...} = key available
   operatorDefaults: null,
@@ -592,17 +595,20 @@ function renderModelSelector() {
             ${tier.label}
             <span style="font-size:10px;color:var(--text-muted);text-transform:none;letter-spacing:0;font-weight:400">${tier.desc}</span>
           </div>
-          <select onchange="state.orTiers['${tier.key}']=this.value" style="width:100%;padding:8px 12px;background:var(--bg-glass-card);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12px">
-            ${byTier(tier.key).map(m => `
-              <option value="${m.id}" ${state.orTiers[tier.key]===m.id||(!state.orTiers[tier.key]&&m.recommended)?'selected':''}>
-                ${m.displayName} — $${m.pricing.input}/$${m.pricing.output}/1M${m.supportsVision?' 👁️':''}
-              </option>
-            `).join('')}
-          </select>
+          <input class="or-tier-input" list="orModelList" value="${escHtml(state.orTiers[tier.key] || '')}"
+                 onchange="setOrTier('${tier.key}', this.value)" spellcheck="false" autocomplete="off"
+                 aria-label="${tier.key} model" placeholder="Type to search models"
+                 style="width:100%;padding:8px 12px;background:var(--bg-glass-card);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12px">
+          <div id="orInfo-${tier.key}" style="font-size:11px;color:var(--text-muted);margin-top:4px">${orModelInfoLine(state.orTiers[tier.key])}</div>
         </div>
       `).join('')}
+      <datalist id="orModelList">${orDatalistOptions(byTier)}</datalist>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+        ${renderOrBrowse()}
+        <button type="button" class="btn" style="font-size:12px;padding:6px 12px" onclick="useOneOrModelForAll()">Use the Balanced model for all three</button>
+      </div>
       <div style="font-size:11px;color:var(--text-muted);padding:8px 12px;background:var(--bg-glass);border-radius:8px">
-        💡 All models via <a href="https://openrouter.ai" target="_blank" style="color:var(--brand-light)">openrouter.ai</a> — one key, 200+ models, pay per use.
+        💡 Type to search, or paste any model ID from <a href="https://openrouter.ai/models" target="_blank" rel="noopener" style="color:var(--brand-light)">openrouter.ai/models</a> — one key, every model, pay per use.
       </div>`;
 
     // Set defaults if not already set
@@ -635,10 +641,18 @@ function renderModelSelector() {
         ${m.recommended && m.recommendedReason ? `<div style="font-size:11px;color:#c4b5fd;margin-top:4px">${m.recommendedReason}</div>` : ''}
       </div>
     </div>`;
-  }).join('');
+  }).join('') + renderMoreModels(group);
 }
 
 function selectProvider(id) {
+  // Switching tabs: a model from another provider can't carry over — start
+  // from this provider's recommended model (a typed / live pick stays).
+  if (id !== state.selectedProvider) {
+    const g = state.modelCatalog.find((x) => x.provider.id === id);
+    const known = g?.models.some((m) => m.id === state.selectedModel)
+      || (state.liveModels[id]?.models || []).some((m) => m.id === state.selectedModel);
+    if (g && !known) state.selectedModel = (g.models.find((m) => m.recommended) || g.models[0])?.id || '';
+  }
   state.selectedProvider = id;
   renderModelSelector();
   renderAIKeySection();
@@ -649,6 +663,167 @@ function selectModel(id, provider) {
   state.selectedProvider = provider;
   renderModelSelector();
   renderAIKeySection();
+}
+
+// ── Every model a provider offers (loaded on request) ──────────────────────
+// Our catalog is a short, tested list. These helpers add: the provider's full
+// live list (OpenRouter's public catalog, or what your saved key can use) and
+// a box to type any model ID. Text from providers is always escaped.
+
+function liveInfo(id) {
+  for (const entry of Object.values(state.liveModels)) {
+    const m = entry?.models?.find((x) => x.id === id);
+    if (m) return m;
+  }
+  return null;
+}
+
+function fmtPrice(p) {
+  if (!p) return '';
+  if (p.input === 0 && p.output === 0) return 'free';
+  return `$${p.input}/$${p.output} per 1M`;
+}
+
+function modelFacts(m) {
+  if (!m) return '';
+  const bits = [];
+  if (m.contextWindow) bits.push(`${Math.round(m.contextWindow / 1000)}K context`);
+  if (m.pricing) bits.push(fmtPrice(m.pricing));
+  if (m.vision) bits.push('vision');
+  if (m.tools === false) bits.push("⚠ can't use tools");
+  return bits.join(' · ');
+}
+
+function orModelInfoLine(id) {
+  if (!id) return '';
+  const live = liveInfo(id);
+  if (!live) return '';
+  const warn = live.tools === false ? " — it can chat but can't read email, files or calendar" : '';
+  return escHtml(modelFacts(live) + warn);
+}
+
+function orVisibleModels() {
+  const live = state.liveModels.openrouter?.models || [];
+  return live.filter((m) => (!state.liveFilter.toolsOnly || m.tools !== false) && (!state.liveFilter.freeOnly || m.free));
+}
+
+function orDatalistOptions(byTier) {
+  const list = state.liveModels.openrouter?.models
+    ? orVisibleModels()
+    : ['fast', 'balanced', 'flagship'].flatMap((t) => byTier(t)).map((m) => ({ id: m.id, name: m.displayName, pricing: m.pricing }));
+  return list.map((m) => `<option value="${escHtml(m.id)}">${escHtml(m.name)}${m.pricing ? ' — ' + escHtml(fmtPrice(m.pricing)) : ''}</option>`).join('');
+}
+
+function renderOrBrowse() {
+  const entry = state.liveModels.openrouter;
+  if (!entry) {
+    return `<button type="button" class="btn btn-primary" style="font-size:12px;padding:6px 12px" onclick="loadLiveModels('openrouter')">🔎 Load all OpenRouter models (300+)</button>`;
+  }
+  if (entry.loading) return `<div style="font-size:12px;color:var(--text-dim)">Loading the OpenRouter catalog…</div>`;
+  if (entry.error) {
+    return `<div style="font-size:12px;color:var(--error)">${escHtml(entry.error)} ` +
+      `<button type="button" class="btn" style="font-size:11px;padding:3px 8px" onclick="loadLiveModels('openrouter', true)">Try again</button></div>`;
+  }
+  return `<div style="font-size:12px;color:var(--text-dim);display:flex;gap:14px;flex-wrap:wrap;align-items:center">
+      <span>✓ ${orVisibleModels().length} of ${entry.models.length} models in the search boxes above</span>
+      <label style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" ${state.liveFilter.toolsOnly ? 'checked' : ''} onchange="state.liveFilter.toolsOnly=this.checked;renderModelSelector()"> Only models that can use tools</label>
+      <label style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" ${state.liveFilter.freeOnly ? 'checked' : ''} onchange="state.liveFilter.freeOnly=this.checked;renderModelSelector()"> Free only</label>
+    </div>`;
+}
+
+function renderMoreModels(group) {
+  const prov = group.provider.id;
+  const entry = state.liveModels[prov];
+  const inCatalog = group.models.some((m) => m.id === state.selectedModel);
+  const current = (!inCatalog && state.selectedProvider === prov && state.selectedModel)
+    ? `<div class="model-opt selected" style="margin-bottom:10px"><div class="model-radio"></div><div class="model-info">
+         <div class="model-name">${escHtml(state.selectedModel)}</div>
+         <div class="model-desc">${escHtml(modelFacts(liveInfo(state.selectedModel)) || 'Chosen from the full list or typed in')}</div></div></div>`
+    : '';
+  let body = '';
+  if (!entry) {
+    body = `<button type="button" class="btn" style="font-size:12px;padding:6px 12px" onclick="loadLiveModels('${prov}')">🔄 Show every ${escHtml(group.provider.name)} model</button>`;
+  } else if (entry.loading) {
+    body = `<div style="font-size:12px;color:var(--text-dim)">Asking ${escHtml(group.provider.name)} for its model list…</div>`;
+  } else if (entry.error) {
+    body = `<div style="font-size:12px;color:${entry.needsKey ? 'var(--text-dim)' : 'var(--error)'}">${escHtml(entry.error)}</div>`;
+  } else {
+    body = `<input type="search" placeholder="Search ${entry.models.length} models…" value="${escHtml(state.liveFilter.q)}"
+              oninput="state.liveFilter.q=this.value;fillLiveList('${prov}')" aria-label="Search models"
+              style="width:100%;padding:8px 12px;background:var(--bg-glass-card);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12px;margin-bottom:8px">
+            <div id="liveList-${prov}" style="max-height:260px;overflow:auto"></div>`;
+  }
+  setTimeout(() => fillLiveList(prov), 0);
+  return `<div class="glass-card" style="margin-top:12px;padding:14px">
+      <div style="font-size:12px;font-weight:700;margin-bottom:8px">More models</div>
+      ${current}${body}
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <input id="customModelId-${prov}" placeholder="Or type any model ID" spellcheck="false" autocomplete="off" aria-label="Model ID"
+               style="flex:1;padding:8px 12px;background:var(--bg-glass-card);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12px">
+        <button type="button" class="btn" style="font-size:12px;padding:6px 12px" onclick="useCustomModel('${prov}')">Use</button>
+      </div>
+    </div>`;
+}
+
+function fillLiveList(prov) {
+  const box = document.getElementById(`liveList-${prov}`);
+  const models = state.liveModels[prov]?.models;
+  if (!box || !models) return;
+  const q = state.liveFilter.q.trim().toLowerCase();
+  const hits = models.filter((m) => !q || m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q));
+  const rows = hits.slice(0, 200).map((m) => `
+    <div class="model-opt ${m.id === state.selectedModel ? 'selected' : ''}" data-id="${escHtml(m.id)}" data-p="${escHtml(prov)}"
+         onclick="selectModel(this.dataset.id, this.dataset.p)" style="padding:8px 12px">
+      <div class="model-radio"></div>
+      <div class="model-info"><div class="model-name" style="font-size:12px">${escHtml(m.name)}</div>
+        <div class="model-meta"><span>${escHtml(m.id)}</span>${modelFacts(m) ? `<span>${escHtml(modelFacts(m))}</span>` : ''}</div></div>
+    </div>`).join('');
+  const more = hits.length > 200 ? `<div style="font-size:11px;color:var(--text-muted);padding:6px">${hits.length - 200} more — type to narrow down</div>` : '';
+  const none = hits.length ? '' : '<div style="font-size:12px;color:var(--text-dim);padding:6px">No model matches.</div>';
+  box.innerHTML = rows + more + none;
+}
+
+async function loadLiveModels(prov, retry = false) {
+  if (state.liveModels[prov]?.loading) return;
+  if (retry) delete state.liveModels[prov];
+  state.liveModels[prov] = { loading: true };
+  renderModelSelector();
+  try {
+    const r = await fetch(`/api/models/live?provider=${encodeURIComponent(prov)}`).then((x) => x.json());
+    state.liveModels[prov] = r.ok
+      ? { models: r.models }
+      : { error: r.error || 'Could not load the list.', needsKey: !!r.needsKey };
+  } catch (err) {
+    state.liveModels[prov] = { error: 'Could not load the list: ' + err.message };
+  }
+  renderModelSelector();
+}
+
+const MODEL_ID_RE = /^~?[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}$/;
+
+function useCustomModel(prov) {
+  const el = document.getElementById(`customModelId-${prov}`);
+  const id = (el?.value || '').trim();
+  if (!MODEL_ID_RE.test(id)) { toast("That doesn't look like a model ID", 'error'); return; }
+  selectModel(id, prov);
+  toast(`Using ${escHtml(id)}`);
+}
+
+function setOrTier(tier, value) {
+  const id = String(value || '').trim();
+  if (!MODEL_ID_RE.test(id)) { toast("That doesn't look like a model ID", 'error'); renderModelSelector(); return; }
+  state.orTiers[tier] = id;
+  const info = document.getElementById(`orInfo-${tier}`);
+  if (info) info.innerHTML = orModelInfoLine(id);
+}
+
+function useOneOrModelForAll() {
+  const id = state.orTiers.balanced;
+  if (!id) return;
+  state.orTiers.fast = id;
+  state.orTiers.flagship = id;
+  renderModelSelector();
+  toast(`All three now use ${escHtml(id)}`);
 }
 
 // ============================================================

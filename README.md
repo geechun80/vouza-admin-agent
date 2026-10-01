@@ -6,7 +6,7 @@
 
 Email · Calendar · WhatsApp · Telegram · Files · Voice · Web search — all in one agent.
 
-[![Tests](https://img.shields.io/badge/tests-622%2F622-brightgreen)](#)
+[![Tests](https://img.shields.io/badge/tests-647%2F647-brightgreen)](#)
 [![Node](https://img.shields.io/badge/node-20.19%2B-blue)](https://nodejs.org)
 [![Audit](https://img.shields.io/badge/npm%20audit-0%20vulnerabilities-brightgreen)](#)
 [![License](https://img.shields.io/badge/license-private-lightgrey)](#)
@@ -127,6 +127,12 @@ You only need **one**. Paste it into Quick Setup (or the Advanced wizard) — no
 
 > 💡 **OpenRouter recommended** if you want to try different models without managing multiple keys.
 
+**Any model, not just our short list.** The Advanced wizard shows a few tested picks per provider, plus:
+- **OpenRouter → 🔎 Load all OpenRouter models** — the whole public catalog (400+), searchable, with price, context size, and a filter for models that can use tools (the agent needs tools to read email and files). "Free only" is one tick away.
+- **Other providers → 🔄 Show every … model** — everything your saved key can use (OpenAI, Claude, Gemini, Grok, DeepSeek, Qwen, Kimi).
+- **Or type any model ID** — for a model released this morning.
+The lists are fetched only when you press the button.
+
 **No key at all — local AI.** Install [Ollama](https://ollama.com/download) (free), run `ollama pull qwen2.5:7b` once, then in Quick Setup tap **💻 Or use a local AI on this computer**. Your conversations are answered on your own computer and never go to an AI company. It's slower than a cloud AI and needs a reasonably recent computer (8 GB+ memory); pick a model that supports tools (qwen2.5, llama3.1) so it can read your email and files. A local-AI setup never falls back to a cloud provider, even if Ollama stops — it tells you instead. Ollama on another address: set `OLLAMA_BASE_URL`.
 
 ---
@@ -226,6 +232,7 @@ The agent reads untrusted text all day — incoming emails, documents, web pages
 | **Other people you allow-list** (WhatsApp, Telegram, WAHA) | Chat only — no email, files, sending, web or your memories |
 | **AgentMail senders** | Only addresses you allow-listed; read-only |
 
+- **Keys and passwords are encrypted on disk.** API keys, email passwords, bot tokens and the WhatsApp login are stored encrypted (AES-256-GCM). The master key is protected by your operating system — Windows DPAPI (only your Windows account on this PC can unlock it) or the macOS Keychain; elsewhere it's an owner-only file, or set `VOUZA_SECRET_KEY` yourself. Older installs are upgraded automatically on first start. Copying the `data/` folder to another computer won't carry working keys — use **Download backup** and restore it there.
 - **Memory can't be planted.** If the agent read an email, file or web page this turn, saving something to its long-term memory waits for your YES — so a message can't slip in a lasting instruction.
 - **WAHA owner:** your number from Step 1 (*Your Phone Number*) is the owner; every other allowed sender is a guest. With no number saved, a single allowed number is treated as yours.
 - **Online only when you ask.** Searching the web, opening a website, or clicking/submitting on one runs only when *your own message* asks for it ("search online…", "google…", "what's the weather", a web address). Otherwise the agent shows exactly what it would search or open and waits for your **YES** — so an email can't make it look up your private details online. Enforced in code, on every channel.

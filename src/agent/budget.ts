@@ -29,6 +29,7 @@ import { promises as fs } from "fs";
 import { dirname } from "path";
 import { findModel } from "../config/models.js";
 import { logger } from "../util/logger.js";
+import { cachedModelInfo } from "../config/liveModels.js";
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
@@ -89,7 +90,8 @@ export function estimateCost(
   outputTokens: number
 ): number {
   const info = findModel(modelId);
-  const pricing = info?.pricing ?? FALLBACK_PRICING_PER_M;
+  // Models outside the short catalog: use the price from the live list.
+  const pricing = info?.pricing ?? cachedModelInfo(modelId)?.pricing ?? FALLBACK_PRICING_PER_M;
   // pricing is per 1M tokens
   const inputUsd  = (inputTokens  / 1_000_000) * pricing.input;
   const outputUsd = (outputTokens / 1_000_000) * pricing.output;

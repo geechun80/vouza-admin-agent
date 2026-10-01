@@ -36,6 +36,7 @@ import { mkdir, readFile } from "fs/promises";
 import { transcribeAudioBuffer } from "../voice/transcriber.js";
 import type { WhisperConfig } from "../voice/transcriber.js";
 import { classifyIncoming, ownerIdsFromUser, SentIdSet } from "./selfChat.js";
+import { useEncryptedFileAuthState } from "./encryptedAuthState.js";
 
 // ---------------------------------------------------------------------------
 // Worker config (received from parent via IPC)
@@ -43,6 +44,8 @@ import { classifyIncoming, ownerIdsFromUser, SentIdSet } from "./selfChat.js";
 
 interface WorkerConfig {
   authDir:         string;
+  /** Master key (hex) — the login files are stored encrypted. Absent → legacy plain files. */
+  authKey?:        string;
   maxChunk:        number;
   whisperKey?:     string;
   whisperBaseUrl?: string;
@@ -151,7 +154,10 @@ async function connect(): Promise<void> {
   await mkdir(_config.authDir, { recursive: true });
 
   const { version }         = await fetchLatestBaileysVersion();
-  const { state, saveCreds } = await useMultiFileAuthState(_config.authDir);
+  // The login files can impersonate the linked account — keep them encrypted.
+  const { state, saveCreds } = _config.authKey
+    ? await useEncryptedFileAuthState(_config.authDir, Buffer.from(_config.authKey, "hex"))
+    : await useMultiFileAuthState(_config.authDir);
 
   ipc({ type: "status", status: "connecting" });
 

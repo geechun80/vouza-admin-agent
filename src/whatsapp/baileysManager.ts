@@ -49,6 +49,7 @@ import {
 } from "../agent/phoneMode.js";
 import { startTurn } from "../agent/webGate.js";
 import { buildGuestRegistry, makeGuest } from "../agent/guestMode.js";
+import { getMasterKey } from "../security/secretStore.js";
 import { withTrigger, recordNet, hostOf } from "../util/netActivity.js";
 import type { FileToSend }         from "../tools/sendFile.js";
 
@@ -83,6 +84,7 @@ const statusListeners: Set<StatusListener> = new Set();
 
 let _worker:       ChildProcess | null = null;
 let _connected     = false;
+let _authKeyHex:   string | null = null;  // master key for the encrypted login files
 let _ownerJid:     string | null = null;  // linked account JID, set on "connected" status
 let _ownerName:    string | null = null;  // WhatsApp profile name, set on "connected" status
 
@@ -271,6 +273,14 @@ export async function startBaileysListener(
   _registry = buildPhoneRegistry(registry);
   _stopped  = false;
 
+  // The worker stores the WhatsApp login encrypted with the master key.
+  if (!_authKeyHex) {
+    _authKeyHex = await getMasterKey().then((k) => k.toString("hex")).catch((err) => {
+      console.warn(chalk.yellow(`  [WhatsApp] Secret key unavailable — login files stay unencrypted: ${err}`));
+      return null;
+    });
+  }
+
   _spawnWorker();
 }
 
@@ -319,6 +329,7 @@ function _spawnWorker(): void {
     type:   "start",
     config: {
       authDir:         AUTH_DIR,
+      authKey:         _authKeyHex ?? undefined,
       maxChunk:        MAX_CHUNK,
       whisperKey:      whisperCfg?.apiKey,
       whisperBaseUrl:  whisperCfg?.baseUrl,

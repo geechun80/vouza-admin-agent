@@ -17,11 +17,14 @@ import {
   findModel,
   getProviderForModel,
   DEFAULT_MODEL,
+  DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_PROVIDER,
   DEFAULT_OPERATOR_PROVIDER,
   DEFAULT_OPERATOR_MODEL,
 } from "./models.js";
 import { DEFAULT_OPENROUTER_TIERS } from "../agent/router.js";
+import { readSealedJson } from "../security/secretStore.js";
+import { isValidModelId } from "./liveModels.js";
 
 const CONFIG_JSON_PATH = join(__dirname, "..", "..", "data", "config.json");
 
@@ -135,8 +138,9 @@ export function loadConfig(): AgentConfig {
  */
 export async function loadConfigFromJson(): Promise<AgentConfig> {
   try {
-    const raw = await readFile(CONFIG_JSON_PATH, "utf-8");
-    const saved = JSON.parse(raw);
+    // Secrets are stored encrypted (security/secretStore.ts); this opens them.
+    const saved = await readSealedJson<any>(CONFIG_JSON_PATH, null);
+    if (!saved) throw new Error("no saved config");
 
     // Start with env-based config as base
     let baseConfig: AgentConfig;
@@ -165,10 +169,16 @@ export async function loadConfigFromJson(): Promise<AgentConfig> {
     // Merge saved config on top
     if (saved.agent) {
       baseConfig.name = saved.agent.name || baseConfig.name;
-      if (saved.agent.model) {
+      if (saved.agent.model && isValidModelId(saved.agent.model)) {
         baseConfig.model = saved.agent.model;
         const modelInfo = findModel(saved.agent.model);
-        if (modelInfo) baseConfig.provider = modelInfo.provider;
+        if (modelInfo) {
+          baseConfig.provider = modelInfo.provider;
+        } else if (saved.agent.provider && saved.agent.provider in DEFAULT_MODEL_BY_PROVIDER) {
+          // A model picked from the live list / typed by hand isn't in our
+          // short catalog — the saved provider says where it lives.
+          baseConfig.provider = saved.agent.provider as AIProvider;
+        }
       }
     }
 
