@@ -18,6 +18,9 @@ import { toDataURL as qrToDataURL } from "qrcode";
 import {
   detectAndVerifyAiKey,
   aiConfigPatch,
+  detectLocalAi,
+  localAiConfigPatch,
+  SUGGESTED_LOCAL_MODEL,
   detectEmailPreset,
   verifyEmailLogin,
   emailConfigPatch,
@@ -78,6 +81,7 @@ export function registerQuickSetupRoutes(app: Express, deps: QuickSetupDeps): vo
       const creds = cfg.credentials || {};
       const provider: string = cfg.agent?.provider || "";
       const userKey = provider ? creds[`${provider}ApiKey`] : "";
+      const localAi = provider === "ollama" && !!cfg.agent?.model;
       const operatorUsable = await deps.operatorKeyUsable();
 
       const grants = loadGrants();
@@ -96,9 +100,11 @@ export function registerQuickSetupRoutes(app: Express, deps: QuickSetupDeps): vo
         agentRunning:   !!deps.getAgent(),
         profile: { userName: cfg.agent?.userName || "" },
         ai: {
-          configured:  !!(userKey && String(userKey).length >= 20) || operatorUsable,
+          configured:  localAi || !!(userKey && String(userKey).length >= 20) || operatorUsable,
+          local:       localAi,
+          model:       localAi ? cfg.agent?.model : undefined,
           ownKey:      !!(userKey && String(userKey).length >= 20),
-          viaBuiltIn:  !(userKey && String(userKey).length >= 20) && operatorUsable,
+          viaBuiltIn:  !localAi && !(userKey && String(userKey).length >= 20) && operatorUsable,
           provider:    provider || null,
         },
         email: { configured: emailConfigured, address: emailAddress, provider: email?.provider || null },
@@ -148,6 +154,29 @@ export function registerQuickSetupRoutes(app: Express, deps: QuickSetupDeps): vo
       res.json({ ok: true, provider: r.candidate.provider, label: r.candidate.label });
     } catch (err) {
       res.json({ ok: false, error: `Your key works, but saving failed: ${String(err)}` });
+    }
+  });
+
+  // ── Step 1b (alternative): a local AI on this computer, no key ─────────
+  app.get("/api/quick-setup/local-ai", guard, async (_req, res) => {
+    res.json({ ...(await detectLocalAi()), suggested: SUGGESTED_LOCAL_MODEL });
+  });
+
+  app.post("/api/quick-setup/local-ai", guard, async (req, res) => {
+    const model = String(req.body?.model ?? "").trim();
+    const local = await detectLocalAi();
+    if (!local.running) {
+      return res.json({ ok: false, error: "The local AI (Ollama) isn't running on this computer. Open Ollama, then tap “Check again”." });
+    }
+    if (!model || !local.models.includes(model)) {
+      return res.json({ ok: false, error: "That model isn't installed in Ollama yet. Pick one from the list." });
+    }
+    try {
+      await patchConfig(localAiConfigPatch(model));
+      if (deps.getAgent()) await deps.restartAgent();
+      res.json({ ok: true, model });
+    } catch (err) {
+      res.json({ ok: false, error: `Saving failed: ${String(err)}` });
     }
   });
 

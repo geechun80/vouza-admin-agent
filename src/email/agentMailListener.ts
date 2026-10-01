@@ -25,6 +25,7 @@ import type { ToolRegistry } from "../tools/registry.js";
 import { agentLoop } from "../agent/loop.js";
 import { buildExternalRegistry } from "../agent/toolProfiles.js";
 import { isAgentMailSenderAllowed } from "../agent/senderPolicy.js";
+import { withTriggerGen } from "../util/netActivity.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -334,7 +335,7 @@ async function processThread(
   // Run agent loop
   let response = "";
   try {
-    for await (const ev of agentLoop(framedInput, session.context, _registry)) {
+    for await (const ev of withTriggerGen("email to the agent's inbox (AgentMail)", agentLoop(framedInput, session.context, _registry))) {
       if (ev.type === "text_delta") response += ev.text;
       if (ev.type === "error" && !response.includes("⚠️")) {
         response += `\n\n⚠️ ${ev.error}`;

@@ -7,7 +7,7 @@
 //
 // Setup for users:
 //   1. Run WAHA locally (Docker: ghcr.io/devlikeapro/waha)
-//   2. In WAHA dashboard → Webhooks → add URL: http://localhost:3456/api/whatsapp/webhook
+//   2. In WAHA dashboard → Webhooks → add URL: http://localhost:<DASHBOARD_PORT, default 3456>/api/whatsapp/webhook
 //   3. Start the admin agent — it will now respond to WhatsApp messages
 //
 // Supported message types:
@@ -28,8 +28,10 @@ import {
   pendingCreatedSince,
   discardPending,
   recordExchange,
-  CONFIRM_PROMPT,
+  confirmPromptFor,
 } from "../agent/phoneMode.js";
+import { startTurn } from "../agent/webGate.js";
+import { withTrigger } from "../util/netActivity.js";
 import { isWahaSenderAllowed } from "../agent/senderPolicy.js";
 
 // Chats refused by the allowlist — log once each, not on every message.
@@ -146,7 +148,7 @@ async function processWAMessage(job: WAMessageJob): Promise<void> {
     : ((payload.body as string | undefined) || "").slice(0, 30);
 
   const result = q.enqueue(
-    () => executeWAMessage(job),
+    () => withTrigger("your message (WhatsApp)", () => executeWAMessage(job)),
     `waha:${chatId}:${label}`
   );
 
@@ -193,6 +195,7 @@ async function executeWAMessage(job: WAMessageJob): Promise<void> {
 
     // A send waiting for YES/NO is answered here, before the model runs; a
     // voice transcript never counts as YES but does supersede it.
+    let grantOnline = false;
     if (isVoice) {
       discardPending(ch);
     } else {
@@ -202,7 +205,10 @@ async function executeWAMessage(job: WAMessageJob): Promise<void> {
         await sendWAHAText(chatId, pendingReply.reply!, baseCtx);
         return;
       }
+      grantOnline = !!pendingReply.grantOnline;
     }
+    // Web tools work this turn only if the owner's own words asked to go online.
+    startTurn(session.context, userText, grantOnline);
     const turnStartedAt = Date.now();
     let response  = "";
 
@@ -220,8 +226,10 @@ async function executeWAMessage(job: WAMessageJob): Promise<void> {
     }
 
     let reply = response.trim();
-    if (pendingCreatedSince(ch, turnStartedAt)) {
-      reply = reply ? `${reply}\n\n${CONFIRM_PROMPT}` : CONFIRM_PROMPT;
+    const parked = pendingCreatedSince(ch, turnStartedAt);
+    if (parked) {
+      const ask = confirmPromptFor(parked);
+      reply = reply ? `${reply}\n\n${ask}` : ask;
     }
     if (reply) await sendWAHAText(chatId, reply, baseCtx);
 

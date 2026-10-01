@@ -25,7 +25,7 @@ export class WhatsAppIntegration implements Integration {
   private _lastFailureAt: string | null = null;
   private _consecutiveFailures = 0;
   // First time we observed the integration as "connecting" — used to detect
-  // a stuck-in-connecting state (the exact failure mode Aerick hit).
+  // a stuck-in-connecting state (the exact failure mode a beta tester hit).
   private _connectingSince: number | null = null;
 
   constructor(private context: () => AgentContext | null) {}
@@ -201,7 +201,7 @@ export class WhatsAppIntegration implements Integration {
 
   // ── reset ─────────────────────────────────────────────────────────────────
   // Wipes the cached Baileys auth dir + restarts the worker. This is the
-  // exact pattern that fixes Aerick-style "stuck in connecting" + stale
+  // exact pattern that fixes beta-tester-reported "stuck in connecting" + stale
   // QR issues. Safe to call when not currently connected.
   async reset(): Promise<{ ok: boolean; message: string }> {
     try {

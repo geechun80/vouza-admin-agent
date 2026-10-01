@@ -16,8 +16,15 @@ import { ToolRegistry } from "../../tools/registry.js";
 import { createMemoryStore } from "../../memory/store.js";
 import { agentLoop } from "../../agent/loop.js";
 import type { AgentContext, AgentConfig } from "../../types/index.js";
-import type { AIProvider } from "../../config/models.js";
-import { DEFAULT_OPENROUTER_TIERS } from "../../agent/router.js";
+import {
+  DEFAULT_OPENROUTER_TIERS,
+  DEFAULT_MODEL,
+  DEFAULT_MODEL_BY_PROVIDER,
+  DEFAULT_PROVIDER,
+  DEFAULT_OPERATOR_PROVIDER,
+  DEFAULT_GUIDE_BOT_MODEL,
+  type AIProvider,
+} from "../../config/models.js";
 import { checkBudget, recordSpend, isVouzaFallbackKey } from "../../agent/budget.js";
 
 // Tools
@@ -44,6 +51,8 @@ import {
 } from "../../tools/setup.js";
 import { testCredentialTool } from "../../tools/setupValidator.js";
 import { webSearchTool } from "../../tools/webSearch.js";
+import { gateWebTools, startTurn } from "../../agent/webGate.js";
+import { resolvePendingReply, pendingCreatedSince, confirmPromptFor, recordExchange } from "../../agent/phoneMode.js";
 import { runShellCommandTool, isShellToolEnabled } from "../../tools/shell.js";
 // Browser tools (Phase 4) — main agent can browse allowlisted sites
 import {
@@ -338,7 +347,7 @@ NEVER call save_integration_credentials more than 2 times in a row for the
 same integration. If you've already failed twice, STOP and ask the user a
 clarifying question instead of trying a 3rd format.
 
-Example of WHAT NOT TO DO (the Aerick incident, 2026-05-27):
+Example of WHAT NOT TO DO (a real beta-tester incident, 2026-05-27):
   Tool error: "JSON is missing project_id, client_email"
   Bot: "Let me try formatting it differently..." → calls tool again → fails
   Bot: "Let me try as a Python object..." → calls tool again → fails
@@ -452,6 +461,11 @@ interface ChatSession {
 }
 
 const sessions = new Map<string, ChatSession>();
+
+/** Apply a live setting change (e.g. the learning switch) to every open chat. */
+export function forEachChatContext(fn: (ctx: AgentContext) => void): void {
+  for (const s of sessions.values()) fn(s.context);
+}
 
 // Prune sessions older than 2 hours every 30 minutes
 const sessionPruneInterval = setInterval(() => {
@@ -572,6 +586,8 @@ function buildSystemPrompt(wizardStep?: number, userName?: string): string {
  *
  * @param wizardStep  Current wizard step (1-4) passed from the browser
  * @param userName    User's name from the Step 1 form (for personalisation)
+ * @param ownWords    Only what the person typed this turn (no attached file
+ *                    text) — decides whether web tools may go online.
  */
 export async function* streamChat(
   sessionId: string,
@@ -580,9 +596,25 @@ export async function* streamChat(
   apiKeyOverride?: string,
   wizardStep?: number,
   userName?: string,
+  ownWords?: string,
 ): AsyncGenerator<Record<string, unknown>> {
   const session = getOrCreateSession(sessionId, savedConfig, apiKeyOverride);
   session.lastActive = Date.now();
+
+  // ── Going online? ─────────────────────────────────────────────────────────
+  // A "may I look this up online?" question waiting for YES/NO is answered
+  // here, before the model runs. Then web tools are allowed for this turn
+  // only if the person's own words asked to go online (or they said YES).
+  const words = ownWords ?? (typeof message === "string" ? message : "");
+  const ch = (session.context.channel ??= { kind: "dashboard", chatId: sessionId });
+  const pendingReply = await resolvePendingReply(ch, words);
+  if (pendingReply.handled) {
+    recordExchange(session.context, words, pendingReply.reply!);
+    yield { type: "text_delta", text: pendingReply.reply! };
+    return;
+  }
+  startTurn(session.context, words, pendingReply.grantOnline);
+  const turnStartedAt = Date.now();
 
   // ── Budget guard — only when on Vouza's fallback key ─────────────────────
   // The user's own key is never capped here; they control their limits at
@@ -648,6 +680,13 @@ export async function* streamChat(
       }
     }
   }
+
+  // Never rely on the model to phrase the "go online?" question.
+  const parked = pendingCreatedSince(ch, turnStartedAt);
+  if (parked) {
+    const ask = confirmPromptFor(parked).replace(/\*/g, "**");
+    yield { type: "text_delta", text: `\n\n**${parked.summary}**\n\n${ask}` };
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -659,8 +698,8 @@ function buildAgentConfig(saved: any, apiKeyOverride?: string): AgentConfig {
   // Vouza ships the agent with a default key so customers can use it immediately.
   // The user's own key always takes priority when configured.
   const operatorKey      = (process.env.VOUZA_API_KEY      || "").trim();
-  const operatorProvider = (process.env.VOUZA_API_PROVIDER || "openrouter") as AIProvider;
-  const operatorModel    = (process.env.VOUZA_API_MODEL    || "google/gemma-4-31b-it:free");
+  const operatorProvider = (process.env.VOUZA_API_PROVIDER || DEFAULT_OPERATOR_PROVIDER) as AIProvider;
+  const operatorModel    = (process.env.VOUZA_API_MODEL    || DEFAULT_GUIDE_BOT_MODEL);
 
   const creds = saved?.credentials || {};
 
@@ -672,12 +711,15 @@ function buildAgentConfig(saved: any, apiKeyOverride?: string): AgentConfig {
   const userProviderKey =
     (userProvider ? creds[`${userProvider}ApiKey`] : "") ||
     (userProvider === "openrouter" ? creds["openrouterApiKey"] : "");
-  const hasUserKey = userProviderKey.length >= 8;
+  // Local AI needs no key — and must never be swapped for the operator's
+  // cloud key, or the "stays on this computer" promise would be broken.
+  const isLocal = userProvider === "ollama" && !!saved?.agent?.model;
+  const hasUserKey = isLocal || userProviderKey.length >= 8;
 
-  // Priority: user's provider (if they have a matching key) → operator provider → anthropic
+  // Priority: user's provider (if they have a matching key) → operator provider → default
   const provider: AIProvider = hasUserKey
     ? (userProvider as AIProvider)
-    : (operatorKey ? operatorProvider : userProvider || "anthropic");
+    : (operatorKey ? operatorProvider : userProvider || DEFAULT_PROVIDER);
 
   // Build the full apiKeys record (user keys take priority over env vars)
   const apiKeys: Record<string, string> = {
@@ -689,13 +731,14 @@ function buildAgentConfig(saved: any, apiKeyOverride?: string): AgentConfig {
     alibaba:    creds.alibabaApiKey    || creds.dashscopeApiKey            || process.env.DASHSCOPE_API_KEY || "",
     moonshot:   creds.moonshotApiKey   || process.env.MOONSHOT_API_KEY     || "",
     openrouter: creds.openrouterApiKey || process.env.OPENROUTER_API_KEY   || "",
+    ollama:     isLocal ? "ollama" : "",
   };
 
   // Pull user's wizard-saved key into the active provider slot
   if (userProviderKey) apiKeys[provider] = userProviderKey;
 
   // Operator key: fills the gap when no user key is configured for this provider
-  if (!apiKeys[provider] || apiKeys[provider].length < 8) {
+  if (!isLocal && (!apiKeys[provider] || apiKeys[provider].length < 8)) {
     apiKeys[provider]          = operatorKey;  // inject for active provider slot
     apiKeys[operatorProvider]  = operatorKey;  // also keep on its native provider slot
   }
@@ -721,7 +764,7 @@ function buildAgentConfig(saved: any, apiKeyOverride?: string): AgentConfig {
   const model = hasUserKey
     ? (provider === "openrouter"
         ? (openrouterTiers?.balanced ?? DEFAULT_OPENROUTER_TIERS.balanced)
-        : (saved?.agent?.model || "claude-sonnet-4-6"))
+        : (saved?.agent?.model || DEFAULT_MODEL_BY_PROVIDER[provider] || DEFAULT_MODEL))
     : operatorModel;
 
   // ── Whisper voice transcription (separate from main AI provider) ───────────
@@ -757,6 +800,8 @@ function buildAgentConfig(saved: any, apiKeyOverride?: string): AgentConfig {
     whisperApiKey,
     whisperProvider,
     tools: buildToolsConfig(saved),
+    ...(isLocal && saved?.agent?.ollamaBaseUrl ? { ollamaBaseUrl: String(saved.agent.ollamaBaseUrl) } : {}),
+    ...(saved?.learnFromConversations === false ? { learnFromConversations: false } : {}),
   };
 }
 
@@ -850,5 +895,7 @@ export function buildRegistry(): ToolRegistry {
     browserExtractTextTool, browserScreenshotTool, browserWaitForTool,
   ];
   for (const tool of allTools) registry.register(tool as any);
+  // Going online only when the person asked (see agent/webGate.ts).
+  gateWebTools(registry);
   return registry;
 }

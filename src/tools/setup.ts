@@ -110,6 +110,12 @@ export async function executePipeline(
 
 const CONFIG_PATH = path.resolve(process.cwd(), "data", "config.json");
 
+/** The WAHA webhook address on THIS dashboard (honours DASHBOARD_PORT). */
+function dashboardWebhookUrl(): string {
+  const port = parseInt(process.env.DASHBOARD_PORT || "3456", 10);
+  return `http://localhost:${port}/api/whatsapp/webhook`;
+}
+
 async function readConfig(): Promise<any> {
   if (!existsSync(CONFIG_PATH)) return {};
   try { return JSON.parse(await readFile(CONFIG_PATH, "utf-8")); }
@@ -399,7 +405,7 @@ const INTEGRATION_GUIDES: Record<string, {
           "     docker run -d -p 3000:3000 ghcr.io/devlikeapro/waha\n" +
           "  3. Open http://localhost:3000 in your browser\n" +
           "  4. Click 'Start Session' → scan the QR code with your WhatsApp\n" +
-          "  5. Once connected, go to Webhooks → add: http://localhost:3456/api/whatsapp/webhook\n" +
+          `  5. Once connected, go to Webhooks → add: ${dashboardWebhookUrl()}\n` +
           "  Your WAHA URL is: http://localhost:3000",
       },
       {
@@ -906,7 +912,7 @@ export const saveIntegrationCredentialsTool = buildTool({
       // Previously this was z.record(z.string()), which made the LLM loop —
       // it tried the JSON as an object first (schema rejected), then as a
       // string (schema accepted but the bot wasn't sure which was right).
-      // Now we accept both and normalize internally. Aerick incident
+      // Now we accept both and normalize internally. beta-tester incident
       // (2026-05-27): bot got stuck calling save_integration_credentials
       // 3+ times because of this exact schema mismatch.
       .record(z.unknown())
@@ -1124,7 +1130,7 @@ export const saveIntegrationCredentialsTool = buildTool({
       // (telegram branch removed in Phase 5 — pipeline-routed, never reaches here)
       let activationNote = "";
       if (integration === "whatsapp_waha") {
-        activationNote = "💾 Saved. WAHA uses webhooks — make sure the webhook URL (http://localhost:3456/api/whatsapp/webhook) is set in WAHA's dashboard.";
+        activationNote = `💾 Saved. WAHA uses webhooks — make sure the webhook URL (${dashboardWebhookUrl()}) is set in WAHA's dashboard.`;
       } else if (integration === "ai_provider") {
         activationNote = "✅ AI provider updated — your key is now active for this chat session and saved for future sessions.";
       } else {
@@ -1194,6 +1200,6 @@ export const runIntegrationPipelineTool = buildTool({
       chatId: input.chatId,
     });
     // Attempts log intentionally NOT surfaced — internal fallbacks stay
-    // silent (Aerick feedback: don't show retry noise in chat).
+    // silent (beta-tester feedback: don't show retry noise in chat).
   },
 });

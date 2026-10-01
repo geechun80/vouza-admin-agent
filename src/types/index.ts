@@ -76,10 +76,18 @@ export interface AgentContext {
    * dashboard chat and scheduled tasks.
    */
   channel?: PhoneChannel;
+  /**
+   * true for this turn only when the person's OWN message asked to go online
+   * (or they answered YES to an online request). Set by the listener from
+   * their typed/spoken words — never from email, file or web content — and
+   * read by the web gate (agent/webGate.ts).
+   */
+  onlineRequested?: boolean;
 }
 
 export interface PhoneChannel {
-  kind: "whatsapp" | "telegram";
+  /** "dashboard" = the browser chat on this computer (pending YES/NO only) */
+  kind: "whatsapp" | "telegram" | "dashboard";
   /** WhatsApp JID or Telegram chat id (stringified) — the chat to reply into */
   chatId: string;
 }
@@ -278,6 +286,14 @@ export interface AgentConfig {
    * still get answered when nobody is at the laptop. Defaults to true.
    */
   keepAwake?: boolean;
+  /** Local AI (provider "ollama") address; defaults to http://127.0.0.1:11434/v1 */
+  ollamaBaseUrl?: string;
+  /**
+   * After longer conversations the agent reviews them (reflection, skill
+   * writing, self-improvement) — each sends the conversation to the AI
+   * provider again. Defaults to true; false keeps only the answers themselves.
+   */
+  learnFromConversations?: boolean;
 }
 
 // --- Template System ---

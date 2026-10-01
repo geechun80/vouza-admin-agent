@@ -28,7 +28,47 @@ export type AIProvider =
   | "deepseek"
   | "alibaba"
   | "moonshot"
-  | "openrouter";
+  | "openrouter"
+  | "ollama";       // local AI on this computer — nothing leaves the machine
+
+// =============================================================================
+// Defaults — the ONE place default model choices live. Every other file reads
+// from here, so retiring a model is a one-line change.
+// =============================================================================
+
+/** Model used when a provider is chosen without a specific model. Ollama: the user picks an installed model. */
+export const DEFAULT_MODEL_BY_PROVIDER: Record<AIProvider, string> = {
+  anthropic:  "claude-sonnet-4-6",
+  openai:     "gpt-4o",
+  google:     "gemini-2.5-flash",
+  xai:        "grok-3",
+  deepseek:   "deepseek-chat",
+  alibaba:    "qwen-plus",
+  moonshot:   "kimi-k2",
+  openrouter: "google/gemini-2.5-flash-lite",
+  ollama:     "",
+};
+
+/** OpenRouter smart routing: cheap model for simple asks, stronger ones as tasks get harder. */
+export const DEFAULT_OPENROUTER_TIERS = {
+  fast:     "meta-llama/llama-3.1-8b-instruct:free",  // free — simple queries
+  balanced: "google/gemini-2.5-flash-lite",            // standard office tasks
+  flagship: "google/gemini-2.5-flash",                 // complex / multi-step / vision
+} as const;
+
+/** Provider + model for a brand-new install with no key and no operator key. */
+export const DEFAULT_PROVIDER: AIProvider = "anthropic";
+export const DEFAULT_MODEL = DEFAULT_MODEL_BY_PROVIDER.anthropic;
+
+/** Operator (Vouza built-in key) defaults, overridable with VOUZA_API_PROVIDER / VOUZA_API_MODEL. */
+export const DEFAULT_OPERATOR_PROVIDER: AIProvider = "openrouter";
+export const DEFAULT_OPERATOR_MODEL = DEFAULT_OPENROUTER_TIERS.balanced;
+
+/** Strongest Claude model, for templates that need deep reasoning (Research Agent). */
+export const FLAGSHIP_ANTHROPIC_MODEL = "claude-opus-4-6";
+
+/** Free model the setup Guide Bot uses on the operator key (dashboard chat only). */
+export const DEFAULT_GUIDE_BOT_MODEL = "google/gemma-4-31b-it:free";
 
 export interface AIProviderConfig {
   id: AIProvider;
@@ -130,6 +170,16 @@ export const AI_PROVIDERS: AIProviderConfig[] = [
     apiKeyHint: "https://openrouter.ai/keys",
     baseUrl: "https://openrouter.ai/api/v1",
     docsUrl: "https://openrouter.ai/docs",
+  },
+  {
+    id: "ollama",
+    name: "Local AI (Ollama)",
+    description: "Runs on this computer — your conversations never leave it. Needs Ollama installed and a model that supports tools.",
+    apiKeyEnvVar: "",
+    apiKeyPrefix: "",
+    apiKeyPlaceholder: "",
+    apiKeyHint: "https://ollama.com/download",
+    docsUrl: "https://ollama.com",
   },
 ];
 
@@ -802,7 +852,9 @@ export function getModelCatalogForUI(): Array<{
   provider: AIProviderConfig;
   models: AIModelInfo[];
 }> {
-  return AI_PROVIDERS.map((provider) => ({
+  // Local AI is offered through Quick Setup (it lists the models installed on
+  // this computer); the Advanced wizard's key-based picker doesn't apply.
+  return AI_PROVIDERS.filter((p) => p.id !== "ollama").map((provider) => ({
     provider,
     models: AI_MODELS.filter((m) => m.provider === provider.id),
   }));

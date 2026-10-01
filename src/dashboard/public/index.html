@@ -69,6 +69,12 @@
         <p class="qs-hint">Don't have one? <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">Get a free key here ↗</a> — it takes a minute. I'll work out which AI it is.</p>
       </div>
       <div class="qs-ready" id="qsAiReady" hidden></div>
+      <div id="qsLocalAiWrap">
+        <p class="qs-hint"><button class="qs-link" type="button" id="qsLocalToggle" onclick="qsToggleLocalAi()" aria-expanded="false" aria-controls="qsLocalAi">💻 Or use a local AI on this computer — no key, your chats never leave it</button></p>
+        <div class="qs-card" id="qsLocalAi" hidden>
+          <div id="qsLocalAiBody" role="status" aria-live="polite">Looking for a local AI…</div>
+        </div>
+      </div>
 
       <div class="qs-msg" id="qsMsg1" role="status" aria-live="polite"></div>
       <div class="qs-actions">
@@ -684,7 +690,7 @@
           <div>
             <div class="step-eyebrow">Operations</div>
             <h2 class="step-title" style="margin:0">📊 System Health</h2>
-            <p class="step-subtitle" style="margin:4px 0 0">Live view of your agent's spend, provider status, and uptime. Refreshes every 15 seconds.</p>
+            <p class="step-subtitle" style="margin:4px 0 0">Live view of your agent's spend, provider status, uptime — and every outside service it contacted. Refreshes every 15 seconds.</p>
           </div>
           <button class="btn" onclick="toggleHealthPanel()" style="min-width:80px">← Back</button>
         </div>

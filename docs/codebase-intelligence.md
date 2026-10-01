@@ -91,7 +91,7 @@ For the segment of admin-agent customers who are themselves developers (freelanc
 4. Customer says in chat: *"Map my project at C:/code/my-app and tell me where payment processing happens"* — the admin-agent shells out via MCP, generates the graph, queries it, replies with the answer.
 
 **Why deferred:**
-- Most current customers (Aerick = ops, Bruce = church admin) are non-developers — wouldn't use this feature
+- Most current customers (e.g. an operations lead and a church administrator) are non-developers — wouldn't use this feature
 - Needs UI affordance: file picker for project root, dashboard embed, etc.
 - The tool itself isn't published as an npm CLI — wrapping it as an MCP server requires either (a) using the plugin runtime, or (b) cloning the repo + invoking the workspace scripts directly. Either path is ~1 day.
 - Wait for first paying dev-segment customer to justify the cost

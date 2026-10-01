@@ -51,7 +51,7 @@ interface WorkerConfig {
   /**
    * Allowlist of WhatsApp JIDs (or phone numbers) that are permitted to
    * trigger the agent. If empty, the agent responds to NO ONE except the
-   * owner (Aerick himself, identified by sock.user?.id).
+   * owner (identified by sock.user?.id).
    *
    * Accepted formats:
    *   - Full JID: "6591234567@s.whatsapp.net"
@@ -199,7 +199,7 @@ async function connect(): Promise<void> {
       // Categorize the disconnect — different reasons require different
       // recovery strategies. Without this, "connectionReplaced" (same phone
       // re-scans) caused an infinite restart loop that effectively crashed
-      // the worker. Reported by Aerick (2026-05-26).
+      // the worker. Reported by a beta tester (2026-05-26).
       switch (code) {
 
         case DisconnectReason.loggedOut: {
@@ -286,7 +286,7 @@ async function connect(): Promise<void> {
 
   // ── Owner JID detection ──────────────────────────────────────────────────
   // The "owner" is the WhatsApp account this Baileys client is linked to —
-  // i.e., Aerick himself. We use this to (1) auto-permit Aerick's own
+  // i.e., the owner. We use this to (1) auto-permit the owner's own
   // messages-to-self and (2) prevent the agent from auto-replying to his
   // friends. sock.user is populated once the connection establishes.
   const getOwnerJid = (): string | null => {
@@ -301,7 +301,7 @@ async function connect(): Promise<void> {
   // SAFETY-CRITICAL: this is what stops the agent from auto-replying to
   // every friend who texts the user. By default the allowlist is empty,
   // and the ONLY sender automatically permitted is the owner themselves
-  // (Aerick texting his own number, e.g. via "Message yourself" in WhatsApp).
+  // (the owner texting their own number, e.g. via "Message yourself" in WhatsApp).
   //
   // Normalize JIDs: accept "6591234567", "+6591234567", or full JIDs.
   const normalizeJid = (s: string): string => {

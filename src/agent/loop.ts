@@ -17,9 +17,11 @@ import type {
 import { ToolRegistry } from "../tools/registry.js";
 import { randomUUID } from "crypto";
 import type { AIProvider } from "../config/models.js";
+import { baseUrlFor, openRouterHeaders } from "../config/providerEndpoints.js";
 import { classifyTask, selectModelForComplexity, TIER_LABELS, DEFAULT_OPENROUTER_TIERS } from "./router.js";
 import { autoReflect }                from "./reflect.js";
 import { findRelevantSkills, autoWriteSkill } from "./skillWriter.js";
+import { withTrigger } from "../util/netActivity.js";
 import { compressContext, estimateConversationTokens } from "./contextCompressor.js";
 import { scrubThinkBlocks, hasThinkBlock } from "./thinkScrubber.js";
 import { redact } from "./redactor.js";
@@ -112,32 +114,21 @@ let _activeSkillWrite = false;         // prevents overlapping autoWriteSkill ca
 
 /**
  * Build an OpenAI-compatible client for non-Anthropic providers.
- * Most providers (OpenAI, Gemini, xAI, DeepSeek, Qwen, Kimi) use the OpenAI API format.
+ * Most providers (OpenAI, Gemini, xAI, DeepSeek, Qwen, Kimi, local Ollama)
+ * use the OpenAI API format. Endpoints come from config/providerEndpoints.ts.
  */
 function getOpenAICompatibleConfig(
   provider: AIProvider,
-  apiKey: string
+  apiKey: string,
+  ollamaUrl?: string,
 ): { baseURL: string; apiKey: string; extraHeaders: Record<string, string> } {
-  const configs: Partial<Record<AIProvider, { baseURL: string; extraHeaders?: Record<string, string> }>> = {
-    openai:      { baseURL: "https://api.openai.com/v1" },
-    google:      { baseURL: "https://generativelanguage.googleapis.com/v1beta/openai" },
-    xai:         { baseURL: "https://api.x.ai/v1" },
-    deepseek:    { baseURL: "https://api.deepseek.com" },
-    alibaba:     { baseURL: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1" },
-    moonshot:    { baseURL: "https://api.moonshot.cn/v1" },
-    openrouter:  {
-      baseURL: "https://openrouter.ai/api/v1",
-      extraHeaders: {
-        "HTTP-Referer": "https://adminagent.app",
-        "X-Title":      "Admin Agent",
-      },
-    },
+  if (provider === "anthropic") throw new Error("Anthropic uses its own SDK, not the OpenAI-compatible path");
+  return {
+    baseURL: baseUrlFor(provider, { ollamaBaseUrl: ollamaUrl }),
+    // Ollama ignores auth but the request shape wants a bearer token.
+    apiKey: provider === "ollama" ? (apiKey || "ollama") : apiKey,
+    extraHeaders: provider === "openrouter" ? openRouterHeaders() : {},
   };
-
-  const config = configs[provider];
-  if (!config) throw new Error(`Unsupported provider for OpenAI-compatible API: ${provider}`);
-
-  return { baseURL: config.baseURL, apiKey, extraHeaders: config.extraHeaders ?? {} };
 }
 
 /**
@@ -150,13 +141,14 @@ async function callOpenAICompatible(
   model: string,
   systemPrompt: string,
   messages: Array<{ role: string; content: any }>,
-  tools: Array<{ name: string; description: string; input_schema: Record<string, unknown> }>
+  tools: Array<{ name: string; description: string; input_schema: Record<string, unknown> }>,
+  ollamaUrl?: string,
 ): Promise<{
   content: Array<{ type: string; text?: string; id?: string; name?: string; input?: unknown }>;
   stop_reason: string;
   usage?: { inputTokens: number; outputTokens: number };
 }> {
-  const { baseURL, apiKey: key, extraHeaders } = getOpenAICompatibleConfig(provider, apiKey);
+  const { baseURL, apiKey: key, extraHeaders } = getOpenAICompatibleConfig(provider, apiKey, ollamaUrl);
 
   // Convert tools to OpenAI function format
   const openaiTools = tools.map((t) => ({
@@ -318,7 +310,7 @@ export async function* agentLoop(
     const complexity = classifyTask(userMessage, hasImage);
     activeModel = selectModelForComplexity(complexity, tiers);
     // Log the routing decision for the dashboard's Live Log Tail + structured
-    // forensics. DO NOT yield as text_delta — Aerick reported (2026-05-26)
+    // forensics. DO NOT yield as text_delta — a beta tester reported (2026-05-26)
     // that these "Balanced model — routing to ..." notices clutter the
     // conversation flow in WhatsApp/Telegram and confuse end-users.
     logger.info(
@@ -344,7 +336,7 @@ export async function* agentLoop(
   // since their model ID may not exist on the new provider.
   if (effectiveProvider !== primaryProvider) {
     activeModel = getDefaultModelFor(effectiveProvider);
-    // Log the provider swap for forensics. Per Aerick's feedback, do NOT
+    // Log the provider swap for forensics. Per beta-tester feedback, do NOT
     // surface this as a chat message — the swap is transparent to the user.
     logger.info(
       { event: "provider_swap_at_startup", from: primaryProvider, to: effectiveProvider, model: activeModel },
@@ -439,7 +431,10 @@ export async function* agentLoop(
         state.messages,
         apiKey,
         effectiveProvider,
-        activeModel
+        activeModel,
+        undefined,
+        undefined,
+        context.config.ollamaBaseUrl,
       ).catch(() => ({ messages: state.messages, savedTokens: 0, compressed: false }));
       state.messages = compressed;
     }
@@ -495,7 +490,8 @@ export async function* agentLoop(
           activeModel,
           fullSystemPrompt,
           apiMessages,
-          registry.toAPISchemas()
+          registry.toAPISchemas(),
+          context.config.ollamaBaseUrl,
         );
         responseContent = result.content;
         stopReason = result.stop_reason;
@@ -529,7 +525,7 @@ export async function* agentLoop(
           // ── Think Scrubber: strip <think>…</think> before showing user ───
           // Models like DeepSeek-R1 and extended-thinking Claude emit raw chain-
           // of-thought inside <think> tags. We strip them silently and yield
-          // only the clean visible portion. Per Aerick's feedback (2026-05-26),
+          // only the clean visible portion. Per beta-tester feedback (2026-05-26),
           // do NOT emit a "💭 reasoning…" indicator in chat — it clutters the
           // conversation flow especially when models emit multiple think blocks
           // per response. Log instead so debugging info is preserved.
@@ -692,7 +688,7 @@ export async function* agentLoop(
         );
         // Force compress regardless of token threshold
         const { messages: compressed } = await compressContext(
-          state.messages, apiKey, effectiveProvider, activeModel, 128_000, 0.99
+          state.messages, apiKey, effectiveProvider, activeModel, 128_000, 0.99, context.config.ollamaBaseUrl
         ).catch(() => ({ messages: state.messages }));
         state.messages = compressed;
         state.turnCount--;
@@ -722,7 +718,7 @@ export async function* agentLoop(
          errInfo.type === "permanent");
 
       if (canFailover) {
-        // Log the failover for forensics. Per Aerick's feedback (2026-05-26),
+        // Log the failover for forensics. Per beta-tester feedback (2026-05-26),
         // do NOT surface as chat text — the switch should be transparent so
         // the user just sees a slightly delayed reply, not "switching to..."
         logger.warn(
@@ -787,18 +783,22 @@ export async function* agentLoop(
     }).catch(() => {});
   }
 
+  // ── Learning steps — each sends this conversation to the AI provider again,
+  // so they only run when the owner left "learn from conversations" on.
+  const learn = context.config.learnFromConversations !== false;
+
   // ── Phase 0: guarded autoReflect — never run two at once ──────────────────
-  if (state.turnCount >= 2 && !_activeReflect) {
+  if (learn && state.turnCount >= 2 && !_activeReflect) {
     _activeReflect = true;
-    autoReflect(state.messages, context)
+    withTrigger("learning from the conversation", () => autoReflect(state.messages, context))
       .catch(() => {})
       .finally(() => { _activeReflect = false; });
   }
 
   // ── Phase 0: guarded autoWriteSkill — never run two at once ───────────────
-  if (toolsUsed.length >= 3 && !_activeSkillWrite) {
+  if (learn && toolsUsed.length >= 3 && !_activeSkillWrite) {
     _activeSkillWrite = true;
-    autoWriteSkill(state.messages, toolsUsed, context)
+    withTrigger("learning from the conversation", () => autoWriteSkill(state.messages, toolsUsed, context))
       .catch(() => {})
       .finally(() => { _activeSkillWrite = false; });
   }

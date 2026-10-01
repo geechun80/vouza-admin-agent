@@ -13,7 +13,7 @@
 
 import { randomUUID } from "crypto";
 import type { AgentContext, AgentTemplate, SkillDefinition } from "../types/index.js";
-import type { AIProvider } from "../config/models.js";
+import { DEFAULT_MODEL_BY_PROVIDER, FLAGSHIP_ANTHROPIC_MODEL, type AIProvider } from "../config/models.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { createMemoryStore } from "../memory/store.js";
 import { loadSkills } from "../skills/loader.js";
@@ -30,6 +30,7 @@ import { readSpreadsheetTool, writeSpreadsheetTool, searchSpreadsheetTool } from
 import { listFilesTool, readFileTool, readExcelFileTool, writeFileTool, organizeFilesTool } from "../tools/fileManager.js";
 import { sendTelegramMessageTool, readTelegramUpdatesTool, getTelegramBotInfoTool, forwardTelegramMessageTool } from "../tools/telegram.js";
 import { sendWhatsAppMessageTool, readWhatsAppMessagesTool } from "../tools/whatsapp.js";
+import { gateWebTools } from "../agent/webGate.js";
 
 // ─── Tool Catalog ──────────────────────────────────────────────────────────
 // Maps ToolCategory to available tool instances for auto-registration
@@ -119,6 +120,8 @@ export async function createAgentFromTemplate(
     }
   }
 
+  gateWebTools(registry);
+
   // Load memory
   const memory = createMemoryStore(memoryDir);
   await memory.load();
@@ -186,7 +189,7 @@ export const ADMIN_TEMPLATE: AgentTemplate = {
   name: "Admin Agent",
   description: "AI-powered office administrator and executive assistant",
   version: "2.0.0",
-  defaultModel: "claude-sonnet-4-6",
+  defaultModel: DEFAULT_MODEL_BY_PROVIDER.anthropic,
   defaultProvider: "anthropic",
   requiredTools: ["email", "calendar", "messaging"],
   optionalTools: ["spreadsheet", "file"],
@@ -225,7 +228,7 @@ export const SALES_TEMPLATE: AgentTemplate = {
   name: "Sales Agent",
   description: "AI sales assistant for lead management, follow-ups, and pipeline tracking",
   version: "1.0.0",
-  defaultModel: "claude-sonnet-4-6",
+  defaultModel: DEFAULT_MODEL_BY_PROVIDER.anthropic,
   defaultProvider: "anthropic",
   requiredTools: ["email", "messaging", "spreadsheet"],
   optionalTools: ["calendar", "file"],
@@ -255,7 +258,7 @@ export const SUPPORT_TEMPLATE: AgentTemplate = {
   name: "Support Agent",
   description: "AI customer support agent for ticket triage, response drafting, and escalation",
   version: "1.0.0",
-  defaultModel: "gemini-2.5-flash",
+  defaultModel: DEFAULT_MODEL_BY_PROVIDER.google,
   defaultProvider: "google",
   requiredTools: ["email", "messaging"],
   optionalTools: ["spreadsheet", "file"],
@@ -285,7 +288,7 @@ export const RESEARCH_TEMPLATE: AgentTemplate = {
   name: "Research Agent",
   description: "AI research assistant for data collection, analysis, and report generation",
   version: "1.0.0",
-  defaultModel: "claude-opus-4-6",
+  defaultModel: FLAGSHIP_ANTHROPIC_MODEL,
   defaultProvider: "anthropic",
   requiredTools: ["file", "spreadsheet"],
   optionalTools: ["email", "messaging"],

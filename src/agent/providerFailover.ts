@@ -29,7 +29,7 @@
 //     the circuit because they're not provider-health issues.
 // =============================================================================
 
-import type { AIProvider } from "../config/models.js";
+import { DEFAULT_MODEL_BY_PROVIDER, type AIProvider } from "../config/models.js";
 import type { ErrorType } from "./errorClassifier.js";
 import { logger } from "../util/logger.js";
 
@@ -58,17 +58,6 @@ const FALLBACK_PREFERENCE: AIProvider[] = [
   "openrouter",
 ];
 
-/** Sensible default model per provider, used when failover swaps providers. */
-const DEFAULT_MODEL_PER_PROVIDER: Record<AIProvider, string> = {
-  anthropic:  "claude-sonnet-4-6",
-  openai:     "gpt-4o",
-  google:     "gemini-2.5-flash",
-  xai:        "grok-3-mini",
-  deepseek:   "deepseek-chat",
-  alibaba:    "qwen-plus",
-  moonshot:   "kimi-k2",
-  openrouter: "google/gemini-2.5-flash",
-};
 
 // ── State (process-local in-memory) ──────────────────────────────────────────
 
@@ -169,6 +158,10 @@ export function pickHealthyProvider(
   availableKeys: Partial<Record<AIProvider, string>>,
   exclude:       AIProvider[] = []
 ): AIProvider {
+  // A local-AI user chose to keep conversations on this computer. Never fail
+  // over to a cloud provider for them — not even when the local AI is down.
+  if (preferred === "ollama") return "ollama";
+
   const hasKey = (p: AIProvider) =>
     !!(availableKeys[p] && String(availableKeys[p]).trim().length > 0);
 
@@ -193,7 +186,7 @@ export function pickHealthyProvider(
 
 /** Returns a sensible default model for a provider. Used when failover swaps providers. */
 export function getDefaultModelFor(provider: AIProvider): string {
-  return DEFAULT_MODEL_PER_PROVIDER[provider] ?? "claude-sonnet-4-6";
+  return DEFAULT_MODEL_BY_PROVIDER[provider] || DEFAULT_MODEL_BY_PROVIDER.anthropic;
 }
 
 /** Snapshot of all provider health states — for /api/services/health endpoint. */

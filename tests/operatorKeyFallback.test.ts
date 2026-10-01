@@ -1,7 +1,7 @@
 // =============================================================================
 // Smoke tests — operator-key fallback in loadConfigFromJson
 //
-// REGRESSION GUARD for the Aerick bug (2026-05-20):
+// REGRESSION GUARD for the beta-tester bug (2026-05-20):
 // The Telegram bot was hitting 401 "Missing Authentication header" because
 // the user hadn't entered their own AI key, and the operator's VOUZA_API_KEY
 // env var was ONLY applied in src/dashboard/api/chat.ts (Guide Bot path) —
@@ -38,7 +38,7 @@ const MINIMAL_SAVED = {
   skills: { enabled: [], schedules: {} },
 };
 
-describe("loader — operator key fallback (Aerick regression)", () => {
+describe("loader — operator key fallback (beta-tester regression)", () => {
   beforeEach(async () => {
     delete process.env.VOUZA_API_KEY;
     delete process.env.VOUZA_API_PROVIDER;

@@ -34,6 +34,8 @@
 import { z }         from "zod";
 import { buildTool } from "./registry.js";
 import { executePipeline } from "./setup.js";
+import type { AIProvider } from "../config/models.js";
+import { keyCheckRequest } from "../config/providerEndpoints.js";
 
 // ── Pipeline executor seam ────────────────────────────────────────────────────
 // Tests inject a fake executor to assert delegation without hitting the
@@ -152,59 +154,34 @@ async function validateAIProvider(provider: string, apiKey: string): Promise<Val
   provider = provider.toLowerCase().trim();
   apiKey   = apiKey.trim();
 
-  const ENDPOINTS: Record<string, { url: string; headers: (k: string) => Record<string, string>; parseResult: (b: any) => string }> = {
-    openrouter: {
-      url: "https://openrouter.ai/api/v1/models",
-      headers: k => ({ Authorization: `Bearer ${k}`, "HTTP-Referer": "https://adminagent.app" }),
-      parseResult: b => `${b?.data?.length ?? "many"} models available`,
-    },
-    anthropic: {
-      url: "https://api.anthropic.com/v1/models",
-      headers: k => ({ "x-api-key": k, "anthropic-version": "2023-06-01" }),
-      parseResult: b => `${b?.data?.length ?? "several"} Claude models available`,
-    },
-    openai: {
-      url: "https://api.openai.com/v1/models",
-      headers: k => ({ Authorization: `Bearer ${k}` }),
-      parseResult: b => `${b?.data?.length ?? "many"} models available`,
-    },
-    google: {
-      url: `https://generativelanguage.googleapis.com/v1beta/models?key=__KEY__`,
-      headers: _k => ({}),
-      parseResult: b => `${b?.models?.length ?? "several"} Gemini models available`,
-    },
+  // AI providers use the shared, auth-gated key checks (Rule 66 — OpenRouter's
+  // /models is public). Groq is only used for voice (Whisper), checked here.
+  const AI_LABELS: Record<string, (b: any) => string> = {
+    openrouter: () => "key is active",
+    anthropic:  b => `${b?.data?.length ?? "several"} Claude models available`,
+    openai:     b => `${b?.data?.length ?? "many"} models available`,
+    google:     b => `${b?.models?.length ?? "several"} Gemini models available`,
+    xai:        b => `${b?.data?.length ?? "several"} Grok models available`,
+    deepseek:   b => `${b?.data?.length ?? "several"} DeepSeek models available`,
+    moonshot:   b => `${b?.data?.length ?? "several"} Kimi models available`,
+    alibaba:    b => `${b?.data?.length ?? "several"} Qwen models available`,
+    ollama:     b => `local AI running — ${b?.models?.length ?? 0} model(s) installed`,
+  };
+  const ENDPOINTS: Record<string, { request: (k: string) => { url: string; headers: Record<string, string> }; parseResult: (b: any) => string }> = {
     groq: {
-      url: "https://api.groq.com/openai/v1/models",
-      headers: k => ({ Authorization: `Bearer ${k}` }),
+      request: k => ({ url: "https://api.groq.com/openai/v1/models", headers: { Authorization: `Bearer ${k}` } }),
       parseResult: b => `${b?.data?.length ?? "several"} models available (including Whisper)`,
     },
-    xai: {
-      url: "https://api.x.ai/v1/models",
-      headers: k => ({ Authorization: `Bearer ${k}` }),
-      parseResult: b => `${b?.data?.length ?? "several"} Grok models available`,
-    },
-    deepseek: {
-      url: "https://api.deepseek.com/v1/models",
-      headers: k => ({ Authorization: `Bearer ${k}` }),
-      parseResult: b => `${b?.data?.length ?? "several"} DeepSeek models available`,
-    },
-    moonshot: {
-      url: "https://api.moonshot.cn/v1/models",
-      headers: k => ({ Authorization: `Bearer ${k}` }),
-      parseResult: b => `${b?.data?.length ?? "several"} Kimi models available`,
-    },
-    alibaba: {
-      url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
-      headers: k => ({ Authorization: `Bearer ${k}` }),
-      parseResult: b => `${b?.data?.length ?? "several"} Qwen models available`,
-    },
   };
+  for (const [p, parseResult] of Object.entries(AI_LABELS)) {
+    ENDPOINTS[p] = { request: k => keyCheckRequest(p as AIProvider, k), parseResult };
+  }
 
   const ep = ENDPOINTS[provider];
   if (!ep) return { valid: false, detail: `Unknown provider "${provider}". Supported: ${Object.keys(ENDPOINTS).join(", ")}` };
 
-  const url = ep.url.replace("__KEY__", encodeURIComponent(apiKey));
-  const r   = await safeFetch(url, { headers: ep.headers(apiKey) });
+  const { url, headers } = ep.request(apiKey);
+  const r   = await safeFetch(url, { headers });
 
   if (r.ok) {
     const info = ep.parseResult(r.body);

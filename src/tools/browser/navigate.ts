@@ -1,6 +1,7 @@
 import { z }                  from "zod";
 import { buildTool }           from "../registry.js";
 import { getBrowserPage, checkDomainAllowed, configuredBrowserDomains } from "./manager.js";
+import { recordNet, hostOf } from "../../util/netActivity.js";
 
 export const browserNavigateTool = buildTool({
   name: "browser_navigate",
@@ -24,6 +25,7 @@ export const browserNavigateTool = buildTool({
       return { success: false, error: guard.reason };
     }
     try {
+      recordNet(hostOf(input.url), "open website", { category: "Website" });
       const page = await getBrowserPage(context.sessionId);
       await page.goto(input.url, {
         waitUntil: input.waitUntil ?? "domcontentloaded",

@@ -192,15 +192,12 @@ const state = {
   enabledSkills: new Set(['triage-email','daily-briefing','schedule-meeting','draft-reply']),
   activePresetId: 'intermediate',                 // default to Recommended preset
   connStatus: {},
-  selectedModel: 'claude-sonnet-4-6',
+  // Default model + OpenRouter tiers come from the server (/api/operator-defaults
+  // → config/models.ts), so model IDs live in one place, not in the browser too.
+  selectedModel: '',
   selectedProvider: 'anthropic',
   modelCatalog: [],
-  // OpenRouter tiered model selections (matches server-side DEFAULT_OPENROUTER_TIERS)
-  orTiers: {
-    fast:     'meta-llama/llama-3.1-8b-instruct:free',  // free, fast 8B — simple queries
-    balanced: 'google/gemini-2.5-flash-lite',            // $0.07/1M — near-instant, 1M ctx
-    flagship: 'google/gemini-2.5-flash',                 // $0.15/1M — full capability, vision
-  },
+  orTiers: {},
   // Operator-supplied default key (set by Vouza, invisible to end-users)
   // null = loading, {} = no default key, {hasDefaultKey:true,...} = key available
   operatorDefaults: null,
@@ -275,6 +272,14 @@ async function init() {
   ]);
   state.modelCatalog    = modelsRes.status === 'fulfilled' ? modelsRes.value : [];
   state.operatorDefaults = opRes.status   === 'fulfilled' ? opRes.value     : {};
+
+  // Server-owned defaults (config/models.ts) — the browser keeps no model IDs.
+  const op = state.operatorDefaults || {};
+  if (op.openrouterTiers) state.orTiers = { ...op.openrouterTiers };
+  if (!state.selectedModel && op.defaultModelForNewSetup) {
+    state.selectedModel    = op.defaultModelForNewSetup;
+    state.selectedProvider = op.defaultProviderForNewSetup || state.selectedProvider;
+  }
 
   // If operator default key is available and no model catalog, default to openrouter
   if (state.operatorDefaults?.hasDefaultKey && !state.modelCatalog.length) {
@@ -1792,6 +1797,10 @@ function toast(msg, type='success') {
   box.appendChild(t);
   setTimeout(()=>t.remove(), 4000);
 }
+// Older call sites use showToast(msg, 'ok' | 'warn' | 'error' | 'success').
+function showToast(msg, type = 'success') {
+  toast(msg, type === 'warn' || type === 'error' ? 'error' : 'success');
+}
 
 // ============================================================
 // AI Guide — Live Streaming Agent
@@ -1927,7 +1936,7 @@ function guideBotScripted(text) {
 // INVARIANT: typing indicator always lives at the END of the message list.
 // We always appendChild() the new message, then move typingEl to the bottom.
 // This eliminates the bug where bot replies showed up ABOVE user messages
-// (Aerick screenshot, 2026-05-27).
+// (beta-tester screenshot, 2026-05-27).
 // ─────────────────────────────────────────────────────────────────────────
 function appendMsg(role, innerHTML, opts) {
   const box      = document.getElementById('guideMessages');
@@ -2513,7 +2522,7 @@ async function callLiveAgent(text, image, textFile) {
     }
 
     // Create the streaming bot bubble — use appendMsg so the typing indicator
-    // always stays at the end (prevents Aerick's "bot reply above user msg" bug)
+    // always stays at the end (prevents the beta-tester-reported "bot reply above user msg" bug)
     typingEl.classList.remove('visible');
     const botEl = appendMsg('bot',
       `<div class="msg-bubble streaming-bubble" id="stream-bubble"></div>` +
@@ -2576,7 +2585,7 @@ async function callLiveAgent(text, image, textFile) {
           case 'done':
             // If the bot bubble ended up with no content (no text, no tool cards),
             // remove it entirely so we don't leave a phantom empty bubble that
-            // creates the huge vertical gap Aerick saw.
+            // creates the huge vertical gap a beta tester saw.
             if (!fullText && !toolCards) {
               if (botEl && botEl.parentNode) botEl.parentNode.removeChild(botEl);
             } else {
@@ -3171,7 +3180,7 @@ function renderMd(t) {
     });
 
     // STEP 2 — Auto-link bare URLs.
-    // Aerick reported (2026-05-27): the bot tells users "Go to your Google
+    // A beta tester reported (2026-05-27): the bot tells users "Go to your Google
     // Account settings at https://myaccount.google.com/" but the URL isn't
     // clickable, so the user has to copy-paste it manually. Auto-linking
     // here means EVERY URL the bot mentions becomes a one-tap link.
@@ -3945,11 +3954,27 @@ function renderHealthPanel({ budget, health, agent }) {
     </div>
   `;
 
+  // ── Privacy & network — what leaves this computer, and why ────────────
+  const privacySection = `
+    <div class="health-section">
+      <h3>🔒 Privacy &amp; network</h3>
+      <div style="font-size:13px;color:var(--text-dim);line-height:1.6;padding:0 4px;margin-bottom:10px">
+        Your files and memories stay on this computer. The agent only contacts the services you connected
+        (your AI model, email, WhatsApp/Telegram). It goes online to search or open websites <strong>only when you ask</strong>
+        — otherwise it asks you first. Every outside connection is listed below.
+      </div>
+      <div id="privacySettings"><div style="color:var(--text-dim);font-size:12px;padding:6px 4px">Loading…</div></div>
+      <div id="networkActivity" style="margin-top:12px"><div style="color:var(--text-dim);font-size:12px;padding:6px 4px">Loading…</div></div>
+    </div>
+  `;
+
   // Kick off the async fetch — the placeholders above hydrate when it returns.
   setTimeout(loadDetailedHealth, 0);
+  setTimeout(loadPrivacyAndNetwork, 0);
 
   return `
     <div class="health-grid">${statCards.join('')}</div>
+    ${privacySection}
     ${providerRows}
     ${spendRows}
     ${detailedHealthSection}
@@ -3957,6 +3982,84 @@ function renderHealthPanel({ budget, health, agent }) {
     ${hints}
     ${backup}
   `;
+}
+
+const NET_CATEGORY_ICON = {
+  'AI model': '🤖', 'Email': '✉️', 'Google account': '📅', 'Microsoft account': '📅',
+  'Messaging': '💬', 'Web search': '🔎', 'Website': '🌐', 'This computer': '💻', 'Other': '❔',
+};
+
+function timeAgo(iso) {
+  const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  return `${Math.round(s / 86400)} d ago`;
+}
+
+async function loadPrivacyAndNetwork() {
+  const [settings, net] = await Promise.all([
+    fetch('/api/privacy-settings').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    fetch('/api/network-activity').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+  ]);
+
+  const setEl = document.getElementById('privacySettings');
+  if (setEl && settings) {
+    setEl.innerHTML = `
+      <label style="display:flex;gap:10px;align-items:flex-start;font-size:13px;line-height:1.5;padding:8px 4px;cursor:pointer">
+        <input type="checkbox" id="learnToggle" ${settings.learnFromConversations ? 'checked' : ''}
+               onchange="setLearnFromConversations(this.checked)" style="margin-top:3px">
+        <span><strong>Learn from conversations</strong><br>
+          <span style="color:var(--text-dim)">After a chat, the agent asks the AI to reflect and save reusable skills.
+          This sends the conversation to your AI model again. Turn off to keep that from happening.</span></span>
+      </label>
+      <div style="font-size:12px;color:var(--text-dim);padding:2px 4px">
+        ${settings.aiRunsLocally
+          ? '💻 Your AI runs on this computer (local AI) — conversations are not sent to an AI company.'
+          : '☁️ Your AI runs in the cloud — each message you send goes to your AI provider to be answered.'}
+        · Connection health checks every ${escHtml(String(settings.healthCheckMinutes))} min.
+      </div>`;
+  }
+
+  const netEl = document.getElementById('networkActivity');
+  if (!netEl) return;
+  if (!net) { netEl.innerHTML = '<div style="color:var(--text-dim);font-size:12px">Network log unavailable.</div>'; return; }
+  if (!net.hosts.length) {
+    netEl.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:6px 4px">No outside connections since the dashboard started.</div>';
+    return;
+  }
+  const rows = net.hosts.map((h) => `
+    <div class="provider-health-row healthy" title="Last reason: ${escHtml(h.lastTrigger)}">
+      <span>${NET_CATEGORY_ICON[h.category] || '❔'}</span>
+      <span class="pname">${escHtml(h.host)}</span>
+      <span class="pmeta">${escHtml(h.category)} · ${h.count}× · ${escHtml(timeAgo(h.lastAt))} · ${escHtml(h.lastTrigger)}</span>
+    </div>`).join('');
+  const recent = net.recent.slice(0, 25).map((e) => `
+    <div style="font-size:12px;padding:3px 4px;color:var(--text-dim)">
+      ${escHtml(new Date(e.at).toLocaleTimeString())} — ${NET_CATEGORY_ICON[e.category] || '❔'} ${escHtml(e.host)}
+      (${escHtml(e.what)}) · <em>${escHtml(e.trigger)}</em>${e.ok === false ? ' · ⚠️ failed' : ''}
+    </div>`).join('');
+  netEl.innerHTML = `
+    <div style="font-size:12px;font-weight:600;padding:4px">Services contacted since ${escHtml(new Date(net.since).toLocaleString())}</div>
+    ${rows}
+    <details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;padding:4px">Latest 25 connections</summary>${recent}</details>`;
+}
+
+async function setLearnFromConversations(on) {
+  try {
+    const r = await fetch('/api/privacy-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ learnFromConversations: !!on }),
+    });
+    const d = await r.json();
+    if (!d.success) throw new Error(d.error || 'Could not save');
+    toast(on ? 'Learning from conversations is on' : 'Learning from conversations is off');
+  } catch (err) {
+    toast('Could not save: ' + err.message, 'error');
+    const box = document.getElementById('learnToggle');
+    if (box) box.checked = !on;
+  }
 }
 
 async function loadDetailedHealth() {
@@ -5182,10 +5285,72 @@ function qsRenderAi() {
   const ready = !!ai?.configured;
   qsEl('qsAiBlock').hidden = ready;
   qsEl('qsAiReady').hidden = !ready;
+  qsEl('qsLocalAiWrap').hidden = !!ai?.local;
   if (ready) {
-    qsEl('qsAiReady').textContent = ai.viaBuiltIn
-      ? '✓ Your AI is ready — nothing to set up'
-      : '✓ Your AI is connected';
+    qsEl('qsAiReady').textContent = ai.local
+      ? `✓ Using the local AI on this computer (${ai.model})`
+      : ai.viaBuiltIn
+        ? '✓ Your AI is ready — nothing to set up'
+        : '✓ Your AI is connected';
+  }
+}
+
+// ── 1 · alternative: local AI (Ollama) ───────────────────────
+async function qsToggleLocalAi() {
+  const box = qsEl('qsLocalAi');
+  box.hidden = !box.hidden;
+  qsEl('qsLocalToggle').setAttribute('aria-expanded', String(!box.hidden));
+  if (!box.hidden) await qsCheckLocalAi();
+}
+
+async function qsCheckLocalAi() {
+  const body = qsEl('qsLocalAiBody');
+  body.textContent = 'Looking for a local AI…';
+  let r = null;
+  try { r = await qsApi('/api/quick-setup/local-ai'); } catch { /* shown below */ }
+  if (!r || !r.running) {
+    body.innerHTML = `
+      <p class="qs-hint" style="margin-top:0">No local AI is running on this computer yet.</p>
+      <ol class="qs-steps-list">
+        <li>Download <strong>Ollama</strong> (free) from <a href="https://ollama.com/download" target="_blank" rel="noopener">ollama.com ↗</a> and open it.</li>
+        <li>Open a terminal and run <code>ollama pull ${escHtml(r?.suggested || 'qwen2.5:7b')}</code> (a few GB, one time).</li>
+        <li>Come back and tap <strong>Check again</strong>.</li>
+      </ol>
+      <p class="qs-hint">A local AI is slower than a cloud one and needs a reasonably recent computer (8 GB+ memory).</p>
+      <button class="qs-btn" type="button" onclick="qsCheckLocalAi()">Check again</button>`;
+    return;
+  }
+  if (!r.models.length) {
+    body.innerHTML = `
+      <p class="qs-hint" style="margin-top:0">✓ Ollama is running, but it has no AI model yet.</p>
+      <p class="qs-hint">Open a terminal and run <code>ollama pull ${escHtml(r.suggested)}</code>, then tap <strong>Check again</strong>.</p>
+      <button class="qs-btn" type="button" onclick="qsCheckLocalAi()">Check again</button>`;
+    return;
+  }
+  const pick = r.models.includes(r.suggested) ? r.suggested : r.models[0];
+  body.innerHTML = `
+    <label class="qs-label" for="qsLocalModel">✓ Found a local AI. Which model?</label>
+    <select class="qs-input" id="qsLocalModel">
+      ${r.models.map((m) => `<option value="${escHtml(m)}" ${m === pick ? 'selected' : ''}>${escHtml(m)}</option>`).join('')}
+    </select>
+    <p class="qs-hint">Pick one that supports tools (for example qwen2.5 or llama3.1) so it can read your email and files.</p>
+    <button class="qs-btn" type="button" onclick="qsUseLocalAi(this)">Use this local AI</button>`;
+}
+
+async function qsUseLocalAi(btn) {
+  const model = qsEl('qsLocalModel')?.value;
+  if (!model) return;
+  const done = qsBusy(btn, 'Saving…');
+  try {
+    const r = await qsApi('/api/quick-setup/local-ai', { model });
+    if (!r.ok) { qsMsg(1, r.error, 'error'); return; }
+    if (qs.state) qs.state.ai = { configured: true, ownKey: false, viaBuiltIn: false, local: true, model: r.model, provider: 'ollama' };
+    qsMsg(1, `✓ Using the local AI (${r.model}) — your chats stay on this computer`, 'ok');
+    qsRenderAi();
+  } catch {
+    qsMsg(1, "I couldn't save that. Make sure the assistant window is still open, then try again.", 'error');
+  } finally {
+    done();
   }
 }
 

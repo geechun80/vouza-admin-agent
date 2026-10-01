@@ -3,11 +3,12 @@
 //
 // PROBLEM this solves:
 //   The UI currently shows "✓ Connected" based on field presence, not
-//   actual liveness. Aerick saw ✓ AI Model and ✓ Telegram but the bot
+//   actual liveness. a beta tester saw ✓ AI Model and ✓ Telegram but the bot
 //   still returned 401 because nobody had ACTUALLY verified the key worked.
 //
 // SOLUTION:
-//   Background loop runs every PROBE_INTERVAL_MS, calls probe() on every
+//   Background loop runs every PROBE_INTERVAL_MS (15 min — each sweep contacts
+//   every connected service, so it stays infrequent), calls probe() on every
 //   registered integration in parallel. Updates a shared probe history.
 //   The dashboard reads the history (instead of running its own one-shot
 //   tests) so badges reflect real liveness.
@@ -20,8 +21,10 @@
 import { integrationRegistry } from "./registry.js";
 import type { IntegrationProbe } from "./types.js";
 import { logger } from "../util/logger.js";
+import { withTrigger } from "../util/netActivity.js";
 
-const PROBE_INTERVAL_MS    = 60_000;  // 60s between full sweeps
+// 15 min between full sweeps; HEALTH_PROBE_INTERVAL_MS overrides (min 60s).
+export const PROBE_INTERVAL_MS = Math.max(60_000, parseInt(process.env.HEALTH_PROBE_INTERVAL_MS || "", 10) || 15 * 60_000);
 const AUTO_RESET_AFTER     = 3;       // consecutive failures before auto-reset
 const RECENT_WINDOW_MS     = 60 * 60_000; // 1 hour rolling window
 const EVENT_WINDOW_SIZE    = 1000;    // M3 rolling event window per integration
@@ -88,9 +91,9 @@ class HealthMonitor {
     this.running = true;
     logger.info({ event: "health_monitor_start", intervalMs: PROBE_INTERVAL_MS }, "Background health monitor started");
     // Probe once immediately so the dashboard has fresh data on first load
-    this.probeAll().catch(() => {});
+    withTrigger("health check", () => this.probeAll()).catch(() => {});
     this.timer = setInterval(() => {
-      this.probeAll().catch((err) => {
+      withTrigger("health check", () => this.probeAll()).catch((err) => {
         logger.warn({ event: "health_monitor_loop_error", err: String(err) }, "Health monitor loop error (continuing)");
       });
     }, PROBE_INTERVAL_MS);

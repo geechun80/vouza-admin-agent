@@ -33,6 +33,8 @@ const DANGEROUS = [
   "save_memory", "update_memory", "forget_memory", "write_spreadsheet", "create_calendar_event",
   "update_calendar_event", "delete_calendar_event", "send_whatsapp_message", "send_telegram_message",
   "save_integration_credentials", "agentmail_send_email", "send_file_to_me",
+  // Going online with nobody there to ask — search words could carry injected private text
+  "web_search",
 ];
 
 function fullRegistry() {

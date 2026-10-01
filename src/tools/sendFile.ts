@@ -107,7 +107,7 @@ export const sendFileToMeTool = buildTool({
   }),
   async call(input, context) {
     const ch = context.channel;
-    if (!ch) {
+    if (!ch || ch.kind === "dashboard") {
       return {
         success: false,
         error: "send_file_to_me only works inside a WhatsApp or Telegram chat. On the desktop, tell the user where the file is instead.",

@@ -25,11 +25,10 @@ export interface OpenRouterTiers {
   flagship: string;   // premium — complex/multi-step/vision tasks
 }
 
-export const DEFAULT_OPENROUTER_TIERS: OpenRouterTiers = {
-  fast:     "meta-llama/llama-3.1-8b-instruct:free",   // Free — fast 8B model, simple queries
-  balanced: "google/gemini-2.5-flash-lite",             // $0.07/1M — near-instant, 1M ctx, multimodal
-  flagship: "google/gemini-2.5-flash",                  // $0.15/1M — fast, full capability, vision
-};
+// Defined once in config/models.ts (the single home for default models);
+// re-exported here so existing imports keep working.
+import { DEFAULT_OPENROUTER_TIERS as TIERS } from "../config/models.js";
+export const DEFAULT_OPENROUTER_TIERS: OpenRouterTiers = TIERS;
 
 export const TIER_LABELS: Record<TaskComplexity, string> = {
   fast:     "⚡ Fast model (simple task) — Llama 8B",

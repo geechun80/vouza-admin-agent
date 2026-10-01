@@ -8,6 +8,7 @@ import { randomUUID } from "crypto";
 import type { TaskEntry, AgentContext, SkillDefinition } from "../types/index.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { agentLoop } from "../agent/loop.js";
+import { withTriggerGen } from "../util/netActivity.js";
 
 /**
  * Optional per-task hooks (used by proactive schedules):
@@ -156,7 +157,7 @@ export class TaskScheduler {
 
       // Run through agent loop
       let output = "";
-      for await (const event of agentLoop(prompt, this.context, this.registry)) {
+      for await (const event of withTriggerGen("scheduled task", agentLoop(prompt, this.context, this.registry))) {
         if (event.type === "text_delta") {
           output += event.text;
         }

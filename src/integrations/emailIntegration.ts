@@ -12,6 +12,7 @@
 import type { Integration, IntegrationProbe, IntegrationStatusReport } from "./types.js";
 import type { AgentContext } from "../types/index.js";
 import nodemailer from "nodemailer";
+import { recordNet } from "../util/netActivity.js";
 
 const PROBE_TIMEOUT_MS = 10_000;  // SMTP handshake can be slower than HTTP
 
@@ -59,6 +60,7 @@ export class EmailIntegration implements Integration {
     }
 
     try {
+      recordNet(creds.host, "SMTP check", { category: "Email" });
       const transporter = nodemailer.createTransport({
         host: creds.host,
         port: creds.port,

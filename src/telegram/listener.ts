@@ -32,8 +32,10 @@ import {
   pendingCreatedSince,
   discardPending,
   recordExchange,
-  CONFIRM_PROMPT,
+  confirmPromptFor,
 } from "../agent/phoneMode.js";
+import { startTurn } from "../agent/webGate.js";
+import { withTrigger } from "../util/netActivity.js";
 import {
   decideTelegramAccess,
   parseStartPayload,
@@ -65,6 +67,13 @@ const CONFIRM_KEYBOARD = {
   inline_keyboard: [[
     { text: "✅ Yes, send", callback_data: "yes" },
     { text: "❌ Cancel",    callback_data: "no"  },
+  ]],
+};
+
+const ONLINE_KEYBOARD = {
+  inline_keyboard: [[
+    { text: "🌐 Yes, go online", callback_data: "yes" },
+    { text: "🏠 Stay offline",   callback_data: "no"  },
   ]],
 };
 
@@ -296,7 +305,7 @@ export async function startTelegramListener(
   _polling = true;
 
   // Run poll loop in background without blocking the caller
-  (async () => {
+  withTrigger("listening for your messages (Telegram)", async () => {
     while (_polling) {
       try {
         const params = new URLSearchParams({
@@ -333,7 +342,7 @@ export async function startTelegramListener(
       }
     }
     console.log(chalk.gray("  [Telegram] Listener stopped."));
-  })();
+  });
 }
 
 /**
@@ -561,7 +570,7 @@ async function handleMessage(
 ): Promise<void> {
   const q      = chatQueues.getOrCreate(String(chatId));
   const result = q.enqueue(
-    () => processMessage(token, chatId, fromName, text, baseCtx, registry, isVoice),
+    () => withTrigger("your message (Telegram)", () => processMessage(token, chatId, fromName, text, baseCtx, registry, isVoice)),
     `tg:${chatId}:${text.slice(0, 30)}`
   );
 
@@ -591,6 +600,7 @@ async function processMessage(
     // the model can never complete a send by itself. A voice transcript must
     // never count as YES (mis-hearing risk), but it does supersede the send.
     const ch = chatCtx.channel!;
+    let grantOnline = false;
     if (isVoice) {
       discardPending(ch);
     } else {
@@ -600,7 +610,10 @@ async function processMessage(
         await sendReply(token, chatId, pendingReply.reply!);
         return;
       }
+      grantOnline = !!pendingReply.grantOnline;
     }
+    // Web tools work this turn only if the owner's own words asked to go online.
+    startTurn(chatCtx, text, grantOnline);
     const turnStartedAt = Date.now();
     let confirmKeyboard: ReturnType<typeof buildInlineKeyboard> = undefined;
     const agentInput = isVoice
@@ -702,9 +715,11 @@ async function processMessage(
 
     // Never rely on the model to phrase the confirmation ask — append it and
     // offer one-tap buttons (their callback text "yes"/"no" comes back here).
-    if (pendingCreatedSince(ch, turnStartedAt)) {
-      fullText = fullText.trim() ? `${fullText.trim()}\n\n${CONFIRM_PROMPT}` : CONFIRM_PROMPT;
-      confirmKeyboard = CONFIRM_KEYBOARD;
+    const parked = pendingCreatedSince(ch, turnStartedAt);
+    if (parked) {
+      const ask = confirmPromptFor(parked);
+      fullText = fullText.trim() ? `${fullText.trim()}\n\n${ask}` : ask;
+      confirmKeyboard = parked.kind === "online" ? ONLINE_KEYBOARD : CONFIRM_KEYBOARD;
     }
 
     const finalText = fullText.trim();

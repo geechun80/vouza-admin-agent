@@ -41,6 +41,7 @@ import { getSetupStatusTool, saveIntegrationCredentialsTool } from "../tools/set
 import { startKeepAwake, stopKeepAwake } from "../util/keepAwake.js";
 import { buildScheduledRegistry } from "../agent/toolProfiles.js";
 import { webSearchTool } from "../tools/webSearch.js";
+import { gateWebTools, startTurn } from "../agent/webGate.js";
 import { runShellCommandTool, isShellToolEnabled } from "../tools/shell.js";
 // Browser tools (Phase 4) — main agent can browse allowlisted sites.
 // Playwright is lazily imported inside the browser manager; if it isn't
@@ -187,6 +188,10 @@ export async function launchAgent(): Promise<AgentInstance> {
   // Shell — sandboxed maintenance commands. Only offered to the model when an
   // admin opted in (SHELL_TOOL_ENABLED=true); otherwise the model never sees it.
   if (isShellToolEnabled()) registry.register(runShellCommandTool as any);
+
+  // Going online (web search / opening a site) only when the person asked —
+  // enforced in code for every channel that receives this registry.
+  gateWebTools(registry);
 
   const activeModules = [
     hasEmail     && "email",
@@ -357,7 +362,10 @@ export async function launchAgent(): Promise<AgentInstance> {
     skills,
     selfImprove,
     serviceManager: svcMgr,
-    runTask: (message: string) => agentLoop(message, context, registry),
+    runTask: (message: string) => {
+      startTurn(context, message);
+      return agentLoop(message, context, registry);
+    },
     stop: async () => {
       stopKeepAwake();
       const { healthMonitor: hm } = await import("../integrations/healthMonitor.js");

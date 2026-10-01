@@ -2,8 +2,8 @@
 // REGRESSION GUARD — WhatsApp Baileys allowlist enforcement
 //
 // THE INCIDENT (2026-05-26):
-// Aerick connected WhatsApp via Baileys QR scan. The agent then auto-replied
-// to messages from his friends — because the Baileys WhatsApp Web model
+// A beta tester connected WhatsApp via Baileys QR scan. The agent then auto-replied
+// to messages from their friends — because the Baileys WhatsApp Web model
 // gives our agent full access to his personal account, and our message
 // handler had no allowlist gate.
 //

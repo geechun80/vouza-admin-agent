@@ -99,7 +99,7 @@ type StreamEvent =
 2. **OpenRouter task routing** — `classifyTask()` returns `fast` / `balanced` /
    `flagship` and `selectModelForComplexity()` picks the matching tier model
    from `context.config.openrouterTiers`. Logged structurally; **never** shown
-   in chat (cluttered the conversation flow per Aerick's 2026-05-26 feedback).
+   in chat (cluttered the conversation flow per beta-tester feedback (2026-05-26)).
 3. **Audit log** — `appendTurn()` writes the user turn to
    `data/chat-history/<sessionId>.jsonl`, redacted, fire-and-forget.
 4. **Context compression** — if the conversation is over 10,000 estimated
@@ -217,7 +217,7 @@ prevent injection]` is appended so the model knows the redaction happened.
 
 Source: [`src/orchestrator/`](../src/orchestrator/).
 
-Replaces ad-hoc LLM tool retries (the "Aerick incident" of 2026-05-27 — the
+Replaces ad-hoc LLM tool retries (the beta-tester incident of 2026-05-27 — the
 bot kept calling `save_integration_credentials` with reformatted JSON until
 exhausting its turn budget) with a fixed declarative pipeline:
 
@@ -313,7 +313,7 @@ interface PipelineResult {
 Source: [`src/integrations/`](../src/integrations/).
 
 Before this layer, each channel (Telegram, WhatsApp, AgentMail) and each
-tool (AI provider, MCP) had bespoke status checks. Aerick reported seeing
+tool (AI provider, MCP) had bespoke status checks. a beta tester reported seeing
 ✓ checkmarks alongside live 401 errors — the badges were lying because they
 checked field presence, not real liveness.
 
@@ -468,7 +468,7 @@ spawn. Empty list = only the owner's own number can talk to the agent.
   `MAX_DELAY_MS = 30_000`.
 - Hard cap `MAX_RESTART_ATTEMPTS = 5` — after this we emit `logged_out` and
   require a manual "Reset connection" from the user. Without this cap,
-  re-scanning a banned number caused an infinite restart loop (Aerick
+  re-scanning a banned number caused an infinite restart loop (a beta tester
   2026-05-26).
 
 ### Disconnect-reason handling

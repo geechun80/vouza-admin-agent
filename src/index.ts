@@ -19,8 +19,11 @@ import { createAgentFromTemplate, ADMIN_TEMPLATE, BUILT_IN_TEMPLATES, scaffoldAg
 import { setupDefaultSchedules } from "./tasks/scheduler.js";
 import { startTelegramListener, stopTelegramListener } from "./telegram/listener.js";
 import { join } from "path";
+import { keyCheckRequest } from "./config/providerEndpoints.js";
+import { installFetchLogger } from "./util/netActivity.js";
 
 async function main() {
+  installFetchLogger();
   console.log(chalk.bold.cyan("\n+==========================================+"));
   console.log(chalk.bold.cyan("|         Admin Agent v2.0.0               |"));
   console.log(chalk.bold.cyan("|   Self-Improving AI Office Assistant     |"));
@@ -66,20 +69,11 @@ async function main() {
   // to confirm the key works at boot time, NOT only when the first user
   // message arrives. Async / non-blocking so it doesn't slow startup.
   (async () => {
-    if (!activeProviderKey) return;
+    if (!activeProviderKey && config.provider !== "ollama") return;
     try {
-      const baseUrl = config.provider === "anthropic" ? "https://api.anthropic.com/v1/models"
-                    : config.provider === "openrouter" ? "https://openrouter.ai/api/v1/models"
-                    : config.provider === "google" ? `https://generativelanguage.googleapis.com/v1beta/models?key=${activeProviderKey}`
-                    : config.provider === "openai" ? "https://api.openai.com/v1/models"
-                    : `https://api.${config.provider}.com/v1/models`;
-      const headers: Record<string, string> = {};
-      if (config.provider === "anthropic") {
-        headers["x-api-key"] = activeProviderKey;
-        headers["anthropic-version"] = "2023-06-01";
-      } else if (config.provider !== "google") {
-        headers["Authorization"] = `Bearer ${activeProviderKey}`;
-      }
+      // Shared, auth-gated, free check (the old inline URL guess was wrong for
+      // xAI, Alibaba and Moonshot, and OpenRouter's /models is public).
+      const { url: baseUrl, headers } = keyCheckRequest(config.provider, activeProviderKey, { ollamaBaseUrl: config.ollamaBaseUrl });
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 8000);
       const r = await fetch(baseUrl, { headers, signal: ctrl.signal });

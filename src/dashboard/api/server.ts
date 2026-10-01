@@ -12,7 +12,16 @@ import { promisify } from "util";
 import os from "os";
 
 const execAsync = promisify(exec);
-import { getModelCatalogForUI } from "../../config/models.js";
+import {
+  getModelCatalogForUI,
+  DEFAULT_MODEL,
+  DEFAULT_PROVIDER,
+  DEFAULT_OPERATOR_PROVIDER,
+  DEFAULT_OPERATOR_MODEL,
+  DEFAULT_OPENROUTER_TIERS,
+  type AIProvider,
+} from "../../config/models.js";
+import { keyCheckRequest } from "../../config/providerEndpoints.js";
 import { getBudgetSnapshot } from "../../agent/budget.js";
 import { getHealthSnapshot as getProviderHealth } from "../../agent/providerFailover.js";
 import {
@@ -22,7 +31,9 @@ import {
 } from "../../agent/conversationStore.js";
 import { launchAgent, getAgentStatus, type AgentInstance } from "../../bridge/launcher.js";
 import { setAgentInstance } from "../../bridge/agentBridge.js";
-import { streamChat, clearSession } from "./chat.js";
+import { streamChat, clearSession, forEachChatContext } from "./chat.js";
+import { installFetchLogger, withTrigger, getNetActivity } from "../../util/netActivity.js";
+import { PROBE_INTERVAL_MS as HEALTH_PROBE_INTERVAL_MS } from "../../integrations/healthMonitor.js";
 import { handleHealthDetailed } from "./health-detailed.js";
 import { handleSetupPipelineTest } from "./setup-pipeline.js";
 import { registerQuickSetupRoutes } from "./quick-setup.js";
@@ -53,6 +64,15 @@ const PUBLIC_DIR = join(__dirname, "..", "public");
 
 // Running agent instance (if launched from dashboard)
 let agentInstance: AgentInstance | null = null;
+
+/** Why a request's outgoing connections happened — shown in the Network view. */
+function requestTrigger(path: string): string {
+  if (path === "/api/chat") return "your message (dashboard)";
+  if (path === "/api/agent/task") return "your request (dashboard)";
+  if (path === "/api/transcribe") return "your voice note (dashboard)";
+  if (path.startsWith("/api/integrations/") && path.endsWith("/probe")) return "health check (you clicked)";
+  return "setup / dashboard";
+}
 // Prevents double-launch race condition between auto-launch retry and manual /api/agent/launch
 let launching = false;
 
@@ -68,6 +88,8 @@ interface SetupConfig {
     timezone: string;
     /** OpenRouter smart routing — model IDs for each complexity tier */
     openrouterTiers?: { fast: string; balanced: string; flagship: string };
+    /** Local AI (provider "ollama") — where Ollama listens; default http://127.0.0.1:11434/v1 */
+    ollamaBaseUrl?: string;
   };
   channels: Record<string, { enabled: boolean; provider: string; config: Record<string, string> }>;
   tools: Record<string, { enabled: boolean; provider: string; config: Record<string, string> }>;
@@ -77,12 +99,14 @@ interface SetupConfig {
     schedules: Record<string, string>;
   };
   selfImproveIntervalHours?: number;
+  /** false → no reflection / skill writing / optimizer passes (each re-sends conversations to the AI) */
+  learnFromConversations?: boolean;
   setupCompleted: boolean;
   setupCompletedAt?: string;
 }
 
 const DEFAULT_CONFIG: SetupConfig = {
-  agent: { name: "AdminAgent", model: "claude-sonnet-4-6", provider: "anthropic", language: "en", timezone: "Asia/Singapore" },
+  agent: { name: "AdminAgent", model: DEFAULT_MODEL, provider: DEFAULT_PROVIDER, language: "en", timezone: "Asia/Singapore" },
   channels: {
     email: { enabled: false, provider: "gmail", config: {} },
     whatsapp: { enabled: false, provider: "web", config: {} },
@@ -239,19 +263,10 @@ async function verifyOperatorKey(): Promise<{ status: OperatorKeyStatus; detail?
     return { status: _opKeyCache.status, detail: _opKeyCache.detail };
   }
 
-  const provider = process.env.VOUZA_API_PROVIDER || "openrouter";
-  // IMPORTANT: validate against an AUTH-GATED endpoint. OpenRouter's /v1/models
-  // is PUBLIC — it returns 200 even for a revoked key, producing a false
-  // "valid". /v1/key requires the key and returns 401 when it's bad. Anthropic
-  // and OpenAI /v1/models are auth-gated; Google's models endpoint takes ?key=.
-  const baseUrl = provider === "anthropic" ? "https://api.anthropic.com/v1/models"
-                : provider === "openrouter" ? "https://openrouter.ai/api/v1/key"
-                : provider === "google" ? `https://generativelanguage.googleapis.com/v1beta/models?key=${key}`
-                : provider === "openai" ? "https://api.openai.com/v1/models"
-                : `https://api.${provider}.com/v1/models`;
-  const headers: Record<string, string> = {};
-  if (provider === "anthropic") { headers["x-api-key"] = key; headers["anthropic-version"] = "2023-06-01"; }
-  else if (provider !== "google") { headers["Authorization"] = `Bearer ${key}`; }
+  const provider = (process.env.VOUZA_API_PROVIDER || DEFAULT_OPERATOR_PROVIDER) as AIProvider;
+  // AUTH-GATED check from the shared endpoint table (Rule 66 — OpenRouter's
+  // /models is PUBLIC and returns 200 even for a revoked key).
+  const { url: baseUrl, headers } = keyCheckRequest(provider, key);
 
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 8000);
@@ -293,11 +308,16 @@ export async function startDashboard(port = 3456): Promise<void> {
     console.warn("  ⚠ Could not initialize data/config.json:", e);
   }
 
+  // Every outgoing connection is recorded for the Network view (Health panel).
+  installFetchLogger();
+
   const app = express();
   app.use(express.json({ limit: "30mb" })); // 30 MB to accommodate base64 audio uploads
+  // Label why any connection made while handling a request happened.
+  app.use((req, _res, next) => withTrigger(requestTrigger(req.path), next));
   // Static files — force HTML to revalidate on every load so dashboard updates
   // are picked up immediately after `git pull && npm run build`. Without this,
-  // browsers cache index.html indefinitely and users see stale UI (Aerick bug,
+  // browsers cache index.html indefinitely and users see stale UI (beta-tester bug,
   // 2026-05-28: M1 chat-ordering fix wasn't visible because the browser kept
   // serving cached HTML). Other static assets (images, fonts) keep default caching.
   //
@@ -379,8 +399,12 @@ export async function startDashboard(port = 3456): Promise<void> {
       hasDefaultKey,
       defaultKeyStatus: status,
       defaultKeyDetail: detail,
-      defaultProvider: process.env.VOUZA_API_PROVIDER || "openrouter",
-      defaultModel:    process.env.VOUZA_API_MODEL    || "google/gemini-2.5-flash-lite",
+      defaultProvider: process.env.VOUZA_API_PROVIDER || DEFAULT_OPERATOR_PROVIDER,
+      defaultModel:    process.env.VOUZA_API_MODEL    || DEFAULT_OPERATOR_MODEL,
+      // The browser reads these instead of keeping its own copy of model IDs.
+      openrouterTiers: DEFAULT_OPENROUTER_TIERS,
+      defaultModelForNewSetup: DEFAULT_MODEL,
+      defaultProviderForNewSetup: DEFAULT_PROVIDER,
       brandName:       process.env.VOUZA_BRAND_NAME   || "Vouza",
     });
   });
@@ -592,6 +616,36 @@ export async function startDashboard(port = 3456): Promise<void> {
   //   - failed actions (last 20 across integrations)
   app.get("/api/health/detailed", requireLocalOrigin, handleHealthDetailed);
 
+  // --- Network activity: every outside service contacted, and why ---
+  app.get("/api/network-activity", requireLocalOrigin, (_req, res) => {
+    res.json(getNetActivity(150));
+  });
+
+  // --- Privacy settings: learning steps on/off, where the AI runs ---
+  app.get("/api/privacy-settings", requireLocalOrigin, async (_req, res) => {
+    const cfg = await loadSetupConfig();
+    res.json({
+      learnFromConversations: cfg.learnFromConversations !== false,
+      aiRunsLocally:          cfg.agent?.provider === "ollama",
+      healthCheckMinutes:     Math.round(HEALTH_PROBE_INTERVAL_MS / 60_000),
+    });
+  });
+
+  app.post("/api/privacy-settings", requireLocalOrigin, async (req, res) => {
+    const { learnFromConversations } = (req.body ?? {}) as { learnFromConversations?: unknown };
+    if (typeof learnFromConversations !== "boolean") {
+      return res.status(400).json({ success: false, error: "learnFromConversations must be true or false" });
+    }
+    const cfg = await loadSetupConfig();
+    cfg.learnFromConversations = learnFromConversations;
+    await saveSetupConfig(cfg);
+    // Takes effect immediately — the running agent and open chats included.
+    const apply = (ctx: { config: { learnFromConversations?: boolean } }) => { ctx.config.learnFromConversations = learnFromConversations; };
+    if (agentInstance) apply(agentInstance.context);
+    forEachChatContext(apply);
+    res.json({ success: true, learnFromConversations });
+  });
+
   // --- M3 Setup Wizard: SSE-streaming pipeline test ---
   // POST { integration, input } → SSE stream of step-by-step progress
   // (detect → validate → test → save → confirm → live-test). Wraps the M2
@@ -660,7 +714,7 @@ export async function startDashboard(port = 3456): Promise<void> {
   // --- Live Connection Diagnostics ---
   // Runs an actual API call against each configured integration's endpoint
   // and reports per-integration pass/fail with the specific error. This is
-  // the "tell me exactly what's wrong" page Aerick asked for after seeing
+  // the "tell me exactly what's wrong" page a beta tester asked for after seeing
   // ✓ checkmarks but 401 errors on the bot.
   //
   // For each check, we report:
@@ -701,24 +755,18 @@ export async function startDashboard(port = 3456): Promise<void> {
       keySource = "operator (VOUZA_API_KEY env)";
     }
 
+    // Local AI needs no key; the check is just "is it running on this computer?"
+    if (activeProvider === "ollama" && config.agent?.model) {
+      activeKey = "ollama";
+      keySource = "local AI (no key)";
+    }
+
     results.push(await time(`AI Provider (${activeProvider})`, async () => {
       if (!activeKey) throw new Error("No API key found — neither user nor operator key is set");
-      // Hit an AUTH-GATED endpoint so a revoked key actually fails. NOTE:
-      // OpenRouter's /v1/models is PUBLIC (200 even with a bad key) — use
-      // /v1/key, which is auth-gated, or the health check reports a dead key as
-      // healthy. Anthropic/OpenAI /v1/models require auth; Google takes ?key=.
-      const baseUrl = activeProvider === "anthropic" ? "https://api.anthropic.com/v1/models"
-                    : activeProvider === "openrouter" ? "https://openrouter.ai/api/v1/key"
-                    : activeProvider === "google" ? `https://generativelanguage.googleapis.com/v1beta/models?key=${activeKey}`
-                    : activeProvider === "openai" ? "https://api.openai.com/v1/models"
-                    : `https://api.${activeProvider}.com/v1/models`;
-      const headers: Record<string, string> = {};
-      if (activeProvider === "anthropic") {
-        headers["x-api-key"] = activeKey;
-        headers["anthropic-version"] = "2023-06-01";
-      } else if (activeProvider !== "google") {
-        headers["Authorization"] = `Bearer ${activeKey}`;
-      }
+      // Free, AUTH-GATED key check from the shared endpoint table (Rule 66).
+      const { url: baseUrl, headers } = keyCheckRequest(activeProvider as AIProvider, activeKey, {
+        ollamaBaseUrl: config.agent?.ollamaBaseUrl,
+      });
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 8000);
       try {
@@ -1171,7 +1219,8 @@ export async function startDashboard(port = 3456): Promise<void> {
         (provider === "openrouter" ? savedCreds["openrouterApiKey"] : undefined) ||
         (provider === "anthropic"  ? savedCreds["anthropicApiKey"]  : undefined);
       const operatorKey = (process.env.VOUZA_API_KEY || "").trim();
-      if ((!savedKey || savedKey.trim().length < 8) && !operatorKey) {
+      const localAi     = provider === "ollama" && !!preFlight.agent?.model; // needs no key
+      if (!localAi && (!savedKey || savedKey.trim().length < 8) && !operatorKey) {
         return res.json({
           success: false,
           error:
@@ -1367,7 +1416,9 @@ export async function startDashboard(port = 3456): Promise<void> {
         messagePayload = effectiveMessage;
       }
 
-      for await (const event of streamChat(sessionId, messagePayload, config, apiKey, wizardStep, userName)) {
+      // `message` (not effectiveMessage) — an attached file's text must never
+      // count as the person asking to go online.
+      for await (const event of streamChat(sessionId, messagePayload, config, apiKey, wizardStep, userName, message)) {
         send(event);
       }
     } catch (err) {
@@ -1824,7 +1875,7 @@ export async function startDashboard(port = 3456): Promise<void> {
   });
 
   // --- Serve SPA ---
-  // Always send fresh HTML — see static-files block above for the Aerick bug context.
+  // Always send fresh HTML — see static-files block above for the beta-tester bug context.
   app.get("*", (_req, res) => {
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     res.setHeader("Pragma", "no-cache");
@@ -1926,80 +1977,26 @@ function deepMerge(target: any, source: any): any {
 
 async function testConnection(type: string, config: Record<string, string>): Promise<{ success: boolean; message: string }> {
   switch (type) {
+    // AI keys: one free, auth-gated check per provider (shared table — Rule 66).
+    // Never a paid completion: the old Anthropic test sent a real message.
     case "anthropic":
+    case "openrouter":
+    case "ai-provider": {
+      const provider = (type === "ai-provider" ? config.provider : type) as AIProvider;
+      let req: { url: string; headers: Record<string, string> };
       try {
-        const res = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: {
-            "x-api-key": config.apiKey,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({
-            model: "claude-haiku-4-5-20251001",
-            max_tokens: 10,
-            messages: [{ role: "user", content: "hi" }],
-          }),
-        });
-        if (res.ok) return { success: true, message: "Anthropic API connected successfully!" };
-        const err = await res.json();
-        return { success: false, message: `API error: ${err.error?.message || res.statusText}` };
-      } catch (e) {
-        return { success: false, message: `Connection failed: ${e}` };
+        req = keyCheckRequest(provider, config.apiKey || "");
+      } catch {
+        return { success: false, message: `Unknown provider: ${provider}` };
       }
-
-    case "openrouter": {
       try {
-        // Rule 66: /api/v1/models is PUBLIC (200 for any key, even revoked).
-        // /api/v1/key is auth-gated and 401s for a bad key.
-        const res = await fetch("https://openrouter.ai/api/v1/key", {
-          headers: {
-            Authorization: `Bearer ${config.apiKey}`,
-            "HTTP-Referer": "https://adminagent.app",
-            "X-Title": "Admin Agent",
-          },
-        });
-        if (res.ok) {
-          return { success: true, message: "OpenRouter connected — your key works!" };
+        const res = await fetch(req.url, { headers: req.headers, signal: AbortSignal.timeout(12_000) });
+        if (res.ok) return { success: true, message: "Connected — your key works!" };
+        if (res.status === 400 || res.status === 401 || res.status === 403) {
+          return { success: false, message: "That key was rejected. It may be mistyped, deleted, or out of credit." };
         }
         const err = await res.text();
-        return { success: false, message: `OpenRouter error: ${err.slice(0, 200)}` };
-      } catch (e) {
-        return { success: false, message: `Connection failed: ${e}` };
-      }
-    }
-
-    case "ai-provider": {
-      // Generic test for any OpenAI-compatible provider
-      const provider = config.provider;
-      const apiKey = config.apiKey;
-
-      if (provider === "anthropic") {
-        return testConnection("anthropic", { apiKey });
-      }
-      if (provider === "openrouter") {
-        return testConnection("openrouter", { apiKey });
-      }
-
-      const baseUrls: Record<string, string> = {
-        openai: "https://api.openai.com/v1",
-        google: "https://generativelanguage.googleapis.com/v1beta/openai",
-        xai: "https://api.x.ai/v1",
-        deepseek: "https://api.deepseek.com",
-        alibaba: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-        moonshot: "https://api.moonshot.cn/v1",
-      };
-
-      const baseUrl = baseUrls[provider];
-      if (!baseUrl) return { success: false, message: `Unknown provider: ${provider}` };
-
-      try {
-        const res = await fetch(`${baseUrl}/models`, {
-          headers: { Authorization: `Bearer ${apiKey}` },
-        });
-        if (res.ok) return { success: true, message: `${provider} API connected successfully!` };
-        const err = await res.text();
-        return { success: false, message: `API error: ${err.slice(0, 200)}` };
+        return { success: false, message: `API error (HTTP ${res.status}): ${err.slice(0, 200)}` };
       } catch (e) {
         return { success: false, message: `Connection failed: ${e}` };
       }

@@ -15,6 +15,8 @@ import { readFile, writeFile, mkdir, readdir } from "fs/promises";
 import { existsSync }                           from "fs";
 import path                                     from "path";
 import type { AgentContext, ConversationMessage } from "../types/index.js";
+import type { AIProvider } from "../config/models.js";
+import { baseUrlFor, openRouterHeaders } from "../config/providerEndpoints.js";
 import { redact }                               from "./redactor.js";
 
 const SKILLS_DIR = path.resolve(process.cwd(), "data", "skills");
@@ -87,25 +89,14 @@ async function callAI(
     return (resp.content.find((b: any) => b.type === "text") as any)?.text ?? "SKIP";
   }
 
-  // OpenAI-compatible (OpenRouter, DeepSeek, xAI, etc.)
-  const BASE_URLS: Record<string, string> = {
-    openrouter: "https://openrouter.ai/api/v1",
-    openai:     "https://api.openai.com/v1",
-    deepseek:   "https://api.deepseek.com",
-    google:     "https://generativelanguage.googleapis.com/v1beta/openai",
-    xai:        "https://api.x.ai/v1",
-    alibaba:    "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-    moonshot:   "https://api.moonshot.cn/v1",
-  };
-  const baseURL = BASE_URLS[provider] ?? "https://openrouter.ai/api/v1";
+  // OpenAI-compatible — same provider the conversation uses (never a
+  // different, cloud one: unknown providers throw instead of falling back).
+  const baseURL = baseUrlFor(provider as AIProvider, { ollamaBaseUrl: context.config.ollamaBaseUrl });
   const headers: Record<string, string> = {
-    Authorization:  `Bearer ${apiKey}`,
+    Authorization:  `Bearer ${apiKey || "ollama"}`,
     "Content-Type": "application/json",
+    ...(provider === "openrouter" ? openRouterHeaders() : {}),
   };
-  if (provider === "openrouter") {
-    headers["HTTP-Referer"] = "https://adminagent.app";
-    headers["X-Title"]      = "Admin Agent";
-  }
 
   const res = await fetch(`${baseURL}/chat/completions`, {
     method:  "POST",

@@ -27,7 +27,9 @@
 import { resolveMx as dnsResolveMx } from "dns/promises";
 import nodemailer from "nodemailer";
 import { ImapFlow } from "imapflow";
-import type { AIProvider } from "../config/models.js";
+import { DEFAULT_MODEL_BY_PROVIDER, DEFAULT_OPENROUTER_TIERS, type AIProvider } from "../config/models.js";
+import { keyCheckRequest, ollamaBaseUrl } from "../config/providerEndpoints.js";
+import { recordNet } from "../util/netActivity.js";
 
 // ---------------------------------------------------------------------------
 // AI key
@@ -39,13 +41,16 @@ export interface AiCandidate {
   label:    string;
 }
 
+const candidate = (provider: AIProvider, label: string): AiCandidate =>
+  ({ provider, model: DEFAULT_MODEL_BY_PROVIDER[provider], label });
+
 const AI: Record<string, AiCandidate> = {
-  anthropic:  { provider: "anthropic",  model: "claude-sonnet-4-6",            label: "Claude (Anthropic)" },
-  openrouter: { provider: "openrouter", model: "google/gemini-2.5-flash-lite", label: "OpenRouter" },
-  google:     { provider: "google",     model: "gemini-2.5-flash",             label: "Gemini (Google)" },
-  xai:        { provider: "xai",        model: "grok-3",                       label: "Grok (xAI)" },
-  openai:     { provider: "openai",     model: "gpt-4o",                       label: "ChatGPT (OpenAI)" },
-  deepseek:   { provider: "deepseek",   model: "deepseek-chat",                label: "DeepSeek" },
+  anthropic:  candidate("anthropic",  "Claude (Anthropic)"),
+  openrouter: candidate("openrouter", "OpenRouter"),
+  google:     candidate("google",     "Gemini (Google)"),
+  xai:        candidate("xai",        "Grok (xAI)"),
+  openai:     candidate("openai",     "ChatGPT (OpenAI)"),
+  deepseek:   candidate("deepseek",   "DeepSeek"),
 };
 
 /** Providers this key could belong to, most likely first. Empty = unknown shape. */
@@ -73,32 +78,10 @@ type FetchFn = typeof fetch;
  * Only auth-gated endpoints — they 401/403 for a bad key.
  */
 export async function verifyAiKey(c: AiCandidate, key: string, fetchFn: FetchFn = fetch): Promise<boolean | Error> {
-  const signal = AbortSignal.timeout(12_000);
   let res: Response;
   try {
-    switch (c.provider) {
-      case "anthropic":
-        res = await fetchFn("https://api.anthropic.com/v1/models", {
-          headers: { "x-api-key": key, "anthropic-version": "2023-06-01" }, signal });
-        break;
-      case "openrouter":
-        res = await fetchFn("https://openrouter.ai/api/v1/key", { headers: { Authorization: `Bearer ${key}` }, signal });
-        break;
-      case "google":
-        res = await fetchFn(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`, { signal });
-        break;
-      case "openai":
-        res = await fetchFn("https://api.openai.com/v1/models", { headers: { Authorization: `Bearer ${key}` }, signal });
-        break;
-      case "deepseek":
-        res = await fetchFn("https://api.deepseek.com/models", { headers: { Authorization: `Bearer ${key}` }, signal });
-        break;
-      case "xai":
-        res = await fetchFn("https://api.x.ai/v1/models", { headers: { Authorization: `Bearer ${key}` }, signal });
-        break;
-      default:
-        return new Error(`Unsupported provider ${c.provider}`);
-    }
+    const { url, headers } = keyCheckRequest(c.provider, key);
+    res = await fetchFn(url, { headers, signal: AbortSignal.timeout(12_000) });
   } catch (err) {
     return err instanceof Error ? err : new Error(String(err));
   }
@@ -140,12 +123,44 @@ export function aiConfigPatch(c: AiCandidate, key: string): Record<string, any> 
     agent: {
       provider: c.provider,
       model:    c.model,
-      ...(c.provider === "openrouter"
-        ? { openrouterTiers: { fast: "meta-llama/llama-3.1-8b-instruct:free", balanced: "google/gemini-2.5-flash-lite", flagship: "google/gemini-2.5-flash" } }
-        : {}),
+      ...(c.provider === "openrouter" ? { openrouterTiers: { ...DEFAULT_OPENROUTER_TIERS } } : {}),
     },
     credentials: { [credentialKeyFor(c.provider)]: key.trim() },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Local AI (Ollama) — the AI runs on this computer, no key, nothing sent out
+// ---------------------------------------------------------------------------
+
+/** A model that handles tool use well on an ordinary laptop. */
+export const SUGGESTED_LOCAL_MODEL = "qwen2.5:7b";
+
+export interface LocalAiStatus {
+  running: boolean;
+  models:  string[];
+  /** Ollama's address — always this computer unless OLLAMA_BASE_URL says otherwise */
+  baseUrl: string;
+}
+
+/** Is Ollama running here, and which models are installed? Never throws. */
+export async function detectLocalAi(fetchFn: FetchFn = fetch): Promise<LocalAiStatus> {
+  const baseUrl = ollamaBaseUrl();
+  try {
+    const { url } = keyCheckRequest("ollama", "", { ollamaBaseUrl: baseUrl });
+    const res = await fetchFn(url, { signal: AbortSignal.timeout(3_000) });
+    if (!res.ok) return { running: false, models: [], baseUrl };
+    const data = (await res.json().catch(() => ({}))) as { models?: Array<{ name?: string; model?: string }> };
+    const models = (data.models ?? []).map((m) => String(m?.name ?? m?.model ?? "")).filter(Boolean);
+    return { running: true, models, baseUrl };
+  } catch {
+    return { running: false, models: [], baseUrl };
+  }
+}
+
+/** setup-config patch for a local model (cloud keys, if any, are left alone). */
+export function localAiConfigPatch(model: string): Record<string, any> {
+  return { agent: { provider: "ollama", model: model.trim() } };
 }
 
 // ---------------------------------------------------------------------------
@@ -219,6 +234,7 @@ export async function detectEmailPreset(address: string, resolveMx: ResolveMxFn 
   if (!fromAddress.guessed) return fromAddress;
   const domain = address.trim().toLowerCase().split("@")[1] ?? "";
   try {
+    recordNet("DNS (mail server lookup)", `find mail server for ${domain}`, { category: "Email" });
     const mx = await resolveMx(domain);
     for (const rec of [...mx].sort((a, b) => a.priority - b.priority)) {
       const hit = MX_PRESET.find(([re]) => re.test(rec.exchange));
@@ -262,6 +278,7 @@ function withTimeout<T>(p: Promise<T>, label: string): Promise<T> {
 
 const realProbes: EmailProbes = {
   async imap(l) {
+    recordNet(l.imapHost, "IMAP login check", { category: "Email" });
     const client = new ImapFlow({
       host: l.imapHost, port: l.imapPort, secure: l.imapPort === 993,
       auth: { user: l.address, pass: l.password }, logger: false,
@@ -275,6 +292,7 @@ const realProbes: EmailProbes = {
     }
   },
   async smtp(l) {
+    recordNet(l.smtpHost, "SMTP login check", { category: "Email" });
     const t = nodemailer.createTransport({
       host: l.smtpHost, port: l.smtpPort, secure: l.smtpPort === 465, requireTLS: l.smtpPort !== 465,
       auth: { user: l.address, pass: l.password },

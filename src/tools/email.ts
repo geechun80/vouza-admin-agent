@@ -12,6 +12,7 @@ import { stat } from "fs/promises";
 import { basename } from "path";
 import { buildImapSearch } from "./imapSearch.js";
 import { resolveAccess } from "../files/folderGrants.js";
+import { recordNet } from "../util/netActivity.js";
 
 // Gmail rejects messages over 25 MB after base64 (~4/3 growth), so keep the
 // raw attachment total comfortably under that.
@@ -121,6 +122,7 @@ export const readEmailsTool = buildTool({
         return { success: false, error: `Failed to read emails: ${err}. No Custom IMAP or Gmail App Password configured.` };
       }
 
+      recordNet(imapHost, "IMAP (read email)", { category: "Email" });
       const client = new ImapFlow({
         host: imapHost,
         port: imapPort,
@@ -222,6 +224,7 @@ export const sendEmailTool = buildTool({
         fromAddress = gmailCfg!.user;
       }
 
+      recordNet((transporterOptions as any).host || "smtp.gmail.com", "SMTP (send email)", { category: "Email" });
       const transporter = nodemailer.createTransport(transporterOptions);
 
       const mailOptions: SendMailOptions = {
@@ -455,6 +458,7 @@ export const replyEmailTool = buildTool({
           fromAddress = gmailCfg!.user;
         }
 
+        recordNet((transporterOptions as any).host || "smtp.gmail.com", "SMTP (send email)", { category: "Email" });
         const transporter = nodemailer.createTransport(transporterOptions);
         const result = await transporter.sendMail({
           from: fromAddress,
@@ -509,6 +513,7 @@ export const deleteEmailTool = buildTool({
  * connect Google credentials in the setup wizard.
  */
 async function getGmailAuth(context: any) {
+  recordNet("gmail.googleapis.com", "Gmail API", { category: "Google account" });
   const SCOPES = ["https://www.googleapis.com/auth/gmail.modify"];
 
   // Option 1: Service account key file (Google Workspace / admin setups)

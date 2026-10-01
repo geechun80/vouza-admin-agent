@@ -51,6 +51,9 @@ export function initSelfImproveLoop(config: AgentConfig, memory: MemoryStore) {
    * Returns improvement actions taken.
    */
   async function runOptimizationCycle(): Promise<ImprovementAction[]> {
+    // --- Gate 0: the owner switched learning off ---
+    if (config.learnFromConversations === false) return [];
+
     // --- Gate 1: Time throttle ---
     const hoursSinceLastRun = (Date.now() - state.lastRunAt) / 3_600_000;
     if (hoursSinceLastRun < config.selfImproveIntervalHours) {

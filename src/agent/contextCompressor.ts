@@ -17,6 +17,8 @@
 // =============================================================================
 
 import type { ConversationMessage } from "../types/index.js";
+import type { AIProvider } from "../config/models.js";
+import { baseUrlFor, openRouterHeaders } from "../config/providerEndpoints.js";
 
 // ─── Token estimation ─────────────────────────────────────────────────────────
 
@@ -77,7 +79,8 @@ async function llmSummarize(
   middleText: string,
   apiKey:     string,
   provider:   string,
-  model:      string
+  model:      string,
+  ollamaUrl?: string,
 ): Promise<string> {
   const prompt = `Summarize this conversation section:\n\n${middleText}`;
 
@@ -93,25 +96,14 @@ async function llmSummarize(
     return (resp.content.find((b: any) => b.type === "text") as any)?.text ?? "";
   }
 
-  // OpenAI-compatible
-  const BASE_URLS: Record<string, string> = {
-    openrouter: "https://openrouter.ai/api/v1",
-    openai:     "https://api.openai.com/v1",
-    deepseek:   "https://api.deepseek.com",
-    google:     "https://generativelanguage.googleapis.com/v1beta/openai",
-    xai:        "https://api.x.ai/v1",
-    alibaba:    "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-    moonshot:   "https://api.moonshot.cn/v1",
-  };
-  const baseURL  = BASE_URLS[provider] ?? "https://openrouter.ai/api/v1";
+  // OpenAI-compatible — same provider the conversation uses (never a
+  // different, cloud one: unknown providers throw instead of falling back).
+  const baseURL  = baseUrlFor(provider as AIProvider, { ollamaBaseUrl: ollamaUrl });
   const headers: Record<string, string> = {
-    Authorization:  `Bearer ${apiKey}`,
+    Authorization:  `Bearer ${apiKey || "ollama"}`,
     "Content-Type": "application/json",
+    ...(provider === "openrouter" ? openRouterHeaders() : {}),
   };
-  if (provider === "openrouter") {
-    headers["HTTP-Referer"] = "https://adminagent.app";
-    headers["X-Title"]      = "Admin Agent";
-  }
 
   const res = await fetch(`${baseURL}/chat/completions`, {
     method:  "POST",
@@ -159,7 +151,8 @@ export async function compressContext(
   provider:          string,
   model:             string,
   contextWindowSize: number = 128_000,
-  threshold:         number = 0.50
+  threshold:         number = 0.50,
+  ollamaUrl?:        string,
 ): Promise<CompressResult> {
   const tokenLimit   = contextWindowSize * threshold;
   const currentTokens = estimateConversationTokens(messages);
@@ -222,7 +215,7 @@ export async function compressContext(
     .join("\n");
 
   try {
-    const summary = await llmSummarize(middleText, apiKey, provider, model);
+    const summary = await llmSummarize(middleText, apiKey, provider, model, ollamaUrl);
 
     if (!summary || !summary.includes("---COMPRESSED---")) {
       // LLM failed — fall back to just the pruned version

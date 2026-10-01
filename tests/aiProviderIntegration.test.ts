@@ -134,7 +134,10 @@ describe("AIProviderIntegration — provider-specific URL + headers", () => {
     }) as any;
     const ai = new AIProviderIntegration(() => makeCtx("openrouter", "sk-or-test"));
     await ai.probe();
-    assert.match(capturedUrl, /openrouter\.ai\/api\/v1\/models/);
+    // Rule 66: /api/v1/models is PUBLIC (200 even for a revoked key) — the
+    // probe must hit the auth-gated /api/v1/key or dead keys look healthy.
+    assert.match(capturedUrl, /openrouter\.ai\/api\/v1\/key$/);
+    assert.doesNotMatch(capturedUrl, /\/models/);
     assert.equal(capturedHeaders["Authorization"], "Bearer sk-or-test");
   });
 });

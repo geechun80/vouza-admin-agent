@@ -22,6 +22,7 @@
 
 import nodemailer from "nodemailer";
 import type { StepResult } from "../types.js";
+import { recordNet } from "../../util/netActivity.js";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
@@ -36,6 +37,7 @@ export interface SmtpProbeOpts {
 }
 
 function defaultTransporterFactory(cfg: any) {
+  recordNet(cfg?.host || "smtp", "SMTP check", { category: "Email" });
   return nodemailer.createTransport(cfg) as unknown as {
     verify: () => Promise<unknown>;
     close: () => void;

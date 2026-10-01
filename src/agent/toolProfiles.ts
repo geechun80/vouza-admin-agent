@@ -37,7 +37,8 @@ export const READ_ONLY_TOOL_NAMES: readonly string[] = [
   "read_spreadsheet",
   "search_spreadsheet",
   "search_memory",
-  "web_search",
+  // No web_search: nobody is there to ask before going online, and the
+  // search words could carry private text an injected email planted.
 ];
 
 /** Scheduled runs: read-only + private, reversible inbox housekeeping. */

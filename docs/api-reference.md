@@ -244,7 +244,7 @@ reported as `$0` (you control your own platform limits).
 ### `GET /api/connection-test`
 
 Live diagnostic that hits every configured integration's real endpoint and
-reports per-integration pass/fail with the specific error. The page Aerick
+reports per-integration pass/fail with the specific error. The page a beta tester
 asked for after seeing ✓ checkmarks alongside actual 401s. CSRF-guarded.
 
 ### `GET /api/recent-logs?limit=N`
@@ -294,7 +294,7 @@ Request body:
   "imageBase64":  "(optional)",
   "imageMimeType":"(optional, when imageBase64 present)",
   "wizardStep":   2,
-  "userName":     "Aerick",
+  "userName":     "Sarah",
   "attachedFileContent": "(optional .json/.txt body, capped at 200 KB)",
   "attachedFileName":    "(optional)"
 }

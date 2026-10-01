@@ -5,6 +5,7 @@
 import { z } from "zod";
 import { buildTool } from "./registry.js";
 import { google } from "googleapis";
+import { recordNet } from "../util/netActivity.js";
 
 // --- List Events ---
 
@@ -264,6 +265,7 @@ export const deleteEventTool = buildTool({
 });
 
 async function getCalendarAuth(context: any) {
+  recordNet("www.googleapis.com", "Google Calendar API", { category: "Google account" });
   const keyPath = context.config.tools.googleServiceAccount;
   if (keyPath) {
     return new google.auth.GoogleAuth({

@@ -62,10 +62,28 @@ export const CONFIRM_PROMPT = "👉 Reply *YES* to send it, or *NO* to cancel.";
 const PHONE_REGISTRY_MARK = Symbol.for("vouza.phoneRegistry");
 
 export interface PendingAction {
+  /**
+   * "send"   — acting toward other people; YES runs the stored action.
+   * "online" — going online (web search / opening a site); YES lets the
+   *            model do it on the next turn so it can read the results.
+   */
+  kind:      "send" | "online";
   toolName:  string;
   summary:   string;
   createdAt: number;
-  execute:   () => Promise<ToolResult>;
+  execute?:  () => Promise<ToolResult>;
+}
+
+export const ONLINE_CONFIRM_PROMPT = "👉 Reply *YES* to let me go online for this, or *NO* to stay offline.";
+
+/** The question appended under the reply — chosen by code, never by the model. */
+export function confirmPromptFor(p: PendingAction): string {
+  return p.kind === "online" ? ONLINE_CONFIRM_PROMPT : CONFIRM_PROMPT;
+}
+
+/** Park a request to go online until the person answers YES/NO (see webGate.ts). */
+export function parkOnlineRequest(ch: PhoneChannel, toolName: string, summary: string): void {
+  pending.set(channelKey(ch), { kind: "online", toolName, summary, createdAt: Date.now() });
 }
 
 const pending = new Map<string, PendingAction>();
@@ -121,6 +139,7 @@ export function wrapWithConfirmation(tool: ToolDefinition): ToolDefinition {
       if (!ctx.channel) return tool.call(input, ctx);
       const summary = describeAction(tool.name, input);
       pending.set(channelKey(ctx.channel), {
+        kind:      "send",
         toolName:  tool.name,
         summary,
         createdAt: Date.now(),
@@ -203,6 +222,8 @@ export interface PendingResolution {
   /** true → the listener must reply with `reply` and NOT run the model */
   handled: boolean;
   reply?:  string;
+  /** true → the person said YES to going online: allow web tools this turn */
+  grantOnline?: boolean;
 }
 
 /**
@@ -222,12 +243,19 @@ export async function resolvePendingReply(
   if (now - p.createdAt > PENDING_TTL_MS) return { handled: false };
 
   const intent = classifyReply(text);
+  if (p.kind === "online") {
+    if (intent === "cancel") return { handled: true, reply: "👍 OK — I'll stay offline." };
+    // YES → the model runs now with web access for this one turn, so it can
+    // read the results and answer. Anything else → stays offline, normal turn.
+    return intent === "confirm" ? { handled: false, grantOnline: true } : { handled: false };
+  }
+
   if (intent === "cancel") return { handled: true, reply: "👍 Cancelled — nothing was sent." };
   if (intent !== "confirm") return { handled: false };
 
   let result: ToolResult;
   try {
-    result = await p.execute();
+    result = await p.execute!();
   } catch (err) {
     result = { success: false, error: err instanceof Error ? err.message : String(err) };
   }

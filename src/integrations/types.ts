@@ -6,7 +6,7 @@
 //   Voice) currently has bespoke code for: starting, checking health,
 //   resetting on failure, surfacing errors. That's 8+ different shapes of
 //   integration code → 8+ different ways things can silently fail → 8+
-//   different debugging stories for non-technical users like Aerick.
+//   different debugging stories for non-technical users like our beta testers.
 //
 // SOLUTION:
 //   Every integration implements the Integration interface below. The

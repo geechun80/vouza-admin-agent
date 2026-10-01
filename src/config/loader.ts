@@ -13,7 +13,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 import type { AgentConfig } from "../types/index.js";
 import type { AIProvider } from "./models.js";
-import { findModel, getProviderForModel } from "./models.js";
+import {
+  findModel,
+  getProviderForModel,
+  DEFAULT_MODEL,
+  DEFAULT_PROVIDER,
+  DEFAULT_OPERATOR_PROVIDER,
+  DEFAULT_OPERATOR_MODEL,
+} from "./models.js";
 import { DEFAULT_OPENROUTER_TIERS } from "../agent/router.js";
 
 const CONFIG_JSON_PATH = join(__dirname, "..", "..", "data", "config.json");
@@ -33,9 +40,12 @@ const DEFAULT_GOOGLE_SCOPES = [
 export function loadConfig(): AgentConfig {
   loadEnv();
 
-  const model = process.env.AGENT_MODEL || "claude-sonnet-4-6";
+  const model = process.env.AGENT_MODEL || DEFAULT_MODEL;
   const modelInfo = findModel(model);
-  const provider = (modelInfo?.provider || process.env.AI_PROVIDER || "anthropic") as AIProvider;
+  // Local AI models aren't in the cloud catalog — AI_PROVIDER=ollama says so explicitly.
+  const provider = (process.env.AI_PROVIDER === "ollama"
+    ? "ollama"
+    : (modelInfo?.provider || process.env.AI_PROVIDER || DEFAULT_PROVIDER)) as AIProvider;
 
   // Collect all API keys from env
   const apiKeys: Record<string, string> = {
@@ -47,6 +57,8 @@ export function loadConfig(): AgentConfig {
     alibaba:     process.env.DASHSCOPE_API_KEY    || "",
     moonshot:    process.env.MOONSHOT_API_KEY     || "",
     openrouter:  process.env.OPENROUTER_API_KEY   || "",
+    // Local AI needs no key; the placeholder keeps "has a key" checks simple.
+    ollama:      provider === "ollama" ? "ollama" : "",
   };
 
   // Ensure at least the selected provider has a key
@@ -132,15 +144,15 @@ export async function loadConfigFromJson(): Promise<AgentConfig> {
       baseConfig = loadConfig();
     } catch {
       // If env config fails, build minimal config from JSON
-      const model = saved.agent?.model || "claude-sonnet-4-6";
+      const model = saved.agent?.model || DEFAULT_MODEL;
       const modelInfo = findModel(model);
-      const provider = (modelInfo?.provider || "anthropic") as AIProvider;
+      const provider = (modelInfo?.provider || DEFAULT_PROVIDER) as AIProvider;
 
       baseConfig = {
         name: saved.agent?.name || "AdminAgent",
         model,
         provider,
-        apiKeys: { anthropic: "", openai: "", google: "", xai: "", deepseek: "", alibaba: "", moonshot: "", openrouter: "" } as Record<AIProvider, string>,
+        apiKeys: { anthropic: "", openai: "", google: "", xai: "", deepseek: "", alibaba: "", moonshot: "", openrouter: "", ollama: "" } as Record<AIProvider, string>,
         memoryDir: "./data/memory",
         skillsDir: "./src/skills/bundled",
         logDir: "./data/logs",
@@ -159,6 +171,21 @@ export async function loadConfigFromJson(): Promise<AgentConfig> {
         if (modelInfo) baseConfig.provider = modelInfo.provider;
       }
     }
+
+    // Local AI (Ollama): the model name is whatever the user installed, so it
+    // isn't in the cloud catalog — the saved provider is authoritative. A
+    // placeholder key means the operator fallback below never swaps a
+    // local-AI user onto a cloud provider.
+    if (saved.agent?.provider === "ollama" && saved.agent?.model) {
+      baseConfig.provider       = "ollama";
+      baseConfig.model          = String(saved.agent.model);
+      baseConfig.apiKeys.ollama = "ollama";
+      if (saved.agent.ollamaBaseUrl) baseConfig.ollamaBaseUrl = String(saved.agent.ollamaBaseUrl);
+    }
+
+    // Learning steps (reflection, skill writing, self-improvement) send the
+    // conversation to the AI provider again — on unless switched off.
+    if (saved.learnFromConversations === false) baseConfig.learnFromConversations = false;
 
     // Merge API keys from saved credentials
     if (saved.credentials) {
@@ -187,8 +214,8 @@ export async function loadConfigFromJson(): Promise<AgentConfig> {
     // pasted their own key, that always takes priority — no behavior
     // change for the established-key path.
     const operatorKey      = (process.env.VOUZA_API_KEY      || "").trim();
-    const operatorProvider = ((process.env.VOUZA_API_PROVIDER || "openrouter") as AIProvider);
-    const operatorModel    = (process.env.VOUZA_API_MODEL    || "google/gemini-2.5-flash-lite").trim();
+    const operatorProvider = ((process.env.VOUZA_API_PROVIDER || DEFAULT_OPERATOR_PROVIDER) as AIProvider);
+    const operatorModel    = (process.env.VOUZA_API_MODEL    || DEFAULT_OPERATOR_MODEL).trim();
     if (operatorKey) {
       const activeKey = baseConfig.apiKeys[baseConfig.provider];
       if (!activeKey || activeKey.trim().length === 0) {

@@ -2,7 +2,7 @@
 // Orchestrator Types — stateful self-healing integration setup
 //
 // The orchestrator replaces ad-hoc tool calls (which led to LLM retry loops —
-// Aerick 2026-05-27 incident) with a fixed pipeline per integration:
+// beta-tester incident, 2026-05-27) with a fixed pipeline per integration:
 //
 //   detect → validate → test → save → confirm → live-test
 //

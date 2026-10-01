@@ -6,7 +6,7 @@
 
 Email · Calendar · WhatsApp · Telegram · Files · Voice · Web search — all in one agent.
 
-[![Tests](https://img.shields.io/badge/tests-402%2F402-brightgreen)](#)
+[![Tests](https://img.shields.io/badge/tests-598%2F598-brightgreen)](#)
 [![Node](https://img.shields.io/badge/node-20.19%2B-blue)](https://nodejs.org)
 [![Audit](https://img.shields.io/badge/npm%20audit-0%20vulnerabilities-brightgreen)](#)
 [![License](https://img.shields.io/badge/license-private-lightgrey)](#)
@@ -103,7 +103,7 @@ Open the dashboard and press **Get Started**. Five screens, one question each:
 
 | Screen | You do | The agent does |
 |---|---|---|
-| **You** | Type your name; paste an AI key (skipped if a built-in key works) | Works out which AI the key belongs to and checks it live |
+| **You** | Type your name; paste an AI key (skipped if a built-in key works) — or pick **a local AI on this computer** | Works out which AI the key belongs to and checks it live; for local AI, finds Ollama and lists your models |
 | **Email** | Type your address + App Password | Finds the mail servers (including Google Workspace / Microsoft 365 on your own domain), signs in to read **and** send, shows your unread count |
 | **Documents** | Tick Documents / Desktop / Downloads | Grants **read-only** access — it can never delete or change files |
 | **Phone** | Scan a QR with WhatsApp (or tap a Telegram link) | Starts itself, links your phone, says hello in "Message yourself" |
@@ -126,6 +126,8 @@ You only need **one**. Paste it into Quick Setup (or the Advanced wizard) — no
 | DeepSeek / xAI / Groq | See respective console | — |
 
 > 💡 **OpenRouter recommended** if you want to try different models without managing multiple keys.
+
+**No key at all — local AI.** Install [Ollama](https://ollama.com/download) (free), run `ollama pull qwen2.5:7b` once, then in Quick Setup tap **💻 Or use a local AI on this computer**. Your conversations are answered on your own computer and never go to an AI company. It's slower than a cloud AI and needs a reasonably recent computer (8 GB+ memory); pick a model that supports tools (qwen2.5, llama3.1) so it can read your email and files. A local-AI setup never falls back to a cloud provider, even if Ollama stops — it tells you instead. Ollama on another address: set `OLLAMA_BASE_URL`.
 
 ---
 
@@ -204,7 +206,7 @@ After the wizard, use the **🔌 Setup** panel in the dashboard to connect chann
 
 ## 📱 Using it from your phone
 
-Message it in WhatsApp's **"Message yourself"** chat (or your Telegram bot). Phone chats get a deliberately small toolset: read and send email, search the folders you shared, **send you the actual file**, read your calendar, search the web, remember things. Deleting, running commands, browsing, changing settings — desktop only.
+Message it in WhatsApp's **"Message yourself"** chat (or your Telegram bot). Phone chats get a deliberately small toolset: read and send email, search the folders you shared, **send you the actual file**, read your calendar, look things up online when you ask, remember things. Deleting, running commands, browsing, changing settings — desktop only.
 
 - **Nothing is sent without your YES.** When the agent wants to send or reply to an email, it shows who, the subject and any attachments, then waits. Reply `yes` (or tap ✅ on Telegram) to send, `no` to cancel; anything else cancels. This is enforced in code — text inside an email or document can't trigger a send — and a voice note never counts as YES.
 - **Files come to you.** "Find my insurance policy and send it to me" delivers the PDF in the chat (up to 45 MB, shared folders only).
@@ -220,11 +222,26 @@ The agent reads untrusted text all day — incoming emails, documents, web pages
 |---|---|
 | **You, on the laptop dashboard** | Everything you've connected (you see every step) |
 | **You, from your phone** | Read and search; send email only after your **YES**; send files to you |
-| **Scheduled runs** (morning briefing, weekly report, scheduled skills) | Read and search, draft emails, label/star/mark read — **never** send, archive, trash, write files, browse or change memory |
+| **Scheduled runs** (morning briefing, weekly report, scheduled skills) | Read and search your own mail/files, draft emails, label/star/mark read — **never** send, archive, trash, write files, search the web, browse or change memory |
 | **Other people** (AgentMail, WAHA) | Only senders you allow-listed. AgentMail: read-only. WAHA: same as your phone |
 
+- **Online only when you ask.** Searching the web or opening a website runs only when *your own message* asks for it ("search online…", "google…", "what's the weather", a web address). Otherwise the agent shows exactly what it would search or open and waits for your **YES** — so an email can't make it look up your private details online. Enforced in code, on every channel.
 - **Maintenance commands are off.** The setup assistant tells you which command to type instead. Admins can enable a locked-down version with `SHELL_TOOL_ENABLED=true` (one plain `npm`/`pm2`/`git` command at a time — no chaining, scripts or URLs).
 - **Upgrading with WAHA or AgentMail?** Both now ignore everyone who isn't allow-listed. Add the numbers/addresses that should reach the agent (WhatsApp card → allowed senders; `agentmail.allowedSenders`). AgentMail always accepts your own email address.
+
+### 🌐 What leaves your computer
+
+Your files, memories and chat history stay on the computer. The agent contacts only:
+
+| Service | When |
+|---|---|
+| Your AI model (cloud) | Each message you send, to answer it. **Local AI: nothing leaves the computer.** |
+| Your email / Google / Microsoft account | When it reads or sends mail or checks your calendar |
+| WhatsApp / Telegram | To receive your messages and reply |
+| Web search / websites | Only when you ask (see above) |
+| Health checks | Every 15 minutes, a quick "is this key still valid?" to each service you connected (`HEALTH_PROBE_INTERVAL_MS` to change) |
+
+**See it for yourself:** System Health → **🔒 Privacy & network** lists every service contacted since the dashboard started, how often, and why (your message, scheduled task, health check, setup…). The same panel has a **Learn from conversations** switch — when on, the agent re-reads finished chats with your AI to save reusable skills; turn it off and that never happens.
 
 ---
 

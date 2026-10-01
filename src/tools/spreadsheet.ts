@@ -5,6 +5,7 @@
 import { z } from "zod";
 import { buildTool } from "./registry.js";
 import { google } from "googleapis";
+import { recordNet } from "../util/netActivity.js";
 
 // --- Read Spreadsheet ---
 
@@ -133,6 +134,7 @@ export const searchSpreadsheetTool = buildTool({
 });
 
 async function getSheetsAuth(context: any) {
+  recordNet("sheets.googleapis.com", "Google Sheets API", { category: "Google account" });
   const keyPath = context.config.tools.googleServiceAccount;
   if (keyPath) {
     return new google.auth.GoogleAuth({

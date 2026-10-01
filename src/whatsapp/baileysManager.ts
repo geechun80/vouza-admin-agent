@@ -45,8 +45,10 @@ import {
   resolvePendingReply,
   pendingCreatedSince,
   recordExchange,
-  CONFIRM_PROMPT,
+  confirmPromptFor,
 } from "../agent/phoneMode.js";
+import { startTurn } from "../agent/webGate.js";
+import { withTrigger, recordNet, hostOf } from "../util/netActivity.js";
 import type { FileToSend }         from "../tools/sendFile.js";
 
 // ---------------------------------------------------------------------------
@@ -282,6 +284,8 @@ function _spawnWorker(): void {
     `  [WhatsApp] Spawning Baileys worker (attempt ${_restartCount + 1})…`
   ));
 
+  // The worker runs in its own process, so its connection is recorded here.
+  recordNet("web.whatsapp.com", "WhatsApp connection", { category: "Messaging" });
   const child = fork(WORKER_PATH, [], {
     // stdio[0..2] piped so we can forward logs; ipc channel [3] added by fork
     stdio: ["pipe", "pipe", "pipe", "ipc"],
@@ -301,7 +305,7 @@ function _spawnWorker(): void {
   // allowlist the agent would auto-reply to every friend who texts the user.
   // Read the allowlist from the user's saved config — defaults to empty,
   // which means only the owner (the WhatsApp account itself) can talk to
-  // the agent. Aerick can add additional senders via the dashboard.
+  // the agent. The owner can add additional senders via the dashboard.
   const waCfg = (_baseCtx?.config as any)?.tools?.whatsapp?.config ?? {};
   const rawAllowed = waCfg.allowedSenders ?? waCfg.allowlist ?? [];
   const allowedSenders: string[] = Array.isArray(rawAllowed)
@@ -339,7 +343,7 @@ function _spawnWorker(): void {
 
     // Cap the restart count to prevent infinite loops when auth is
     // unrecoverably broken (e.g. WhatsApp banned the device). Reported by
-    // Aerick (2026-05-26): re-scanning the same number caused an infinite
+    // Beta-tester report (2026-05-26): re-scanning the same number caused an infinite
     // restart loop that effectively hung the agent.
     const MAX_RESTART_ATTEMPTS = 5;
     if (_restartCount >= MAX_RESTART_ATTEMPTS) {
@@ -431,7 +435,7 @@ function _handleWorkerMessage(msg: any): void {
       // Phase 1 queue gate
       const q      = chatQueues.getOrCreate(chatId);
       const result = q.enqueue(
-        () => _processIncoming(chatId, fromName, text, isVoice),
+        () => withTrigger("your message (WhatsApp)", () => _processIncoming(chatId, fromName, text, isVoice)),
         `wa:${chatId.split("@")[0]}:${text.slice(0, 30)}`
       );
 
@@ -491,6 +495,11 @@ async function _processIncoming(
 
   // Per-chat isolated session
   const session = _getOrCreateSession(chatId);
+  if (isVoice && _baseCtx) {
+    // The worker sent the voice note for transcription before handing us the text.
+    const w = resolveWhisperConfig(_baseCtx.config);
+    if (w) recordNet(hostOf(w.baseUrl), "voice note transcription", { category: "AI model" });
+  }
 
   // A send waiting for YES/NO is answered here, before the model runs — the
   // model can never complete a send by itself. Voice transcripts arrive
@@ -501,6 +510,8 @@ async function _processIncoming(
     _worker?.send({ type: "send_reply", chatId, text: pendingReply.reply });
     return;
   }
+  // Web tools work this turn only if the owner's own words asked to go online.
+  startTurn(session, text, pendingReply.grantOnline);
 
   const framedInput = isVoice
     ? text  // voice already framed by worker ("🎙️ [Voice message from …]: …")
@@ -522,8 +533,10 @@ async function _processIncoming(
 
   let reply = response.trim();
   // Never rely on the model to phrase the confirmation ask.
-  if (pendingCreatedSince(session.channel!, turnStartedAt)) {
-    reply = reply ? `${reply}\n\n${CONFIRM_PROMPT}` : CONFIRM_PROMPT;
+  const parked = pendingCreatedSince(session.channel!, turnStartedAt);
+  if (parked) {
+    const ask = confirmPromptFor(parked);
+    reply = reply ? `${reply}\n\n${ask}` : ask;
   }
   if (reply && _worker) {
     _worker.send({ type: "send_reply", chatId, text: reply });

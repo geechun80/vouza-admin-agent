@@ -4,16 +4,18 @@
 // Third adapter in the Tier 1 migration. Critical because EVERY user
 // message goes through the AI provider — a single misconfigured key
 // silently breaks every channel at once (which is exactly what hit
-// Aerick: ✓ Telegram + ✓ AI Model badges but 401 on every reply).
+// Beta tester: ✓ Telegram + ✓ AI Model badges but 401 on every reply).
 //
 // Probes the resolved provider+key (uses same resolution logic as
 // loader.ts) by hitting /models. Mirrors what the connection-test
 // endpoint does but lives in the unified registry so the HealthMonitor
-// catches AI auth failures every 60s instead of only on demand.
+// catches AI auth failures on its regular sweep instead of only on demand.
 // =============================================================================
 
 import type { Integration, IntegrationProbe, IntegrationStatusReport } from "./types.js";
 import type { AgentContext } from "../types/index.js";
+import type { AIProvider } from "../config/models.js";
+import { keyCheckRequest } from "../config/providerEndpoints.js";
 
 const PROBE_TIMEOUT_MS = 8_000;
 
@@ -24,51 +26,9 @@ function maskKey(k: string | undefined): string | undefined {
 }
 
 /** Build the canonical /models URL + auth headers for a given provider. */
-function buildProviderRequest(provider: string, apiKey: string): { url: string; headers: Record<string, string> } {
-  const headers: Record<string, string> = {};
-  let url: string;
-
-  switch (provider) {
-    case "anthropic":
-      url = "https://api.anthropic.com/v1/models";
-      headers["x-api-key"] = apiKey;
-      headers["anthropic-version"] = "2023-06-01";
-      break;
-    case "openrouter":
-      url = "https://openrouter.ai/api/v1/models";
-      headers["Authorization"] = `Bearer ${apiKey}`;
-      break;
-    case "google":
-      // Google AI uses ?key=… not a header
-      url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
-      break;
-    case "openai":
-      url = "https://api.openai.com/v1/models";
-      headers["Authorization"] = `Bearer ${apiKey}`;
-      break;
-    case "xai":
-      url = "https://api.x.ai/v1/models";
-      headers["Authorization"] = `Bearer ${apiKey}`;
-      break;
-    case "deepseek":
-      url = "https://api.deepseek.com/v1/models";
-      headers["Authorization"] = `Bearer ${apiKey}`;
-      break;
-    case "moonshot":
-      url = "https://api.moonshot.cn/v1/models";
-      headers["Authorization"] = `Bearer ${apiKey}`;
-      break;
-    case "alibaba":
-      url = "https://dashscope.aliyuncs.com/compatible-mode/v1/models";
-      headers["Authorization"] = `Bearer ${apiKey}`;
-      break;
-    default:
-      // Best-effort fallback for OpenAI-compatible providers
-      url = `https://api.${provider}.com/v1/models`;
-      headers["Authorization"] = `Bearer ${apiKey}`;
-  }
-
-  return { url, headers };
+/** Free, auth-gated key check from the shared endpoint table (Rule 66). */
+function buildProviderRequest(provider: string, apiKey: string, ollamaUrl?: string): { url: string; headers: Record<string, string> } {
+  return keyCheckRequest(provider as AIProvider, apiKey, { ollamaBaseUrl: ollamaUrl });
 }
 
 export class AIProviderIntegration implements Integration {
@@ -113,7 +73,11 @@ export class AIProviderIntegration implements Integration {
     let activeKey = userKey;
     this._activeKeySource = "user";
 
-    if (!activeKey || !activeKey.trim()) {
+    if (userProvider === "ollama") {
+      // Local AI: no key, and never probe a cloud provider on its behalf —
+      // just check that the local AI on this computer is running.
+      this._activeKeySource = "user";
+    } else if (!activeKey || !activeKey.trim()) {
       // Try operator fallback (loader.ts also does this)
       const operatorKey = (process.env.VOUZA_API_KEY || "").trim();
       const operatorProvider = (process.env.VOUZA_API_PROVIDER || "openrouter");
@@ -136,7 +100,7 @@ export class AIProviderIntegration implements Integration {
     }
 
     this._activeProvider = activeProvider;
-    const { url, headers } = buildProviderRequest(activeProvider, activeKey);
+    const { url, headers } = buildProviderRequest(activeProvider, activeKey, ctx.config.ollamaBaseUrl);
 
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS);

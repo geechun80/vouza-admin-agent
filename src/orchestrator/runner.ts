@@ -69,7 +69,7 @@ async function runWithTimeout<T>(
  * or the LAST failure (the one from the final fallback).
  *
  * Fallbacks are silent — they only show up in the attempts log, never in the
- * surfaced error message (Aerick feedback: stop showing the LLM internal retry
+ * surfaced error message (beta-tester feedback: stop showing the LLM internal retry
  * noise).
  */
 async function runStepWithFallbacks(
