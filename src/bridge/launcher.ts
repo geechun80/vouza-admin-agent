@@ -39,8 +39,9 @@ import { saveMemoryTool, searchMemoryTool, forgetMemoryTool, updateMemoryTool, l
 import { transcribeAudioTool, transcribeAndSummarizeTool } from "../tools/voice.js";
 import { getSetupStatusTool, saveIntegrationCredentialsTool } from "../tools/setup.js";
 import { startKeepAwake, stopKeepAwake } from "../util/keepAwake.js";
+import { buildScheduledRegistry } from "../agent/toolProfiles.js";
 import { webSearchTool } from "../tools/webSearch.js";
-import { runShellCommandTool } from "../tools/shell.js";
+import { runShellCommandTool, isShellToolEnabled } from "../tools/shell.js";
 // Browser tools (Phase 4) — main agent can browse allowlisted sites.
 // Playwright is lazily imported inside the browser manager; if it isn't
 // installed the tools return a clear, actionable error instead of crashing.
@@ -183,8 +184,9 @@ export async function launchAgent(): Promise<AgentInstance> {
   registry.register(getSetupStatusTool as any);
   registry.register(saveIntegrationCredentialsTool as any);
 
-  // Shell — sandboxed whitelisted commands (npm, pm2, git, node)
-  registry.register(runShellCommandTool as any);
+  // Shell — sandboxed maintenance commands. Only offered to the model when an
+  // admin opted in (SHELL_TOOL_ENABLED=true); otherwise the model never sees it.
+  if (isShellToolEnabled()) registry.register(runShellCommandTool as any);
 
   const activeModules = [
     hasEmail     && "email",
@@ -223,7 +225,10 @@ export async function launchAgent(): Promise<AgentInstance> {
   console.log(chalk.green(`  Self-improvement engine initialized`));
 
   // --- Init Task Scheduler ---
-  const scheduler = new TaskScheduler(context, registry, skills);
+  // Scheduled runs (briefings, reports, skills) are unattended and read
+  // untrusted email — they get read-only tools plus private, reversible
+  // housekeeping, never sends/deletes/files/shell (see toolProfiles.ts).
+  const scheduler = new TaskScheduler(context, buildScheduledRegistry(registry), skills);
 
   console.log(chalk.bold.green(`\n  ${config.name} is running!\n`));
 

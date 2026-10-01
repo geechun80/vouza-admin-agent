@@ -464,7 +464,7 @@ to know when each step completed.
 | `SETUP_BROWSER_TTL_MS`         | `600000`    | Inactivity timeout for browser sessions (default 10 min) |
 | `PLAYWRIGHT_HEADED`            | `false`     | `true` to show the browser window (useful for OAuth consent) |
 | `SETUP_AGENT_ENABLED`          | `false`     | Master switch for the Playwright-based setup agent      |
-| `SHELL_TOOL_ENABLED`           | `true`      | Set to `false` to disable the sandboxed shell tool entirely |
+| `SHELL_TOOL_ENABLED`           | `false`     | Set to `true` (admins only) to offer the sandboxed maintenance shell to the dashboard chat. One plain command at a time; never available to phone chats, scheduled runs or outside senders |
 | `PM2_ALLOWED_SERVICES`         | `admin-agent` | Comma-separated services the shell tool may `pm2 start/stop` |
 | `OAUTH_CALLBACK_PORT`          | (default)   | Local port for the OAuth helper                         |
 

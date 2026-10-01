@@ -22,6 +22,18 @@ import type { AgentContext } from "../types/index.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { agentLoop } from "../agent/loop.js";
 import { ChannelQueues } from "../agent/queue.js";
+import {
+  buildPhoneRegistry,
+  resolvePendingReply,
+  pendingCreatedSince,
+  discardPending,
+  recordExchange,
+  CONFIRM_PROMPT,
+} from "../agent/phoneMode.js";
+import { isWahaSenderAllowed } from "../agent/senderPolicy.js";
+
+// Chats refused by the allowlist — log once each, not on every message.
+const refusedLogged = new Set<string>();
 import { transcribeAudioBuffer, mimeFromFilename, resolveWhisperConfig, WHISPER_NO_KEY_MSG } from "../voice/transcriber.js";
 
 const MAX_MSG_LEN = 3800; // WhatsApp practical limit
@@ -74,6 +86,25 @@ export function handleWAHAEvent(
   const payload = event.payload;
   if (!payload || !payload.from) return;
   if (payload.fromMe)           return; // never reply to our own messages
+
+  // ── SAFETY GATE: deny by default ────────────────────────────────────────
+  // This number is reachable by anyone, so only allow-listed senders are
+  // served (same allowlist the WhatsApp card saves). Groups, LIDs and an
+  // empty allowlist are all refused — silently, so spammers learn nothing.
+  const waCfg: any = (baseCtx.config.tools?.whatsapp as any)?.config ?? {};
+  if (!isWahaSenderAllowed(payload.from, waCfg.allowedSenders ?? waCfg.allowlist)) {
+    if (!refusedLogged.has(payload.from)) {
+      refusedLogged.add(payload.from);
+      console.warn(chalk.yellow(
+        `  [WhatsApp/WAHA] Ignored message from ${payload.notifyName || "unknown"} — not on the allowed-senders list`
+      ));
+    }
+    return;
+  }
+
+  // Phone chats get the small, confirmation-gated toolset. File delivery is
+  // Baileys-only for now, so it's left out here.
+  registry = buildPhoneRegistry(registry, { exclude: ["send_file_to_me"] });
 
   const chatId:   string = payload.from;      // "6512345678@c.us"
   const fromName: string = payload.notifyName || payload.from.split("@")[0] || "User";
@@ -158,6 +189,21 @@ async function executeWAMessage(job: WAMessageJob): Promise<void> {
 
     // ── Run agent ──────────────────────────────────────────────────────────
     const session = getOrCreateSession(chatId, baseCtx);
+    const ch = session.context.channel!;
+
+    // A send waiting for YES/NO is answered here, before the model runs; a
+    // voice transcript never counts as YES but does supersede it.
+    if (isVoice) {
+      discardPending(ch);
+    } else {
+      const pendingReply = await resolvePendingReply(ch, userText);
+      if (pendingReply.handled) {
+        recordExchange(session.context, userText, pendingReply.reply!);
+        await sendWAHAText(chatId, pendingReply.reply!, baseCtx);
+        return;
+      }
+    }
+    const turnStartedAt = Date.now();
     let response  = "";
 
     // Frame as external input to reduce prompt injection risk
@@ -173,7 +219,10 @@ async function executeWAMessage(job: WAMessageJob): Promise<void> {
       }
     }
 
-    const reply = response.trim();
+    let reply = response.trim();
+    if (pendingCreatedSince(ch, turnStartedAt)) {
+      reply = reply ? `${reply}\n\n${CONFIRM_PROMPT}` : CONFIRM_PROMPT;
+    }
     if (reply) await sendWAHAText(chatId, reply, baseCtx);
 
   } catch (err) {
@@ -331,6 +380,7 @@ function getOrCreateSession(chatId: string, baseCtx: AgentContext): WASession {
         turnCount: 0,
         messages:  [],
         taskQueue: [],
+        channel:   { kind: "whatsapp", chatId },
       },
       lastActive: Date.now(),
     });

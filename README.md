@@ -212,6 +212,20 @@ Message it in WhatsApp's **"Message yourself"** chat (or your Telegram bot). Pho
 
 **Keeping it reachable while you're away.** While the agent runs, it asks the computer not to idle-sleep (Windows, macOS, Linux with systemd) and lets go when it stops — even after a crash. It can't override the lid: if closing the lid puts your laptop to sleep, the agent stops answering until you open it. Quick Setup checks this setting and offers a **Change lid setting** button (Windows: *When I close the lid → Do nothing* for *Plugged in*). Keep the laptop plugged in. If the computer does sleep: Telegram messages are answered when it wakes (Telegram holds them for 24 hours); WhatsApp messages sent during the sleep are not answered — send them again.
 
+### 🛡️ Safety defaults
+
+The agent reads untrusted text all day — incoming emails, documents, web pages — so what it can *do* depends on who is talking to it:
+
+| Who / when | What it can do |
+|---|---|
+| **You, on the laptop dashboard** | Everything you've connected (you see every step) |
+| **You, from your phone** | Read and search; send email only after your **YES**; send files to you |
+| **Scheduled runs** (morning briefing, weekly report, scheduled skills) | Read and search, draft emails, label/star/mark read — **never** send, archive, trash, write files, browse or change memory |
+| **Other people** (AgentMail, WAHA) | Only senders you allow-listed. AgentMail: read-only. WAHA: same as your phone |
+
+- **Maintenance commands are off.** The setup assistant tells you which command to type instead. Admins can enable a locked-down version with `SHELL_TOOL_ENABLED=true` (one plain `npm`/`pm2`/`git` command at a time — no chaining, scripts or URLs).
+- **Upgrading with WAHA or AgentMail?** Both now ignore everyone who isn't allow-listed. Add the numbers/addresses that should reach the agent (WhatsApp card → allowed senders; `agentmail.allowedSenders`). AgentMail always accepts your own email address.
+
 ---
 
 ## 🛠️ Running 24/7

@@ -144,10 +144,11 @@ export function wrapWithConfirmation(tool: ToolDefinition): ToolDefinition {
  * Build the phone registry from the full one. Idempotent — passing a phone
  * registry back in returns it unchanged, so nested callers can't double-wrap.
  */
-export function buildPhoneRegistry(full: ToolRegistry): ToolRegistry {
+export function buildPhoneRegistry(full: ToolRegistry, opts: { exclude?: readonly string[] } = {}): ToolRegistry {
   if ((full as any)[PHONE_REGISTRY_MARK]) return full;
   const phone = new ToolRegistry();
   for (const name of PHONE_TOOL_NAMES) {
+    if (opts.exclude?.includes(name)) continue;
     const tool = name === sendFileToMeTool.name ? (full.get(name) ?? sendFileToMeTool) : full.get(name);
     if (!tool) continue;
     phone.register(CONFIRM_TOOL_NAMES.has(name) ? wrapWithConfirmation(tool) : tool);

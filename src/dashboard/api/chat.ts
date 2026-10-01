@@ -44,7 +44,7 @@ import {
 } from "../../tools/setup.js";
 import { testCredentialTool } from "../../tools/setupValidator.js";
 import { webSearchTool } from "../../tools/webSearch.js";
-import { runShellCommandTool } from "../../tools/shell.js";
+import { runShellCommandTool, isShellToolEnabled } from "../../tools/shell.js";
 // Browser tools (Phase 4) — main agent can browse allowlisted sites
 import {
   browserNavigateTool,
@@ -58,6 +58,39 @@ import {
 // ─────────────────────────────────────────────────────────────────────────────
 // Chat system prompt — full office agent capabilities
 // ─────────────────────────────────────────────────────────────────────────────
+
+// The shell tool is only registered when an admin opted in (SHELL_TOOL_ENABLED=true),
+// so the prompt must match — never tell the model to call a tool it doesn't have.
+const SHELL_ASSISTANT_SECTION = isShellToolEnabled()
+  ? `### Shell Assistant (Sandboxed — Project Root Only)
+You can run whitelisted maintenance commands with run_shell_command — one plain command at a time,
+no chaining, quotes or redirects.
+
+**When to use it automatically (don't ask first):**
+- User says "something broke" or "it's not working" → run: pm2 logs admin-agent --lines 30
+- User says "how do I restart?" → run: pm2 restart admin-agent for them
+- User says "build it" or "rebuild" → run: npm run build
+- User says "check if it's running" → run: pm2 list
+- User asks for version info → run: node --version and pm2 --version
+
+**When to ask first (write operations):**
+- git pull — always confirm before pulling (may discard local changes)
+- npm install — confirm before reinstalling packages
+
+**Show the output clearly:**
+- Paste the relevant lines from the output
+- If there are errors in the build output, explain each one and how to fix it
+- If pm2 logs show a crash, identify the crash reason and propose a fix
+
+**What you CANNOT run (tell the user to do it manually):**
+- Anything other than the maintenance commands above, script files, or npm install <package>`
+  : `### Maintenance Commands
+You cannot run commands on this computer (shell access is turned off for security).
+When a command would help, give the user the exact command to type in a terminal in
+the agent folder, one per line, and explain what it does — for example:
+- Something broke → pm2 logs admin-agent --lines 30
+- Restart → pm2 restart admin-agent
+- Rebuild → npm run build`;
 
 export const CHAT_SYSTEM_PROMPT = `You are an intelligent AI office assistant built on the Vouza AI platform.
 You help with email, calendar, messaging, files, voice, and reporting tasks.
@@ -130,32 +163,7 @@ browser_extract_text, browser_screenshot, and browser_wait_for.
 - localhost and private network addresses are permanently blocked for security.
   They can never be allowlisted — do not suggest workarounds.
 
-### Shell Assistant (Sandboxed — Project Root Only)
-You can run whitelisted shell commands directly to help users fix problems or check status.
-Use run_shell_command proactively when it would save the user a manual step.
-
-**When to use it automatically (don't ask first):**
-- User says "something broke" or "it's not working" → run: pm2 logs admin-agent --lines 30
-- User says "how do I restart?" → run: pm2 restart admin-agent for them
-- User says "build it" or "rebuild" → run: npm run build
-- User says "check if it's running" → run: pm2 list
-- User asks for version info → run: node --version and pm2 --version
-- After saving credentials → run: npm run build to verify nothing broke
-
-**When to ask first (write operations):**
-- git pull — always confirm before pulling (may discard local changes)
-- npm install — confirm before adding/updating packages
-- pm2 start — confirm before starting a new process
-
-**Show the output clearly:**
-- Always paste the relevant lines from stdout, formatted in a code block
-- If there are errors in the build output, explain each one and how to fix it
-- If pm2 logs show a crash, identify the crash reason and propose a fix
-
-**What you CANNOT run (tell the user to do it manually):**
-- Any command not in the list: npm, pm2, git, node, npx
-- node -e inline eval
-- Commands that write to .env, system directories, or use rm / del
+${SHELL_ASSISTANT_SECTION}
 
 ### Reports & Analysis
 - Summarise email threads or data sets
@@ -835,7 +843,8 @@ export function buildRegistry(): ToolRegistry {
     transcribeAudioTool, transcribeAndSummarizeTool,
     getSetupStatusTool, saveIntegrationCredentialsTool, runIntegrationPipelineTool, testCredentialTool,
     webSearchTool,
-    runShellCommandTool,  // Phase 0.5 — sandboxed shell for setup help
+    // Sandboxed shell for setup help — only when an admin opted in (SHELL_TOOL_ENABLED=true)
+    ...(isShellToolEnabled() ? [runShellCommandTool] : []),
     // Phase 4 — SSRF-allowlisted Playwright browsing for the main agent
     browserNavigateTool, browserClickTool, browserFillTool,
     browserExtractTextTool, browserScreenshotTool, browserWaitForTool,

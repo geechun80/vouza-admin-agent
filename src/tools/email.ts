@@ -4,7 +4,7 @@
 
 import { z } from "zod";
 import { buildTool } from "./registry.js";
-import nodemailer from "nodemailer";
+import nodemailer, { type SendMailOptions } from "nodemailer";
 import { google } from "googleapis";
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
@@ -224,7 +224,7 @@ export const sendEmailTool = buildTool({
 
       const transporter = nodemailer.createTransport(transporterOptions);
 
-      const mailOptions: nodemailer.SendMailOptions = {
+      const mailOptions: SendMailOptions = {
         from: fromAddress,
         to: input.to,
         subject: input.subject,

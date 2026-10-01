@@ -47,9 +47,16 @@ const PM2_ALLOWED_SERVICES = new Set(
     .filter(Boolean)
 );
 
-// Global kill switch for the shell tool. Set SHELL_TOOL_ENABLED=false to
-// completely disable shell access (e.g. for high-security customer deployments).
-const SHELL_ENABLED = (process.env.SHELL_TOOL_ENABLED || "true").toLowerCase() !== "false";
+// OFF unless an admin opts in with SHELL_TOOL_ENABLED=true. The agent reads
+// untrusted text (emails, documents, web pages); a shell reachable from that
+// is the highest-impact thing a prompt injection can hit, and end users don't
+// need it — the guide bot can tell them which command to run instead.
+const SHELL_ENABLED = (process.env.SHELL_TOOL_ENABLED || "").trim().toLowerCase() === "true";
+
+/** Whether the shell tool should be offered to the model at all. */
+export function isShellToolEnabled(): boolean {
+  return SHELL_ENABLED;
+}
 
 // ── 1. Base-command whitelist ──────────────────────────────────────────────────
 const ALLOWED_CMDS = new Set([
@@ -60,12 +67,23 @@ const ALLOWED_CMDS = new Set([
 // Only the listed sub-commands (first word after the base) are permitted.
 // Commands NOT in this map are unrestricted (e.g. "node --version" — base only).
 const SUBCOMMAND_ALLOW: Record<string, RegExp> = {
-  npm: /^(run|install|ci|audit|list|ls|update|test|--version|-v)\b/i,
-  git: /^(status|pull|log|diff|branch|fetch|remote|describe|shortlog|show|tag|stash\s+list)\b/i,
+  // npm run: only build/test (other scripts start servers or run setup).
+  // audit: report only — "audit fix" rewrites dependencies (Rule 30 pins).
+  // update: removed — upgrades unpinned deps; updates go through npm ci.
+  npm: /^(run\s+(build|test)$|install\b|i\b|ci\b|audit$|list\b|ls\b|test$|--version$|-v$)/i,
+  // pull/fetch only from the configured origin; remote only to list.
+  git: /^(status\b|pull(\s+origin(\s+[\w.\-/]+)?)?$|log\b|diff\b|branch\b|fetch(\s+origin)?$|remote(\s+-v)?$|describe\b|shortlog\b|show\b|tag\b|stash\s+list$)/i,
   pm2: /^(list|ls|status|restart|reload|logs?|start|stop|show|describe|info|flush|save|ping|jlist|prettylist|monit|--version|-v)\b/i,
-  npx: /^(tsc|ts-node)\b/i,
-  // node: no sub-command restriction — handled by blocked patterns below
+  // tsc only type-checks/compiles; ts-node removed — it runs arbitrary files.
+  npx: /^tsc\b/i,
+  // node: version check only — "node file.js" runs arbitrary code.
+  node: /^(--version|-v)$/i,
 };
+
+// Exactly one plain command. No shell metacharacters (& | ; < > ` $ ( ) % ^ !),
+// no quotes, no newlines — so nothing can be chained, substituted, expanded or
+// redirected — and no ":" or "@", so no URLs or user@host remotes either.
+const SAFE_CHARS = /^[A-Za-z0-9 ._\-\/=,+]+$/;
 
 // ── 3. Blocked patterns (scanned against the FULL raw command string) ──────────
 // Any match → rejected, even if the base command is whitelisted.
@@ -142,8 +160,19 @@ export function validateShellCommand(cmd: string): string | null {
     );
   }
 
+  if (!SAFE_CHARS.test(cmd.trim())) {
+    return (
+      `Only one plain command is allowed — no &, |, ;, quotes, redirects, $ or URLs. ` +
+      `Ask the user to run "${cmd}" in their terminal directly.`
+    );
+  }
+
   const args = parts.slice(1).join(" ").trim();
   const subAllow = SUBCOMMAND_ALLOW[base];
+  // node needs an explicit, allowed argument ("node" alone opens a REPL).
+  if (base === "node" && !subAllow.test(args)) {
+    return `Only "node --version" is allowed. Running files with node is blocked.`;
+  }
   if (subAllow && args && !subAllow.test(args)) {
     return (
       `Sub-command "${args.split(" ")[0]}" is not allowed for "${base}". ` +
@@ -263,22 +292,22 @@ async function auditLog(entry: {
 // ── Tool definition ────────────────────────────────────────────────────────────
 export const runShellCommandTool = buildTool({
   name:        "run_shell_command",
-  description: `Run a whitelisted shell command in the project root directory.
+  description: `Run one whitelisted maintenance command in the project root directory.
 
 Use this to help users with setup tasks: checking build output, restarting the agent,
 tailing logs, verifying installs, pulling latest code, or confirming version numbers.
 
-ALLOWED commands and examples:
-  npm     → npm run build | npm install | npm audit | npm --version
+ALLOWED commands and examples (one plain command — no &, |, ;, quotes or redirects):
+  npm     → npm run build | npm run test | npm ci | npm install | npm audit | npm --version
   pm2     → pm2 list | pm2 restart admin-agent | pm2 logs admin-agent --lines 30
-            pm2 stop admin-agent | pm2 start ecosystem.config.js | pm2 flush
+            pm2 stop admin-agent | pm2 flush
   git     → git status | git pull | git log --oneline -5 | git branch | git diff
   node    → node --version
-  npx     → npx tsc --version
+  npx     → npx tsc --noEmit
 
 BLOCKED (ask the user to run manually):
-  rm / del / rmdir  •  sudo / runas  •  curl|sh / wget|sh
-  node -e (eval)    •  path traversal (../)  •  writing to .env or system dirs
+  chaining or redirects  •  running script files  •  npm install <package>
+  rm / del / rmdir  •  sudo / runas  •  URLs  •  path traversal (../)
 
 The command always runs from the project root: ${PROJECT_DIR}
 Output is capped at ${MAX_OUTPUT} characters. Timeout: ${TIMEOUT_MS / 1000}s.`,

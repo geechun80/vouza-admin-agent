@@ -23,6 +23,8 @@ import chalk from "chalk";
 import type { AgentContext } from "../types/index.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { agentLoop } from "../agent/loop.js";
+import { buildExternalRegistry } from "../agent/toolProfiles.js";
+import { isAgentMailSenderAllowed } from "../agent/senderPolicy.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -138,7 +140,10 @@ export async function startAgentMailListener(
 
   _starting  = true;
   _baseCtx   = baseCtx;
-  _registry  = registry;
+  // Senders here are other people writing in from the internet: read-only
+  // tools only. Replies go out through this listener, never through a tool
+  // the sender's text could steer (see toolProfiles.ts).
+  _registry  = buildExternalRegistry(registry);
   _apiKey    = apiKey;
 
   console.log(chalk.cyan("  [AgentMail] Initialising inbox..."));
@@ -292,17 +297,18 @@ async function processThread(
 
   if (!userText.trim()) return;
 
-  // Sender allowlist — if configured, only whitelisted addresses can trigger the agent
-  const allowedSenders = (_baseCtx!.config.tools?.agentmail as any)?.allowedSenders as string[] | undefined;
-  if (allowedSenders && allowedSenders.length > 0) {
-    const senderEmail = newest.from.email.toLowerCase();
-    const allowed = allowedSenders.some((s) => s.toLowerCase() === senderEmail);
-    if (!allowed) {
-      console.warn(chalk.yellow(
-        `  [AgentMail] Rejected message from unlisted sender: ${newest.from.email}`
-      ));
-      return;
-    }
+  // Sender allowlist — deny by default. Only the owner's own mailbox and
+  // explicitly allowed addresses can trigger the agent; an empty list used to
+  // mean "anyone on the internet".
+  const tools = _baseCtx!.config.tools;
+  const allowedSenders = (tools?.agentmail as any)?.allowedSenders;
+  const ownerAddresses = [tools?.gmail?.user, tools?.gmail?.emailAddress, tools?.smtp?.user];
+  if (!isAgentMailSenderAllowed(newest.from.email, allowedSenders, ownerAddresses)) {
+    console.warn(chalk.yellow(
+      `  [AgentMail] Ignored message from ${newest.from.email} — not the owner and not on the allowed-senders list ` +
+      `(add it to agentmail.allowedSenders to let them use the agent)`
+    ));
+    return;
   }
 
   // Reply depth cap — prevents infinite reply loops
