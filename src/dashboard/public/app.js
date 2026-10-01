@@ -2603,6 +2603,14 @@ async function callLiveAgent(text, image, textFile) {
             keepTypingLast();
             break;
 
+          case 'confirm_needed':
+            // A send / going online / memory save is waiting for the person's
+            // answer. The server decides; these buttons just type "yes"/"no".
+            if (botEl) botEl.appendChild(buildConfirmRow(event.kind));
+            keepTypingLast();
+            pinChatToBottom();
+            break;
+
           case 'credential_saved':
             // Wizard card badge live-update: when the agent saves credentials,
             // flip the relevant card badge to "✓ Connected" without a page reload.
@@ -2625,6 +2633,32 @@ async function callLiveAgent(text, image, textFile) {
     chat.busy = false;
     setInputEnabled(true);
   }
+}
+
+// ── YES / NO buttons for actions waiting on the person ─────────────────────
+const CONFIRM_LABELS = {
+  send:   ['✅ Yes, send it', '❌ Cancel'],
+  online: ['🌐 Yes, go online', '🏠 Stay offline'],
+  memory: ['✅ Yes, save it', "❌ Don't save"],
+};
+
+function buildConfirmRow(kind) {
+  const [yes, no] = CONFIRM_LABELS[kind] || CONFIRM_LABELS.send;
+  const row = document.createElement('div');
+  row.className = 'confirm-row';
+  row.style.cssText = 'display:flex;gap:8px;margin:8px 0 4px;flex-wrap:wrap';
+  row.innerHTML =
+    `<button type="button" class="btn btn-primary" style="font-size:13px;padding:6px 14px" onclick="answerConfirm(this,'yes')">${escHtml(yes)}</button>` +
+    `<button type="button" class="btn" style="font-size:13px;padding:6px 14px" onclick="answerConfirm(this,'no')">${escHtml(no)}</button>`;
+  return row;
+}
+
+function answerConfirm(btn, answer) {
+  if (chat.busy) { toast("Please wait — I'm still responding…", 'error'); return; }
+  btn.closest('.confirm-row')?.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+  appendUserMsg(answer);
+  convTrackUser(answer);
+  callLiveAgent(answer);
 }
 
 // ── Tool call card UI ───────────────────────────────────────────────────────

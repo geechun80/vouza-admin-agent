@@ -35,6 +35,7 @@ import {
   confirmPromptFor,
 } from "../agent/phoneMode.js";
 import { startTurn } from "../agent/webGate.js";
+import { buildGuestRegistry, makeGuest } from "../agent/guestMode.js";
 import { withTrigger } from "../util/netActivity.js";
 import {
   decideTelegramAccess,
@@ -67,6 +68,13 @@ const CONFIRM_KEYBOARD = {
   inline_keyboard: [[
     { text: "✅ Yes, send", callback_data: "yes" },
     { text: "❌ Cancel",    callback_data: "no"  },
+  ]],
+};
+
+const MEMORY_KEYBOARD = {
+  inline_keyboard: [[
+    { text: "✅ Yes, save it", callback_data: "yes" },
+    { text: "❌ Don't save",   callback_data: "no"  },
   ]],
 };
 
@@ -594,7 +602,11 @@ async function processMessage(
   isVoice   = false
 ): Promise<void> {
   try {
-    const chatCtx    = getOrCreateChatContext(chatId, baseCtx);
+    // Only the chat that linked the bot is the owner; allow-listed chats are
+    // guests — no tools, none of the owner's memory (guestMode.ts).
+    const isOwner = _ownerChatId !== null && chatId === _ownerChatId;
+    const chatCtx = getOrCreateChatContext(chatId, baseCtx, isOwner ? null : fromName);
+    if (!isOwner) registry = buildGuestRegistry();
 
     // A send waiting for YES/NO is answered here, before the model runs —
     // the model can never complete a send by itself. A voice transcript must
@@ -719,7 +731,9 @@ async function processMessage(
     if (parked) {
       const ask = confirmPromptFor(parked);
       fullText = fullText.trim() ? `${fullText.trim()}\n\n${ask}` : ask;
-      confirmKeyboard = parked.kind === "online" ? ONLINE_KEYBOARD : CONFIRM_KEYBOARD;
+      confirmKeyboard = parked.kind === "online" ? ONLINE_KEYBOARD
+                      : parked.kind === "memory" ? MEMORY_KEYBOARD
+                      : CONFIRM_KEYBOARD;
     }
 
     const finalText = fullText.trim();
@@ -828,7 +842,7 @@ async function sendDirectReply(
   }
 }
 
-function getOrCreateChatContext(chatId: number, baseCtx: AgentContext): AgentContext {
+function getOrCreateChatContext(chatId: number, baseCtx: AgentContext, guestName: string | null = null): AgentContext {
   if (!chatContexts.has(chatId)) {
     chatContexts.set(chatId, {
       context: {
@@ -841,6 +855,7 @@ function getOrCreateChatContext(chatId: number, baseCtx: AgentContext): AgentCon
       },
       lastActive: Date.now(),
     });
+    if (guestName !== null) makeGuest(chatContexts.get(chatId)!.context, guestName);
   }
   const session = chatContexts.get(chatId)!;
   session.lastActive = Date.now();

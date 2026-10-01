@@ -1,6 +1,6 @@
 import { z }           from "zod";
 import { buildTool }   from "../registry.js";
-import { getBrowserPage } from "./manager.js";
+import { getBrowserPage, configuredBrowserDomains } from "./manager.js";
 
 export const browserScreenshotTool = buildTool({
   name: "browser_screenshot",
@@ -21,7 +21,7 @@ export const browserScreenshotTool = buildTool({
 
   async call(input, context): Promise<any> {
     try {
-      const page = await getBrowserPage(context.sessionId);
+      const page = await getBrowserPage(context.sessionId, configuredBrowserDomains(context));
       let   buf: Buffer;
 
       if (input.selector) {

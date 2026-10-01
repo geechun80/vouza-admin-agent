@@ -23,7 +23,8 @@ import type { ToolRegistry } from "../tools/registry.js";
 import { parkOnlineRequest } from "./phoneMode.js";
 
 /** Tools that send something to the internet on the model's choice. */
-export const WEB_TOOL_NAMES: ReadonlySet<string> = new Set(["web_search", "browser_navigate"]);
+// Clicking a link or submitting a form on an open page loads new pages too.
+export const WEB_TOOL_NAMES: ReadonlySet<string> = new Set(["web_search", "browser_navigate", "browser_click", "browser_fill"]);
 
 // "google" alone means the web; "Google Calendar/Drive/…" means the user's own data.
 const GOOGLE_PRODUCT = /\bgoogle\s+(calendar|drive|sheets?|docs?|meet|account|workspace|contacts|mail|photos)\b/gi;
@@ -54,6 +55,8 @@ function clip(s: unknown, n: number): string {
 export function describeWebAction(toolName: string, input: any): string {
   if (toolName === "web_search") return `Search the web for: "${clip(input?.query, 120)}"`;
   if (toolName === "browser_navigate") return `Open the website: ${clip(input?.url, 160)}`;
+  if (toolName === "browser_click")    return `Click "${clip(input?.selector, 80)}" on the open website`;
+  if (toolName === "browser_fill")     return `Type into "${clip(input?.selector, 80)}" on the open website${input?.pressEnter ? " and submit" : ""}`;
   return `Go online (${toolName})`;
 }
 
@@ -94,6 +97,8 @@ export function gateWebTool(tool: ToolDefinition): ToolDefinition {
  */
 export function startTurn(ctx: AgentContext, ownWords: string, granted = false): void {
   ctx.onlineRequested = granted || userAskedToGoOnline(ownWords);
+  ctx.userWords = ownWords;
+  ctx.readUntrustedThisTurn = false; // memoryGuard.ts
 }
 
 /** Replace any registered web tools with gated versions (idempotent per tool object). */

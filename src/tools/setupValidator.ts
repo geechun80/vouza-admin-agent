@@ -198,6 +198,22 @@ async function validateAIProvider(provider: string, apiKey: string): Promise<Val
   return { valid: false, detail: `${provider} returned HTTP ${r.status}: ${JSON.stringify(r.body).slice(0, 200)}` };
 }
 
+/** Local / home-network host, or an address present in the person's own words. */
+export function isWahaTestAddressAllowed(url: string, userWords?: string): boolean {
+  let u: URL;
+  try { u = new URL(url); } catch { return false; }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  const local =
+    host === "localhost" || host === "::1" || host === "host.docker.internal" ||
+    host.endsWith(".local") || host.endsWith(".localhost") ||
+    /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(host);
+  if (local) return true;
+  const words = (userWords || "").toLowerCase();
+  return !!words && words.includes(u.host.toLowerCase());
+}
+
 async function validateWAHA(wahaUrl: string, wahaKey?: string): Promise<ValidationResult> {
   const base    = (wahaUrl || "").replace(/\/$/, "");
   const headers: Record<string, string> = {};
@@ -310,6 +326,17 @@ export const testCredentialTool = buildTool({
         case "waha":
           if (!c.url)
             return { success: false, error: "waha requires: url (e.g. http://localhost:3000)" };
+          // The model picks this URL, so it must not become a way to send data
+          // to an arbitrary server: only a local/home-network WAHA, or an
+          // address the person typed themselves this turn.
+          if (!isWahaTestAddressAllowed(String(c.url), ctx?.userWords)) {
+            return {
+              success: false,
+              error:
+                "Not tested — that WAHA address isn't on this computer or your home network, and you didn't type it. " +
+                "Ask the user to paste the WAHA address themselves.",
+            };
+          }
           result = await validateWAHA(c.url, c.apiKey);
           break;
 

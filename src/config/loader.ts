@@ -301,6 +301,8 @@ export async function loadConfigFromJson(): Promise<AgentConfig> {
         normalizedCfg.serverUrl  = rawCfg.serverUrl  || rawCfg.wahaUrl     || "http://localhost:3000";
         normalizedCfg.apiKey     = rawCfg.apiKey     || rawCfg.wahaKey     || "";
         normalizedCfg.sessionName = rawCfg.sessionName || rawCfg.wahaSession || "default";
+        // Who gets the full phone toolset; every other allowed sender is a guest.
+        normalizedCfg.ownerNumber = rawCfg.ownerNumber || saved.agent?.phone || "";
       }
 
       baseConfig.tools.whatsapp = {

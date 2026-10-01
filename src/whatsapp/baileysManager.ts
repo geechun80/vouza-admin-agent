@@ -48,6 +48,7 @@ import {
   confirmPromptFor,
 } from "../agent/phoneMode.js";
 import { startTurn } from "../agent/webGate.js";
+import { buildGuestRegistry, makeGuest } from "../agent/guestMode.js";
 import { withTrigger, recordNet, hostOf } from "../util/netActivity.js";
 import type { FileToSend }         from "../tools/sendFile.js";
 
@@ -431,11 +432,13 @@ function _handleWorkerMessage(msg: any): void {
       const { chatId, fromName, text, isVoice } = msg as {
         chatId: string; fromName: string; text: string; isVoice: boolean;
       };
+      // Anything but an explicit owner flag is treated as a guest.
+      const isOwner = (msg as { isOwner?: unknown }).isOwner === true;
 
       // Phase 1 queue gate
       const q      = chatQueues.getOrCreate(chatId);
       const result = q.enqueue(
-        () => withTrigger("your message (WhatsApp)", () => _processIncoming(chatId, fromName, text, isVoice)),
+        () => withTrigger("your message (WhatsApp)", () => _processIncoming(chatId, fromName, text, isVoice, isOwner)),
         `wa:${chatId.split("@")[0]}:${text.slice(0, 30)}`
       );
 
@@ -485,7 +488,8 @@ async function _processIncoming(
   chatId:   string,
   fromName: string,
   text:     string,
-  isVoice:  boolean
+  isVoice:  boolean,
+  isOwner = false,
 ): Promise<void> {
   if (!_baseCtx || !_registry || !_worker) return;
 
@@ -494,7 +498,9 @@ async function _processIncoming(
   ));
 
   // Per-chat isolated session
-  const session = _getOrCreateSession(chatId);
+  const session = _getOrCreateSession(chatId, isOwner ? null : fromName);
+  // Allow-listed people who aren't the owner get no tools (guestMode.ts).
+  const registry = isOwner ? _registry : buildGuestRegistry();
   if (isVoice && _baseCtx) {
     // The worker sent the voice note for transcription before handing us the text.
     const w = resolveWhisperConfig(_baseCtx.config);
@@ -520,7 +526,7 @@ async function _processIncoming(
   const turnStartedAt = Date.now();
   let response = "";
   try {
-    for await (const ev of agentLoop(framedInput, session, _registry)) {
+    for await (const ev of agentLoop(framedInput, session, registry)) {
       if (ev.type === "text_delta") response += ev.text;
       if (ev.type === "error" && !response.includes("⚠️")) {
         response += `\n\n⚠️ ${ev.error}`;
@@ -547,7 +553,7 @@ async function _processIncoming(
 // Session management
 // ---------------------------------------------------------------------------
 
-function _getOrCreateSession(chatId: string): AgentContext {
+function _getOrCreateSession(chatId: string, guestName: string | null = null): AgentContext {
   if (!chatSessions.has(chatId)) {
     chatSessions.set(chatId, {
       context: {
@@ -560,6 +566,7 @@ function _getOrCreateSession(chatId: string): AgentContext {
       },
       lastActive: Date.now(),
     });
+    if (guestName !== null) makeGuest(chatSessions.get(chatId)!.context, guestName);
   }
   const s = chatSessions.get(chatId)!;
   s.lastActive = Date.now();

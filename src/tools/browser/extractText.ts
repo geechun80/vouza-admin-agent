@@ -1,6 +1,6 @@
 import { z }           from "zod";
 import { buildTool }   from "../registry.js";
-import { getBrowserPage } from "./manager.js";
+import { getBrowserPage, configuredBrowserDomains } from "./manager.js";
 
 export const browserExtractTextTool = buildTool({
   name: "browser_extract_text",
@@ -22,7 +22,7 @@ export const browserExtractTextTool = buildTool({
 
   async call(input, context): Promise<any> {
     try {
-      const page   = await getBrowserPage(context.sessionId);
+      const page   = await getBrowserPage(context.sessionId, configuredBrowserDomains(context));
       const max    = input.maxLength ?? 4000;
       let   text: string;
 

@@ -6,7 +6,7 @@
 
 Email · Calendar · WhatsApp · Telegram · Files · Voice · Web search — all in one agent.
 
-[![Tests](https://img.shields.io/badge/tests-598%2F598-brightgreen)](#)
+[![Tests](https://img.shields.io/badge/tests-622%2F622-brightgreen)](#)
 [![Node](https://img.shields.io/badge/node-20.19%2B-blue)](https://nodejs.org)
 [![Audit](https://img.shields.io/badge/npm%20audit-0%20vulnerabilities-brightgreen)](#)
 [![License](https://img.shields.io/badge/license-private-lightgrey)](#)
@@ -210,7 +210,7 @@ Message it in WhatsApp's **"Message yourself"** chat (or your Telegram bot). Pho
 
 - **Nothing is sent without your YES.** When the agent wants to send or reply to an email, it shows who, the subject and any attachments, then waits. Reply `yes` (or tap ✅ on Telegram) to send, `no` to cancel; anything else cancels. This is enforced in code — text inside an email or document can't trigger a send — and a voice note never counts as YES.
 - **Files come to you.** "Find my insurance policy and send it to me" delivers the PDF in the chat (up to 45 MB, shared folders only).
-- **Only you.** WhatsApp answers your own number plus anyone you allow-list. A Telegram bot answers only the person who linked it with the one-time link from setup; strangers get "This is a private assistant".
+- **Only you get your data.** WhatsApp answers your own "Message yourself" chat plus anyone you allow-list; a Telegram bot answers the person who linked it (strangers get "This is a private assistant") plus allow-listed chats. **Allow-listed people are guests:** they can chat and get help with general questions, but the agent has no tools for them — it can't read your email or files, send anything, or go online — and it never shows them your memories.
 
 **Keeping it reachable while you're away.** While the agent runs, it asks the computer not to idle-sleep (Windows, macOS, Linux with systemd) and lets go when it stops — even after a crash. It can't override the lid: if closing the lid puts your laptop to sleep, the agent stops answering until you open it. Quick Setup checks this setting and offers a **Change lid setting** button (Windows: *When I close the lid → Do nothing* for *Plugged in*). Keep the laptop plugged in. If the computer does sleep: Telegram messages are answered when it wakes (Telegram holds them for 24 hours); WhatsApp messages sent during the sleep are not answered — send them again.
 
@@ -220,12 +220,15 @@ The agent reads untrusted text all day — incoming emails, documents, web pages
 
 | Who / when | What it can do |
 |---|---|
-| **You, on the laptop dashboard** | Everything you've connected (you see every step) |
+| **You, on the laptop dashboard** | Everything you've connected — sending email/Telegram/WhatsApp, and changing a saved connection (keys, logins, WAHA address), waits for your **YES** button |
 | **You, from your phone** | Read and search; send email only after your **YES**; send files to you |
 | **Scheduled runs** (morning briefing, weekly report, scheduled skills) | Read and search your own mail/files, draft emails, label/star/mark read — **never** send, archive, trash, write files, search the web, browse or change memory |
-| **Other people** (AgentMail, WAHA) | Only senders you allow-listed. AgentMail: read-only. WAHA: same as your phone |
+| **Other people you allow-list** (WhatsApp, Telegram, WAHA) | Chat only — no email, files, sending, web or your memories |
+| **AgentMail senders** | Only addresses you allow-listed; read-only |
 
-- **Online only when you ask.** Searching the web or opening a website runs only when *your own message* asks for it ("search online…", "google…", "what's the weather", a web address). Otherwise the agent shows exactly what it would search or open and waits for your **YES** — so an email can't make it look up your private details online. Enforced in code, on every channel.
+- **Memory can't be planted.** If the agent read an email, file or web page this turn, saving something to its long-term memory waits for your YES — so a message can't slip in a lasting instruction.
+- **WAHA owner:** your number from Step 1 (*Your Phone Number*) is the owner; every other allowed sender is a guest. With no number saved, a single allowed number is treated as yours.
+- **Online only when you ask.** Searching the web, opening a website, or clicking/submitting on one runs only when *your own message* asks for it ("search online…", "google…", "what's the weather", a web address). Otherwise the agent shows exactly what it would search or open and waits for your **YES** — so an email can't make it look up your private details online. Enforced in code, on every channel.
 - **Maintenance commands are off.** The setup assistant tells you which command to type instead. Admins can enable a locked-down version with `SHELL_TOOL_ENABLED=true` (one plain `npm`/`pm2`/`git` command at a time — no chaining, scripts or URLs).
 - **Upgrading with WAHA or AgentMail?** Both now ignore everyone who isn't allow-listed. Add the numbers/addresses that should reach the agent (WhatsApp card → allowed senders; `agentmail.allowedSenders`). AgentMail always accepts your own email address.
 

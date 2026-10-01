@@ -31,6 +31,7 @@ import { listFilesTool, readFileTool, readExcelFileTool, writeFileTool, organize
 import { sendTelegramMessageTool, readTelegramUpdatesTool, getTelegramBotInfoTool, forwardTelegramMessageTool } from "../tools/telegram.js";
 import { sendWhatsAppMessageTool, readWhatsAppMessagesTool } from "../tools/whatsapp.js";
 import { gateWebTools } from "../agent/webGate.js";
+import { guardMemoryWrites } from "../agent/memoryGuard.js";
 
 // ─── Tool Catalog ──────────────────────────────────────────────────────────
 // Maps ToolCategory to available tool instances for auto-registration
@@ -121,6 +122,7 @@ export async function createAgentFromTemplate(
   }
 
   gateWebTools(registry);
+  guardMemoryWrites(registry);
 
   // Load memory
   const memory = createMemoryStore(memoryDir);

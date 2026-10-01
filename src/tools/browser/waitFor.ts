@@ -1,6 +1,6 @@
 import { z }           from "zod";
 import { buildTool }   from "../registry.js";
-import { getBrowserPage } from "./manager.js";
+import { getBrowserPage, configuredBrowserDomains } from "./manager.js";
 
 export const browserWaitForTool = buildTool({
   name: "browser_wait_for",
@@ -27,7 +27,7 @@ export const browserWaitForTool = buildTool({
   async call(input, context): Promise<any> {
     const timeout = (input.timeoutSeconds ?? 15) * 1000;
     try {
-      const page = await getBrowserPage(context.sessionId);
+      const page = await getBrowserPage(context.sessionId, configuredBrowserDomains(context));
 
       switch (input.condition) {
         case "selector": {

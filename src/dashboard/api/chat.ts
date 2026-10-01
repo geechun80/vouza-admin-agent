@@ -52,7 +52,8 @@ import {
 import { testCredentialTool } from "../../tools/setupValidator.js";
 import { webSearchTool } from "../../tools/webSearch.js";
 import { gateWebTools, startTurn } from "../../agent/webGate.js";
-import { resolvePendingReply, pendingCreatedSince, confirmPromptFor, recordExchange } from "../../agent/phoneMode.js";
+import { resolvePendingReply, pendingCreatedSince, confirmPromptFor, recordExchange, requireConfirmation, DASHBOARD_CONFIRM_TOOL_NAMES, SETTINGS_CONFIRM_TOOL_NAMES } from "../../agent/phoneMode.js";
+import { guardMemoryWrites } from "../../agent/memoryGuard.js";
 import { runShellCommandTool, isShellToolEnabled } from "../../tools/shell.js";
 // Browser tools (Phase 4) — main agent can browse allowlisted sites
 import {
@@ -611,9 +612,17 @@ export async function* streamChat(
   if (pendingReply.handled) {
     recordExchange(session.context, words, pendingReply.reply!);
     yield { type: "text_delta", text: pendingReply.reply! };
+    // Saved settings after a YES → flip the wizard card badge as before.
+    const ran = pendingReply.ran;
+    if (ran?.toolName === "save_integration_credentials" && ran.result.success) {
+      const d: any = typeof ran.result.data === "string" ? JSON.parse(ran.result.data || "{}") : ran.result.data;
+      if (d?.slug) yield { type: "credential_saved", slug: d.slug, integration: d.integration };
+    }
     return;
   }
   startTurn(session.context, words, pendingReply.grantOnline);
+  // An attached file or image is someone else's text, not the person's words.
+  if (typeof message !== "string" || message !== words) session.context.readUntrustedThisTurn = true;
   const turnStartedAt = Date.now();
 
   // ── Budget guard — only when on Vouza's fallback key ─────────────────────
@@ -684,6 +693,7 @@ export async function* streamChat(
   // Never rely on the model to phrase the "go online?" question.
   const parked = pendingCreatedSince(ch, turnStartedAt);
   if (parked) {
+    yield { type: "confirm_needed", kind: parked.kind };
     const ask = confirmPromptFor(parked).replace(/\*/g, "**");
     yield { type: "text_delta", text: `\n\n**${parked.summary}**\n\n${ask}` };
   }
@@ -897,5 +907,13 @@ export function buildRegistry(): ToolRegistry {
   for (const tool of allTools) registry.register(tool as any);
   // Going online only when the person asked (see agent/webGate.ts).
   gateWebTools(registry);
+  // Sends wait for the person's YES here too — an email or file read in this
+  // chat could otherwise make the agent send data out (phoneMode.ts).
+  requireConfirmation(registry, DASHBOARD_CONFIRM_TOOL_NAMES);
+  // Changing a saved connection waits for YES too (an email could try to
+  // re-point an integration).
+  requireConfirmation(registry, SETTINGS_CONFIRM_TOOL_NAMES);
+  // No silent memory writes after reading someone else's text (memoryGuard.ts).
+  guardMemoryWrites(registry);
   return registry;
 }

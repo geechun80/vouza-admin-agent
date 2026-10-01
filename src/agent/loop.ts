@@ -27,6 +27,7 @@ import { scrubThinkBlocks, hasThinkBlock } from "./thinkScrubber.js";
 import { redact } from "./redactor.js";
 import { classifyError } from "./errorClassifier.js";
 import { buildProfileContext } from "./userProfile.js";
+import { guestSystemPrompt } from "./guestMode.js";
 import {
   pickHealthyProvider,
   recordFailure,
@@ -298,7 +299,9 @@ export async function* agentLoop(
 ): AsyncGenerator<StreamEvent> {
   const startTime = Date.now();
   const primaryProvider = context.config.provider;
-  const systemPrompt = systemPromptOverride || DEFAULT_SYSTEM_PROMPT;
+  const systemPrompt = context.guest
+    ? guestSystemPrompt(context.guest.name)
+    : (systemPromptOverride || DEFAULT_SYSTEM_PROMPT);
 
   // ── OpenRouter: classify task complexity and pick the right model tier ──
   // Done once per session against the PRIMARY provider, because failover
@@ -394,7 +397,8 @@ export async function* agentLoop(
 
   // Load relevant memories for context
   const searchQuery = typeof userMessage === "string" ? userMessage : (userMessage.find((b: any) => b.type === "text")?.text ?? "");
-  const memories = await context.memory.search(searchQuery, 10);
+  // A guest never sees the owner's memory, profile or learned skills.
+  const memories = context.guest ? [] : await context.memory.search(searchQuery, 10);
   const memoryContext = memories.length > 0
     ? `\n\n## Relevant Memory\n${memories.map((m) => `- [${m.type}] ${m.title}: ${m.content}`).join("\n")}`
     : "";
@@ -406,13 +410,13 @@ export async function* agentLoop(
   // ── Phase 2: inject learned skills for this task ──────────────────────────
   // Searches data/skills/*.md for procedures matching the current task.
   // If found, the agent follows the proven steps instead of re-figuring them.
-  const learnedSkills = await findRelevantSkills(searchQuery).catch(() => "");
+  const learnedSkills = context.guest ? "" : await findRelevantSkills(searchQuery).catch(() => "");
 
   // ── Phase 4: inject user profile ──────────────────────────────────────────
   // Reads accumulated memory facts from past sessions and builds a compact
   // profile block so the agent knows the user's name, role, and preferences
   // without needing to re-ask every session.
-  const userProfile = await buildProfileContext(context.memory).catch(() => "");
+  const userProfile = context.guest ? "" : await buildProfileContext(context.memory).catch(() => "");
 
   const fullSystemPrompt = systemPrompt + userProfile + memoryContext + skillsSummary + learnedSkills;
   const toolsUsed: string[] = [];
@@ -765,7 +769,7 @@ export async function* agentLoop(
   // Only write every PERF_LOG_FREQUENCY sessions — each write + index rebuild
   // is a disk hit; accumulating logs every single turn bloats memory quickly.
   _perfLogCounter++;
-  if (_perfLogCounter % PERF_LOG_FREQUENCY === 0) {
+  if (_perfLogCounter % PERF_LOG_FREQUENCY === 0 && !context.guest) {
     const rawTaskName = (typeof userMessage === "string" ? userMessage : searchQuery).slice(0, 100);
     const perfLog: PerformanceLog = {
       sessionId: context.sessionId,
@@ -785,7 +789,8 @@ export async function* agentLoop(
 
   // ── Learning steps — each sends this conversation to the AI provider again,
   // so they only run when the owner left "learn from conversations" on.
-  const learn = context.config.learnFromConversations !== false;
+  // Never learn from a guest's conversation — it would end up in the owner's memory.
+  const learn = context.config.learnFromConversations !== false && !context.guest;
 
   // ── Phase 0: guarded autoReflect — never run two at once ──────────────────
   if (learn && state.turnCount >= 2 && !_activeReflect) {

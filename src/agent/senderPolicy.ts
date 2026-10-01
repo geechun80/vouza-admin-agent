@@ -45,6 +45,22 @@ export function isWahaSenderAllowed(chatId: string, allowlist: unknown): boolean
 }
 
 /**
+ * WAHA: is this allowed sender the OWNER (full phone toolset) or a guest?
+ * The owner is the number saved as the owner's phone (WhatsApp card or
+ * Step 1 "Your Phone Number"). With no owner number saved, a single-entry
+ * allowlist is taken to be the owner's own phone — the usual WAHA setup.
+ * Anything else is a guest (guestMode.ts). Never a LID.
+ */
+export function isWahaOwner(chatId: string, ownerNumber: unknown, allowlist: unknown): boolean {
+  const sender = phoneDigitsFromJid(chatId);
+  if (!sender) return false;
+  const owner = typeof ownerNumber === "string" ? allowlistDigits(ownerNumber) : null;
+  if (owner) return owner === sender;
+  const list = parseAllowlist(allowlist).map(allowlistDigits).filter(Boolean);
+  return list.length === 1 && list[0] === sender;
+}
+
+/**
  * AgentMail: the owner's own addresses plus explicitly allowed senders.
  * Exact address match, case-insensitive. Everyone else is refused.
  */

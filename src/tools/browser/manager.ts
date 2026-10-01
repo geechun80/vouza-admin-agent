@@ -16,6 +16,7 @@
 // =============================================================================
 
 import { EventEmitter } from "events";
+import { recordNet, hostOf } from "../../util/netActivity.js";
 
 // ── Domain allowlist ─────────────────────────────────────────────────────────
 // Only these domains are reachable via browser tools. The list can be extended
@@ -124,7 +125,16 @@ export function checkDomainAllowed(url: string, configDomains?: string[]): { all
 
 let _playwright: any = null;
 let _browser: any    = null;
-const _sessions      = new Map<string, { page: any; context: any; lastActive: number }>();
+interface BrowserSession {
+  page:       any;
+  context:    any;
+  lastActive: number;
+  /** Extra allowed domains from config — refreshed on every tool call. */
+  domains:    string[];
+  /** Last page-level navigation the guard refused (a click on an outside link). */
+  blocked:    string | null;
+}
+const _sessions      = new Map<string, BrowserSession>();
 const TTL_MS         = parseInt(process.env.SETUP_BROWSER_TTL_MS || "600000", 10); // 10 min default
 
 const emitter = new EventEmitter();
@@ -168,11 +178,19 @@ async function ensureBrowser(): Promise<any> {
   return _browser;
 }
 
-/** Get or create a Page for the given sessionId. */
-export async function getBrowserPage(sessionId: string): Promise<any> {
+/**
+ * Get or create a Page for the given sessionId.
+ *
+ * Every page-level navigation in the session — browser_navigate, but also a
+ * click on a link, a form submit or a script redirect — is checked against
+ * the same allowlist + private-address block as browser_navigate. Without
+ * this, one click could take the browser to any site.
+ */
+export async function getBrowserPage(sessionId: string, configDomains: string[] = []): Promise<any> {
   const existing = _sessions.get(sessionId);
   if (existing) {
     existing.lastActive = Date.now();
+    existing.domains = configDomains;
     return existing.page;
   }
 
@@ -186,9 +204,33 @@ export async function getBrowserPage(sessionId: string): Promise<any> {
     storageState: undefined,
   });
 
+  const record: BrowserSession = { page: null, context, lastActive: Date.now(), domains: configDomains, blocked: null };
+  await context.route("**/*", async (route: any) => {
+    const req = route.request();
+    if (!req.isNavigationRequest()) return route.continue();
+    const url = req.url();
+    const verdict = checkDomainAllowed(url, record.domains);
+    if (!verdict.allowed) {
+      record.blocked = url;
+      return route.abort("blockedbyclient");
+    }
+    recordNet(hostOf(url), "open website", { category: "Website" });
+    return route.continue();
+  });
+
   const page = await context.newPage();
-  _sessions.set(sessionId, { page, context, lastActive: Date.now() });
+  record.page = page;
+  _sessions.set(sessionId, record);
   return page;
+}
+
+/** The outside address the guard refused since the last call, if any (then cleared). */
+export function takeBlockedNavigation(sessionId: string): string | null {
+  const s = _sessions.get(sessionId);
+  if (!s || !s.blocked) return null;
+  const url = s.blocked;
+  s.blocked = null;
+  return url;
 }
 
 /** Close a session's browser context and remove it from the pool. */

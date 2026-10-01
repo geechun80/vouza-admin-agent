@@ -32,7 +32,8 @@ import {
 } from "../agent/phoneMode.js";
 import { startTurn } from "../agent/webGate.js";
 import { withTrigger } from "../util/netActivity.js";
-import { isWahaSenderAllowed } from "../agent/senderPolicy.js";
+import { isWahaSenderAllowed, isWahaOwner } from "../agent/senderPolicy.js";
+import { buildGuestRegistry, makeGuest } from "../agent/guestMode.js";
 
 // Chats refused by the allowlist — log once each, not on every message.
 const refusedLogged = new Set<string>();
@@ -106,7 +107,12 @@ export function handleWAHAEvent(
 
   // Phone chats get the small, confirmation-gated toolset. File delivery is
   // Baileys-only for now, so it's left out here.
-  registry = buildPhoneRegistry(registry, { exclude: ["send_file_to_me"] });
+  // Allow-listed people who aren't the owner are guests: no tools, none of
+  // the owner's memory (guestMode.ts).
+  const isOwner = isWahaOwner(payload.from, waCfg.ownerNumber, waCfg.allowedSenders ?? waCfg.allowlist);
+  registry = isOwner
+    ? buildPhoneRegistry(registry, { exclude: ["send_file_to_me"] })
+    : buildGuestRegistry();
 
   const chatId:   string = payload.from;      // "6512345678@c.us"
   const fromName: string = payload.notifyName || payload.from.split("@")[0] || "User";
@@ -115,7 +121,7 @@ export function handleWAHAEvent(
   const isText:  boolean = msgType === "chat" || msgType === "text";
 
   // Fire-and-forget — webhook handler returns immediately (WAHA doesn't wait)
-  processWAMessage({ chatId, fromName, isVoice, isText, payload, baseCtx, registry }).catch((err) => {
+  processWAMessage({ chatId, fromName, isVoice, isText, payload, baseCtx, registry, isOwner }).catch((err) => {
     console.error(chalk.red(`  [WhatsApp] Unhandled error for chat ${chatId}:`, err));
   });
 }
@@ -132,6 +138,7 @@ interface WAMessageJob {
   payload:  any;
   baseCtx:  AgentContext;
   registry: ToolRegistry;
+  isOwner:  boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -164,7 +171,7 @@ async function processWAMessage(job: WAMessageJob): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function executeWAMessage(job: WAMessageJob): Promise<void> {
-  const { chatId, fromName, isVoice, isText, payload, baseCtx, registry } = job;
+  const { chatId, fromName, isVoice, isText, payload, baseCtx, registry, isOwner } = job;
 
   try {
     // ── Resolve the text to send to the agent ──────────────────────────────
@@ -190,7 +197,7 @@ async function executeWAMessage(job: WAMessageJob): Promise<void> {
     console.log(chalk.gray(`  [WhatsApp] ${fromName} (${chatId}): ${userText.slice(0, 100)}${userText.length > 100 ? "…" : ""}`));
 
     // ── Run agent ──────────────────────────────────────────────────────────
-    const session = getOrCreateSession(chatId, baseCtx);
+    const session = getOrCreateSession(chatId, baseCtx, isOwner ? null : fromName);
     const ch = session.context.channel!;
 
     // A send waiting for YES/NO is answered here, before the model runs; a
@@ -379,7 +386,7 @@ async function sendWAHAText(
 // Session management
 // ---------------------------------------------------------------------------
 
-function getOrCreateSession(chatId: string, baseCtx: AgentContext): WASession {
+function getOrCreateSession(chatId: string, baseCtx: AgentContext, guestName: string | null = null): WASession {
   if (!chatSessions.has(chatId)) {
     chatSessions.set(chatId, {
       context: {
@@ -392,6 +399,7 @@ function getOrCreateSession(chatId: string, baseCtx: AgentContext): WASession {
       },
       lastActive: Date.now(),
     });
+    if (guestName !== null) makeGuest(chatSessions.get(chatId)!.context, guestName);
   }
   const session = chatSessions.get(chatId)!;
   session.lastActive = Date.now();

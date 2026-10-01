@@ -1121,7 +1121,9 @@ export async function startDashboard(port = 3456): Promise<void> {
   });
 
   // --- Config API ---
-  app.get("/api/config", async (_req, res) => {
+  // Same "this computer only" check as every other config route — blocks a
+  // malicious site using DNS rebinding from reading email/phone/allow-list.
+  app.get("/api/config", requireLocalOrigin, async (_req, res) => {
     const config = await loadSetupConfig();
     const masked = { ...config, credentials: { ...config.credentials } };
     // Mask all sensitive credential fields (key/token/secret/pass/password)

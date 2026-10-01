@@ -54,6 +54,29 @@ export const PHONE_TOOL_NAMES: readonly string[] = [
 /** Tools that act on the user's behalf toward other people → need a YES. */
 export const CONFIRM_TOOL_NAMES: ReadonlySet<string> = new Set(["send_email", "reply_email"]);
 
+/**
+ * The desktop dashboard asks too: an email or file the agent reads there can
+ * carry instructions, and every send is a way to carry data out.
+ */
+export const DASHBOARD_CONFIRM_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "send_email",
+  "reply_email",
+  "send_telegram_message",
+  "forward_telegram_message",
+  "send_whatsapp_message",
+  "agentmail_send_email",
+]);
+
+/**
+ * Tools that change a saved connection (AI key, email login, WhatsApp/WAHA
+ * address…). A booby-trapped email read in the dashboard must not be able to
+ * re-point an integration, so these wait for YES too.
+ */
+export const SETTINGS_CONFIRM_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "save_integration_credentials",
+  "run_integration_pipeline",
+]);
+
 export const PENDING_TTL_MS = 10 * 60_000;
 
 /** Appended by the listener (not left to the model) whenever a send is waiting. */
@@ -66,8 +89,10 @@ export interface PendingAction {
    * "send"   — acting toward other people; YES runs the stored action.
    * "online" — going online (web search / opening a site); YES lets the
    *            model do it on the next turn so it can read the results.
+   * "memory" — saving to long-term memory right after reading someone
+   *            else's text (agent/memoryGuard.ts); YES saves it.
    */
-  kind:      "send" | "online";
+  kind:      "send" | "online" | "memory";
   toolName:  string;
   summary:   string;
   createdAt: number;
@@ -75,10 +100,18 @@ export interface PendingAction {
 }
 
 export const ONLINE_CONFIRM_PROMPT = "👉 Reply *YES* to let me go online for this, or *NO* to stay offline.";
+export const MEMORY_CONFIRM_PROMPT = "👉 Reply *YES* to save this to memory, or *NO* to skip it.";
 
 /** The question appended under the reply — chosen by code, never by the model. */
 export function confirmPromptFor(p: PendingAction): string {
-  return p.kind === "online" ? ONLINE_CONFIRM_PROMPT : CONFIRM_PROMPT;
+  if (p.kind === "online") return ONLINE_CONFIRM_PROMPT;
+  if (p.kind === "memory") return MEMORY_CONFIRM_PROMPT;
+  return CONFIRM_PROMPT;
+}
+
+/** Park any action until the person answers YES/NO. Used by memoryGuard.ts. */
+export function parkAction(ch: PhoneChannel, action: Omit<PendingAction, "createdAt">): void {
+  pending.set(channelKey(ch), { ...action, createdAt: Date.now() });
 }
 
 /** Park a request to go online until the person answers YES/NO (see webGate.ts). */
@@ -113,6 +146,31 @@ export function describeAction(toolName: string, input: any): string {
     }
     case "reply_email":
       return `Reply to ${clip(input?.to, 80)}:\n"${clip(input?.body, 160)}"`;
+    case "send_telegram_message":
+      return `Send a Telegram message to ${clip(input?.chatId, 60)}:\n"${clip(input?.text, 160)}"`;
+    case "forward_telegram_message":
+      return `Forward Telegram message ${clip(input?.messageId, 20)} from ${clip(input?.fromChatId, 40)} to ${clip(input?.chatId, 40)}.`;
+    case "send_whatsapp_message":
+      return `Send a WhatsApp message to ${clip(input?.to, 40)}:\n"${clip(input?.message, 160)}"`;
+    case "agentmail_send_email": {
+      const subj = input?.subject ? ` — subject "${clip(input.subject, 80)}"` : "";
+      return `Send an email from the agent's inbox to ${clip(input?.to, 80)}${subj}:\n"${clip(input?.message, 160)}"`;
+    }
+    case "save_integration_credentials":
+    case "run_integration_pipeline": {
+      // Field names only — never the values (keys, passwords, tokens).
+      const creds = input?.credentials && typeof input.credentials === "object" ? Object.keys(input.credentials) : [];
+      const fields = creds.length ? ` (${clip(creds.join(", "), 120)})` : "";
+      const verb = toolName === "run_integration_pipeline" ? "Set up and save" : "Save new settings for";
+      return `${verb} ${clip(input?.integration, 40)}${fields}.`;
+    }
+    case "save_memory":
+      return `Remember "${clip(input?.title, 80)}": "${clip(input?.content, 200)}"`;
+    case "update_memory": {
+      const title = input?.title ? ` to "${clip(input.title, 80)}"` : "";
+      const body  = input?.content ? `: "${clip(input.content, 200)}"` : "";
+      return `Change memory ${clip(input?.id, 40)}${title}${body}`;
+    }
     default:
       return `Run ${toolName}.`;
   }
@@ -122,6 +180,14 @@ function doneMessage(toolName: string): string {
   switch (toolName) {
     case "send_email":  return "✅ Sent.";
     case "reply_email": return "✅ Reply sent.";
+    case "send_telegram_message":
+    case "forward_telegram_message":
+    case "send_whatsapp_message":
+    case "agentmail_send_email": return "✅ Sent.";
+    case "save_memory":
+    case "update_memory": return "✅ Saved to memory.";
+    case "save_integration_credentials":
+    case "run_integration_pipeline": return "✅ Settings saved.";
     default:            return "✅ Done.";
   }
 }
@@ -157,6 +223,21 @@ export function wrapWithConfirmation(tool: ToolDefinition): ToolDefinition {
       };
     },
   };
+}
+
+/**
+ * Wrap the named tools in `registry` so they wait for a YES (dashboard).
+ * Idempotent per tool object.
+ */
+export function requireConfirmation(registry: ToolRegistry, names: ReadonlySet<string>): void {
+  for (const name of names) {
+    const tool = registry.get(name);
+    if (tool && !(tool as any).__needsYes) {
+      const wrapped = wrapWithConfirmation(tool);
+      (wrapped as any).__needsYes = true;
+      registry.register(wrapped);
+    }
+  }
 }
 
 /**
@@ -224,6 +305,8 @@ export interface PendingResolution {
   reply?:  string;
   /** true → the person said YES to going online: allow web tools this turn */
   grantOnline?: boolean;
+  /** Set when a YES ran a stored action — which tool, and what it returned. */
+  ran?: { toolName: string; result: ToolResult };
 }
 
 /**
@@ -250,7 +333,9 @@ export async function resolvePendingReply(
     return intent === "confirm" ? { handled: false, grantOnline: true } : { handled: false };
   }
 
-  if (intent === "cancel") return { handled: true, reply: "👍 Cancelled — nothing was sent." };
+  if (intent === "cancel") {
+    return { handled: true, reply: p.kind === "memory" ? "👍 OK — not saved." : "👍 Cancelled — nothing was sent." };
+  }
   if (intent !== "confirm") return { handled: false };
 
   let result: ToolResult;
@@ -261,6 +346,7 @@ export async function resolvePendingReply(
   }
   return {
     handled: true,
+    ran: { toolName: p.toolName, result },
     reply: result.success
       ? doneMessage(p.toolName)
       : `⚠️ That didn't go through: ${clip(result.error ?? "unknown error", 300)}`,

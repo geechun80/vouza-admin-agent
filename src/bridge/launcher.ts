@@ -42,6 +42,8 @@ import { startKeepAwake, stopKeepAwake } from "../util/keepAwake.js";
 import { buildScheduledRegistry } from "../agent/toolProfiles.js";
 import { webSearchTool } from "../tools/webSearch.js";
 import { gateWebTools, startTurn } from "../agent/webGate.js";
+import { guardMemoryWrites } from "../agent/memoryGuard.js";
+import { DASHBOARD_CONFIRM_TOOL_NAMES, SETTINGS_CONFIRM_TOOL_NAMES } from "../agent/phoneMode.js";
 import { runShellCommandTool, isShellToolEnabled } from "../tools/shell.js";
 // Browser tools (Phase 4) — main agent can browse allowlisted sites.
 // Playwright is lazily imported inside the browser manager; if it isn't
@@ -192,6 +194,18 @@ export async function launchAgent(): Promise<AgentInstance> {
   // Going online (web search / opening a site) only when the person asked —
   // enforced in code for every channel that receives this registry.
   gateWebTools(registry);
+  // No silent memory writes after reading someone else's text (memoryGuard.ts).
+  // Sends are confirmed per channel: phone chats wrap them in phoneMode.ts.
+  guardMemoryWrites(registry);
+
+  // /api/agent/task has nobody to say YES, so it gets no send or
+  // settings-changing tools at all.
+  const taskRegistry = new ToolRegistry();
+  for (const tool of registry.getAll()) {
+    if (!DASHBOARD_CONFIRM_TOOL_NAMES.has(tool.name) && !SETTINGS_CONFIRM_TOOL_NAMES.has(tool.name)) {
+      taskRegistry.register(tool);
+    }
+  }
 
   const activeModules = [
     hasEmail     && "email",
@@ -364,7 +378,7 @@ export async function launchAgent(): Promise<AgentInstance> {
     serviceManager: svcMgr,
     runTask: (message: string) => {
       startTurn(context, message);
-      return agentLoop(message, context, registry);
+      return agentLoop(message, context, taskRegistry);
     },
     stop: async () => {
       stopKeepAwake();

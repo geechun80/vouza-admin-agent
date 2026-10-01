@@ -83,6 +83,20 @@ export interface AgentContext {
    * read by the web gate (agent/webGate.ts).
    */
   onlineRequested?: boolean;
+  /** The person's own words this turn (typed or spoken) — never email/file/web text. */
+  userWords?: string;
+  /**
+   * Set by tools that read text someone else wrote (email, files, web pages).
+   * While true, memory writes need the person's YES (agent/memoryGuard.ts).
+   * Reset at the start of every turn.
+   */
+  readUntrustedThisTurn?: boolean;
+  /**
+   * A guest: someone the owner allow-listed, not the owner. Guests get no
+   * tools and never see the owner's memory, profile or learned skills
+   * (agent/guestMode.ts).
+   */
+  guest?: { name: string };
 }
 
 export interface PhoneChannel {

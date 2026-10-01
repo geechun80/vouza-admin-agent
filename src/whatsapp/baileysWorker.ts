@@ -17,7 +17,7 @@
 // Worker → Parent:
 //   { type: "qr";            data: string }
 //   { type: "status";        status: BaileysStatus; ownerJid?: string; ownerName?: string }
-//   { type: "incoming_text"; chatId: string; fromName: string; text: string; isVoice: boolean }
+//   { type: "incoming_text"; chatId: string; fromName: string; text: string; isVoice: boolean; isOwner: boolean }
 //   { type: "send_result";   reqId: string; ok: boolean; error?: string }
 //   { type: "reset_command"; chatId: string }
 //   { type: "log";           level: "info"|"warn"|"error"; message: string }
@@ -363,7 +363,9 @@ async function connect(): Promise<void> {
         if (!userText) continue;
       }
 
-      ipc({ type: "incoming_text", chatId, fromName, text: userText, isVoice });
+      // isOwner: only the linked account's own "Message yourself" chat; allow-listed
+      // people are guests in the main process (guestMode.ts).
+      ipc({ type: "incoming_text", chatId, fromName, text: userText, isVoice, isOwner: decision.isSelfChat === true });
     }
   });
 }

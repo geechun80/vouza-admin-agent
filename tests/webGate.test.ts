@@ -78,8 +78,8 @@ describe("userAskedToGoOnline — only the person's explicit words count", () =>
 });
 
 describe("web tools — gated", () => {
-  it("covers exactly web_search and browser_navigate", () => {
-    assert.deepEqual([...WEB_TOOL_NAMES].sort(), ["browser_navigate", "web_search"]);
+  it("covers searching, opening, clicking and submitting forms", () => {
+    assert.deepEqual([...WEB_TOOL_NAMES].sort(), ["browser_click", "browser_fill", "browser_navigate", "web_search"]);
   });
 
   it("runs directly when the person asked to go online this turn", async () => {
