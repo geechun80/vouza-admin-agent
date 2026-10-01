@@ -38,6 +38,7 @@ import {
 import { saveMemoryTool, searchMemoryTool, forgetMemoryTool, updateMemoryTool, listAllMemoriesTool } from "../tools/memory.js";
 import { transcribeAudioTool, transcribeAndSummarizeTool } from "../tools/voice.js";
 import { getSetupStatusTool, saveIntegrationCredentialsTool } from "../tools/setup.js";
+import { startKeepAwake, stopKeepAwake } from "../util/keepAwake.js";
 import { webSearchTool } from "../tools/webSearch.js";
 import { runShellCommandTool } from "../tools/shell.js";
 // Browser tools (Phase 4) — main agent can browse allowlisted sites.
@@ -80,7 +81,8 @@ export async function launchAgent(): Promise<AgentInstance> {
   const registry = new ToolRegistry();
   const tools   = config.tools ?? {};
 
-  const hasEmail      = !!(tools.gmail?.user || tools.gmail?.appPassword);
+  const hasEmail      = !!(tools.gmail?.user || tools.gmail?.appPassword)
+                     || !!(tools.smtp?.host && tools.smtp?.user && tools.smtp?.pass);
   const hasGoogle     = !!(tools.google?.credentialsJson);
   const hasTelegram   = !!(tools.telegram?.botToken);
   const hasWhatsApp   = !!(tools.whatsapp?.provider);
@@ -333,6 +335,16 @@ export async function launchAgent(): Promise<AgentInstance> {
   // known-recoverable failures). Idempotent — safe to call even if already running.
   healthMonitor.start();
 
+  // ── Keep-awake: people message the agent from their phone while away from
+  // the laptop, so stop the OS idle-sleeping while it runs. Not awaited —
+  // Windows takes 10–30s to confirm and startup must not wait on it.
+  if (config.keepAwake !== false) {
+    startKeepAwake().then((s) => {
+      if (s.state === "active") console.log(chalk.green("  Keep-awake on — this computer won't idle-sleep while the agent runs"));
+      else console.log(chalk.yellow(`  Keep-awake ${s.state}${s.detail ? ` — ${s.detail}` : ""}`));
+    });
+  }
+
   return {
     context,
     registry,
@@ -342,6 +354,7 @@ export async function launchAgent(): Promise<AgentInstance> {
     serviceManager: svcMgr,
     runTask: (message: string) => agentLoop(message, context, registry),
     stop: async () => {
+      stopKeepAwake();
       const { healthMonitor: hm } = await import("../integrations/healthMonitor.js");
       hm.stop();
       await svcMgr.stopAll();

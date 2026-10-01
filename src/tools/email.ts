@@ -8,6 +8,44 @@ import nodemailer from "nodemailer";
 import { google } from "googleapis";
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
+import { stat } from "fs/promises";
+import { basename } from "path";
+import { buildImapSearch } from "./imapSearch.js";
+import { resolveAccess } from "../files/folderGrants.js";
+
+// Gmail rejects messages over 25 MB after base64 (~4/3 growth), so keep the
+// raw attachment total comfortably under that.
+const MAX_ATTACHMENT_BYTES = 18 * 1024 * 1024;
+
+/**
+ * Resolve attachment paths against the same read boundary as every file tool
+ * (workspace + owner-granted folders). Returns nodemailer attachments or a
+ * user-readable error naming the first bad file.
+ */
+async function resolveAttachments(
+  paths: string[] | undefined,
+): Promise<{ ok: true; attachments: Array<{ filename: string; path: string }> } | { ok: false; error: string }> {
+  const attachments: Array<{ filename: string; path: string }> = [];
+  let total = 0;
+  for (const p of paths ?? []) {
+    const access = resolveAccess(p);
+    if (!access.allowed) {
+      return { ok: false, error: `Can't attach "${basename(p)}" — it's outside the folders I'm allowed to read.` };
+    }
+    try {
+      const st = await stat(access.resolvedPath);
+      if (!st.isFile()) return { ok: false, error: `Can't attach "${basename(p)}" — it's a folder, not a file.` };
+      total += st.size;
+    } catch {
+      return { ok: false, error: `Can't attach "${basename(p)}" — file not found.` };
+    }
+    attachments.push({ filename: basename(access.resolvedPath), path: access.resolvedPath });
+  }
+  if (total > MAX_ATTACHMENT_BYTES) {
+    return { ok: false, error: `Attachments total ${(total / 1048576).toFixed(1)} MB — email allows about 18 MB.` };
+  }
+  return { ok: true, attachments };
+}
 
 // --- Read Emails ---
 
@@ -95,13 +133,10 @@ export const readEmailsTool = buildTool({
         await client.connect();
         const lock = await client.getMailboxLock("INBOX");
         try {
-          const query = input.query.toLowerCase();
-          const searchOpts: any = {};
-          if (query.includes("is:unread")) searchOpts.unseen = true;
-          else if (query.includes("is:read")) searchOpts.seen = true;
-          else searchOpts.all = true;
-
-          const seqs = await client.search(searchOpts);
+          // Gmail (X-GM-EXT-1) gets the query verbatim as X-GM-RAW; other
+          // servers get faithful IMAP criteria (see imapSearch.ts).
+          const isGmail = client.capabilities.has("X-GM-EXT-1");
+          const seqs = await client.search(buildImapSearch(input.query, isGmail) as any);
           if (!seqs || seqs.length === 0) return { success: true, data: { count: 0, emails: [] } };
 
           const limit = input.maxResults || 10;
@@ -143,7 +178,8 @@ export const readEmailsTool = buildTool({
 export const sendEmailTool = buildTool({
   name: "send_email",
   description:
-    "Send an email via Gmail. Supports to, cc, bcc, subject, body (plain text or HTML), and attachments.",
+    "Send an email. Supports to, cc, bcc, subject, body (plain text or HTML), and file attachments " +
+    "from this computer (full paths, e.g. from search_local_files; workspace or owner-granted folders only, ~18 MB total).",
   category: "email",
   isReadOnly: false,
   isConcurrencySafe: false,
@@ -155,12 +191,17 @@ export const sendEmailTool = buildTool({
     bcc: z.string().optional(),
     isHtml: z.boolean().optional().default(false),
     replyToMessageId: z.string().optional().describe("Gmail message ID to reply to"),
+    attachments: z.array(z.string()).optional()
+      .describe("Full paths of files on this computer to attach"),
   }),
   async call(input, context) {
     try {
       const smtpCfg = context.config.tools.smtp;
       const gmailCfg = context.config.tools.gmail;
       if (!smtpCfg && !gmailCfg) return { success: false, error: "Email (SMTP or Gmail) not configured" };
+
+      const att = await resolveAttachments(input.attachments);
+      if (!att.ok) return { success: false, error: att.error };
 
       let transporterOptions: any;
       let fromAddress = "";
@@ -189,6 +230,7 @@ export const sendEmailTool = buildTool({
         subject: input.subject,
         cc: input.cc,
         bcc: input.bcc,
+        ...(att.attachments.length ? { attachments: att.attachments } : {}),
       };
 
       if (input.isHtml) {
@@ -200,7 +242,11 @@ export const sendEmailTool = buildTool({
       const result = await transporter.sendMail(mailOptions);
       return {
         success: true,
-        data: { messageId: result.messageId, accepted: result.accepted },
+        data: {
+          messageId: result.messageId,
+          accepted: result.accepted,
+          attached: att.attachments.map((a) => a.filename),
+        },
       };
     } catch (err) {
       return { success: false, error: `Failed to send email: ${err}` };

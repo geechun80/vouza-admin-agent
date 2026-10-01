@@ -40,6 +40,14 @@ import type { ToolRegistry }       from "../tools/registry.js";
 import { agentLoop }               from "../agent/loop.js";
 import { ChannelQueues }           from "../agent/queue.js";
 import { resolveWhisperConfig }    from "../voice/transcriber.js";
+import {
+  buildPhoneRegistry,
+  resolvePendingReply,
+  pendingCreatedSince,
+  recordExchange,
+  CONFIRM_PROMPT,
+} from "../agent/phoneMode.js";
+import type { FileToSend }         from "../tools/sendFile.js";
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -73,6 +81,24 @@ const statusListeners: Set<StatusListener> = new Set();
 let _worker:       ChildProcess | null = null;
 let _connected     = false;
 let _ownerJid:     string | null = null;  // linked account JID, set on "connected" status
+let _ownerName:    string | null = null;  // WhatsApp profile name, set on "connected" status
+
+// Document sends wait for the worker's send_result so the tool can report
+// real delivery instead of "queued".
+const SEND_DOC_TIMEOUT_MS = 90_000;
+const pendingDocSends = new Map<string, {
+  resolve: () => void;
+  reject:  (err: Error) => void;
+  timer:   ReturnType<typeof setTimeout>;
+}>();
+
+function _failPendingDocSends(reason: string): void {
+  for (const [id, p] of pendingDocSends) {
+    clearTimeout(p.timer);
+    p.reject(new Error(reason));
+    pendingDocSends.delete(id);
+  }
+}
 let _baseCtx:      AgentContext | null = null;
 let _registry:     ToolRegistry | null = null;
 let _stopped       = false;   // true after an intentional stopBaileysListener() call
@@ -125,6 +151,43 @@ export function isBaileysConnected(): boolean {
  */
 export function getBaileysOwnerJid(): string | null {
   return _connected ? _ownerJid : null;
+}
+
+/**
+ * Who this WhatsApp is linked to, for setup to show and pre-fill:
+ * phone number (digits of the owner's phone JID — never a LID) and profile name.
+ */
+export function getBaileysOwnerInfo(): { jid: string; phone: string; name: string | null } | null {
+  if (!_connected || !_ownerJid || !_ownerJid.endsWith("@s.whatsapp.net")) return null;
+  return { jid: _ownerJid, phone: `+${_ownerJid.split("@")[0]}`, name: _ownerName };
+}
+
+/**
+ * Send a file into a WhatsApp chat. Resolves only after the worker confirms
+ * delivery to WhatsApp; rejects with a user-readable reason otherwise.
+ */
+export function sendBaileysDocument(chatId: string, file: FileToSend): Promise<void> {
+  const worker = _worker;
+  if (!worker || !_connected) {
+    return Promise.reject(new Error("WhatsApp is not connected right now."));
+  }
+  const reqId = randomUUID();
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingDocSends.delete(reqId);
+      reject(new Error("WhatsApp took too long to accept the file."));
+    }, SEND_DOC_TIMEOUT_MS);
+    pendingDocSends.set(reqId, { resolve, reject, timer });
+    worker.send({
+      type:     "send_document",
+      reqId,
+      chatId,
+      filePath: file.absPath,
+      fileName: file.fileName,
+      mimeType: file.mimeType,
+      caption:  file.caption,
+    });
+  });
 }
 
 /**
@@ -200,7 +263,9 @@ export async function startBaileysListener(
   if (_worker && _connected) return;
 
   _baseCtx  = baseCtx;
-  _registry = registry;
+  // Phone chats get the small, confirmation-gated toolset — enforced here so
+  // every caller (launcher, dashboard QR flow, auto-recovery) gets it.
+  _registry = buildPhoneRegistry(registry);
   _stopped  = false;
 
   _spawnWorker();
@@ -263,6 +328,7 @@ function _spawnWorker(): void {
   child.on("exit", (code, signal) => {
     _connected = false;
     _worker    = null;
+    _failPendingDocSends("WhatsApp disconnected before the file was sent.");
     _emitStatus("disconnected");
 
     // Intentional stop or clean WhatsApp logout (exit 0) — do not restart
@@ -314,6 +380,7 @@ function _spawnWorker(): void {
 
 function _killWorker(): void {
   if (!_worker) return;
+  _failPendingDocSends("WhatsApp was restarted before the file was sent.");
   _worker.removeAllListeners();
   try { _worker.kill("SIGTERM"); } catch { /* already dead */ }
   _worker = null;
@@ -344,6 +411,9 @@ function _handleWorkerMessage(msg: any): void {
         if (typeof msg.ownerJid === "string" && msg.ownerJid) {
           _ownerJid = msg.ownerJid;
         }
+        if (typeof msg.ownerName === "string" && msg.ownerName) {
+          _ownerName = msg.ownerName;
+        }
         console.log(chalk.green("  [WhatsApp] Connected via Baileys worker!"));
       } else {
         console.log(chalk.yellow(`  [WhatsApp] Status: ${status}`));
@@ -372,6 +442,16 @@ function _handleWorkerMessage(msg: any): void {
           text:   "⏳ You have too many messages queued — please wait for the current ones to finish.",
         });
       }
+      break;
+    }
+
+    case "send_result": {
+      const p = pendingDocSends.get(msg.reqId as string);
+      if (!p) break; // timed out already
+      clearTimeout(p.timer);
+      pendingDocSends.delete(msg.reqId as string);
+      if (msg.ok) p.resolve();
+      else p.reject(new Error(String(msg.error || "WhatsApp refused the file.")));
       break;
     }
 
@@ -412,10 +492,21 @@ async function _processIncoming(
   // Per-chat isolated session
   const session = _getOrCreateSession(chatId);
 
+  // A send waiting for YES/NO is answered here, before the model runs — the
+  // model can never complete a send by itself. Voice transcripts arrive
+  // framed, so a mis-heard voice note can never count as YES.
+  const pendingReply = await resolvePendingReply(session.channel!, text);
+  if (pendingReply.handled) {
+    recordExchange(session, text, pendingReply.reply!);
+    _worker?.send({ type: "send_reply", chatId, text: pendingReply.reply });
+    return;
+  }
+
   const framedInput = isVoice
     ? text  // voice already framed by worker ("🎙️ [Voice message from …]: …")
     : `[Message from ${fromName} via WhatsApp]: ${text}`;
 
+  const turnStartedAt = Date.now();
   let response = "";
   try {
     for await (const ev of agentLoop(framedInput, session, _registry)) {
@@ -429,7 +520,11 @@ async function _processIncoming(
     response = "⚠️ Sorry, I ran into an error. Please try again in a moment.";
   }
 
-  const reply = response.trim();
+  let reply = response.trim();
+  // Never rely on the model to phrase the confirmation ask.
+  if (pendingCreatedSince(session.channel!, turnStartedAt)) {
+    reply = reply ? `${reply}\n\n${CONFIRM_PROMPT}` : CONFIRM_PROMPT;
+  }
   if (reply && _worker) {
     _worker.send({ type: "send_reply", chatId, text: reply });
   }
@@ -448,6 +543,7 @@ function _getOrCreateSession(chatId: string): AgentContext {
         turnCount: 0,
         messages:  [],
         taskQueue: [],
+        channel:   { kind: "whatsapp", chatId },
       },
       lastActive: Date.now(),
     });

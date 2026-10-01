@@ -221,7 +221,13 @@ export async function loadConfigFromJson(): Promise<AgentConfig> {
       const cfg = saved.channels.telegram.config || {};
       const botToken    = cfg.botToken    || cfg.telegramToken    || cfg.telegramBotToken;
       const webhookUrl  = cfg.webhookUrl  || cfg.telegramWebhookUrl || "";
-      if (botToken) baseConfig.tools.telegram = { botToken, webhookUrl: webhookUrl || undefined };
+      if (botToken) {
+        baseConfig.tools.telegram = {
+          botToken,
+          webhookUrl: webhookUrl || undefined,
+          ...(cfg.allowedChatIds ? { allowedChatIds: cfg.allowedChatIds } : {}),
+        };
+      }
     }
     // Slack deferred — Bolt Socket Mode listener not yet implemented
     if (saved.channels?.email?.enabled && saved.channels.email.config) {
@@ -232,6 +238,23 @@ export async function loadConfigFromJson(): Promise<AgentConfig> {
         emailAddress: ec.emailAddress || ec.gmailUser || "",
       };
     }
+    // Any provider over IMAP/SMTP (Quick Setup and the setup tool write
+    // tools.smtp). Before this it was saved but silently dropped on restart.
+    const savedSmtp = saved.tools?.smtp;
+    if (savedSmtp?.host && savedSmtp?.user && savedSmtp?.pass) {
+      baseConfig.tools.smtp = {
+        host:     String(savedSmtp.host),
+        port:     String(savedSmtp.port || "587"),
+        user:     String(savedSmtp.user),
+        pass:     String(savedSmtp.pass),
+        imapHost: savedSmtp.imapHost ? String(savedSmtp.imapHost) : undefined,
+        imapPort: String(savedSmtp.imapPort || "993"),
+      };
+    }
+
+    // Keep-awake is on unless the user turned it off.
+    if (saved.keepAwake === false) baseConfig.keepAwake = false;
+
     // AgentMail channel
     if (saved.channels?.email?.provider === "agentmail" && saved.channels.email.enabled) {
       const cfg = saved.channels.email.config || {};

@@ -69,6 +69,19 @@ export interface AgentContext {
   config: AgentConfig;
   tools: Map<string, ToolDefinition>;
   taskQueue: TaskEntry[];
+  /**
+   * Set on per-chat sessions created by the phone channels (WhatsApp /
+   * Telegram). Tools use it to reply into the right chat (send_file_to_me)
+   * and phone mode keys pending confirmations by it. Absent for the
+   * dashboard chat and scheduled tasks.
+   */
+  channel?: PhoneChannel;
+}
+
+export interface PhoneChannel {
+  kind: "whatsapp" | "telegram";
+  /** WhatsApp JID or Telegram chat id (stringified) — the chat to reply into */
+  chatId: string;
 }
 
 export interface ConversationMessage {
@@ -233,7 +246,12 @@ export interface AgentConfig {
     };
     smtp?: { host: string; port: string; user: string; pass: string; imapHost?: string; imapPort?: string };
     slack?: { botToken: string };
-    telegram?: { botToken: string; webhookUrl?: string };
+    telegram?: {
+      botToken:    string;
+      webhookUrl?: string;
+      /** Extra Telegram chat ids (besides the linked owner) allowed to use the agent */
+      allowedChatIds?: Array<number | string>;
+    };
     whatsapp?: {
       provider: "twilio" | "meta" | "waha" | "web";
       config: Record<string, string>;
@@ -255,6 +273,11 @@ export interface AgentConfig {
   };
   /** Raw credentials bag — stores provider creds not covered by tools above */
   credentials?: Record<string, string>;
+  /**
+   * Ask the OS not to idle-sleep while the agent runs, so phone messages
+   * still get answered when nobody is at the laptop. Defaults to true.
+   */
+  keepAwake?: boolean;
 }
 
 // --- Template System ---

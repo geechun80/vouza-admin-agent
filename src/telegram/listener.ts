@@ -23,8 +23,26 @@ import { join } from "path";
 import chalk from "chalk";
 import type { AgentContext } from "../types/index.js";
 import type { ToolRegistry } from "../tools/registry.js";
+import type { FileToSend } from "../tools/sendFile.js";
 import { agentLoop } from "../agent/loop.js";
 import { ChannelQueues } from "../agent/queue.js";
+import {
+  buildPhoneRegistry,
+  resolvePendingReply,
+  pendingCreatedSince,
+  discardPending,
+  recordExchange,
+  CONFIRM_PROMPT,
+} from "../agent/phoneMode.js";
+import {
+  decideTelegramAccess,
+  parseStartPayload,
+  generateClaimCode,
+  claimDeepLink,
+  parseAllowedChatIds,
+  CLAIM_TTL_MS,
+  type TelegramClaim,
+} from "./ownerGate.js";
 import {
   transcribeAudioBuffer,
   mimeFromFilename,
@@ -40,6 +58,15 @@ const LIVE_EDIT_INTERVAL = 1_500;  // ms between live edits (stay under rate lim
 // Hermes-inspired adaptive fast-path: short replies with no tool use skip the
 // streaming placeholder entirely — one sendMessage instead of send+edit+edit.
 const FAST_PATH_MAX_CHARS = 200;
+
+// One-tap answers for a send waiting on the user (phone mode). Tapping a
+// button arrives as the plain text "yes"/"no" through the callback handler.
+const CONFIRM_KEYBOARD = {
+  inline_keyboard: [[
+    { text: "✅ Yes, send", callback_data: "yes" },
+    { text: "❌ Cancel",    callback_data: "no"  },
+  ]],
+};
 
 // ---------------------------------------------------------------------------
 // Per-chat session state
@@ -97,16 +124,20 @@ let _polling      = false;
 let updateOffset  = 0;
 
 // ---------------------------------------------------------------------------
-// Owner chat persistence — needed for PROACTIVE sends (briefings/reports).
-// A bot cannot initiate a conversation: we can only message a chat that has
-// messaged us before. The FIRST chat that ever talks to the bot is recorded
-// as the owner (the user who set the bot up) and persisted across restarts.
-// First-seen wins — a stranger messaging the bot later never becomes "owner".
+// Owner chat — who the bot serves, and where proactive sends go.
+// A bot cannot initiate a conversation, so the owner is whoever linked it.
+// Access is enforced by ownerGate.ts: once linked, ONLY the owner (plus
+// allow-listed chats) is served. Ownership is per bot: connecting a different
+// bot token clears it, so the new bot must be claimed again.
 // ---------------------------------------------------------------------------
 
 const TELEGRAM_STATE_PATH = join(process.cwd(), "data", "telegram-state.json");
 let _ownerChatId: number | null = null;
+let _ownerBotId:  number | null = null;
 let _ownerLoaded = false;
+let _claim:       TelegramClaim | null = null;
+let _botUsername: string | null = null;
+const _refusedNotified = new Set<number>(); // refuse-notice sent once per chat
 
 async function loadOwnerChatId(): Promise<void> {
   if (_ownerLoaded) return;
@@ -114,17 +145,56 @@ async function loadOwnerChatId(): Promise<void> {
   try {
     const raw = JSON.parse(await readFile(TELEGRAM_STATE_PATH, "utf-8"));
     if (typeof raw?.ownerChatId === "number") _ownerChatId = raw.ownerChatId;
+    if (typeof raw?.botId === "number")       _ownerBotId  = raw.botId;
   } catch { /* no state yet */ }
+}
+
+async function saveOwnerState(): Promise<void> {
+  try {
+    await mkdir(join(process.cwd(), "data"), { recursive: true });
+    await writeFile(
+      TELEGRAM_STATE_PATH,
+      JSON.stringify({ ownerChatId: _ownerChatId, botId: _ownerBotId }, null, 2),
+      "utf-8",
+    );
+  } catch { /* persistence is best-effort */ }
 }
 
 async function recordOwnerChat(chatId: number): Promise<void> {
   await loadOwnerChatId();
-  if (_ownerChatId !== null) return; // first-seen wins
+  if (_ownerChatId !== null) return; // already linked
   _ownerChatId = chatId;
-  try {
-    await mkdir(join(process.cwd(), "data"), { recursive: true });
-    await writeFile(TELEGRAM_STATE_PATH, JSON.stringify({ ownerChatId: chatId }, null, 2), "utf-8");
-  } catch { /* persistence is best-effort */ }
+  _claim = null;
+  await saveOwnerState();
+}
+
+/** Ownership belongs to one bot. A different bot token → owner must re-claim. */
+async function bindOwnerToBot(botId: number): Promise<void> {
+  await loadOwnerChatId();
+  if (_ownerBotId === botId) return;
+  if (_ownerBotId !== null) _ownerChatId = null; // new bot: old owner link no longer applies
+  _ownerBotId = botId;
+  await saveOwnerState();
+}
+
+/**
+ * Open a one-time claim so the owner can link the bot by tapping a link on
+ * their phone. Until it's used (or expires), nobody else can link the bot.
+ */
+export function createTelegramClaim(botUsername?: string): { code: string; link: string | null; expiresAt: number } {
+  const code = generateClaimCode();
+  _claim = { code, expiresAt: Date.now() + CLAIM_TTL_MS };
+  const user = botUsername || _botUsername;
+  return { code, link: user ? claimDeepLink(user, code) : null, expiresAt: _claim.expiresAt };
+}
+
+export async function getTelegramOwnerStatus(): Promise<{ linked: boolean; claimOpen: boolean; botUsername: string | null }> {
+  await loadOwnerChatId();
+  return {
+    linked:      _ownerChatId !== null,
+    claimOpen:   !!_claim && _claim.expiresAt > Date.now(),
+    botUsername: _botUsername,
+  };
 }
 
 /** The owner's chat id (first chat that ever messaged the bot), or null. */
@@ -160,6 +230,10 @@ export async function startTelegramListener(
   const token = baseContext.config.tools?.telegram?.botToken;
   if (!token) return; // not configured — silently skip
 
+  // Phone chats get the small, confirmation-gated toolset — enforced here so
+  // every caller (launcher, CLI, auto-recovery) gets it.
+  registry = buildPhoneRegistry(registry);
+
   // Verify the token
   let botUsername = "";
   try {
@@ -170,6 +244,8 @@ export async function startTelegramListener(
       return;
     }
     botUsername = info.result.username;
+    _botUsername = botUsername;
+    if (typeof info.result.id === "number") await bindOwnerToBot(info.result.id);
   } catch (err) {
     console.error(chalk.red("  [Telegram] Could not verify bot token — NOT started:", err));
     return;
@@ -285,6 +361,49 @@ export function activeChatCount(): number {
 }
 
 // ---------------------------------------------------------------------------
+// Owner gate (see ownerGate.ts)
+// ---------------------------------------------------------------------------
+
+/**
+ * "serve" → handle normally; "linked" → this message just claimed the bot;
+ * "refused" → not the owner (a one-time notice was sent).
+ */
+async function admitChat(
+  token:   string,
+  chatId:  number,
+  text:    string | undefined,
+  baseCtx: AgentContext,
+): Promise<"serve" | "linked" | "refused"> {
+  await loadOwnerChatId();
+  const decision = decideTelegramAccess({
+    chatId,
+    text,
+    ownerChatId:    _ownerChatId,
+    allowedChatIds: parseAllowedChatIds(baseCtx.config.tools?.telegram?.allowedChatIds),
+    claim:          _claim,
+    now:            Date.now(),
+  });
+
+  if (!decision.allow) {
+    console.log(chalk.gray(`  [Telegram] refused chat ${chatId} (${decision.reason})`));
+    if (!_refusedNotified.has(chatId)) {
+      _refusedNotified.add(chatId);
+      await sendReply(token, chatId, decision.reason === "claim_required"
+        ? "🔒 This assistant is being set up. Open the setup page on its owner's computer and tap the link shown there."
+        : "🔒 This is a private assistant.");
+    }
+    return "refused";
+  }
+
+  if (decision.claimOwner) {
+    await recordOwnerChat(chatId);
+    console.log(chalk.green(`  [Telegram] Linked to owner chat ${chatId}`));
+    if (parseStartPayload(text)) return "linked";
+  }
+  return "serve";
+}
+
+// ---------------------------------------------------------------------------
 // Update dispatcher (shared by polling + webhook)
 // ---------------------------------------------------------------------------
 
@@ -312,6 +431,7 @@ async function dispatchUpdate(
     }).catch(() => {});
 
     if (chatId && data) {
+      if (await admitChat(token, chatId, undefined, baseCtx) !== "serve") return;
       console.log(chalk.gray(
         `  [Telegram] ${fromName} (${chatId}): [button] ${data.slice(0, 80)}`
       ));
@@ -326,8 +446,21 @@ async function dispatchUpdate(
   if (!msg) return;
 
   const chatId:   number = msg.chat.id;
-  // Record the first chat as the owner for proactive scheduled delivery
-  recordOwnerChat(chatId).catch(() => {});
+
+  // ── Owner gate — nobody but the linked owner (and allow-listed chats) ────
+  const admission = await admitChat(token, chatId, msg.text, baseCtx);
+  if (admission === "refused") return;
+  if (admission === "linked") {
+    await sendReply(token, chatId,
+      "✅ Linked! From now on I only answer you here.\n\n" +
+      "Try: *any important emails today?* or *find my insurance policy and send it to me*.");
+    return;
+  }
+  if (parseStartPayload(msg.text)) {
+    await sendReply(token, chatId, "✅ You're already linked — just send me a task.");
+    return;
+  }
+
   const fromName: string = [msg.from?.first_name, msg.from?.last_name]
     .filter(Boolean).join(" ") || "User";
 
@@ -453,6 +586,23 @@ async function processMessage(
 ): Promise<void> {
   try {
     const chatCtx    = getOrCreateChatContext(chatId, baseCtx);
+
+    // A send waiting for YES/NO is answered here, before the model runs —
+    // the model can never complete a send by itself. A voice transcript must
+    // never count as YES (mis-hearing risk), but it does supersede the send.
+    const ch = chatCtx.channel!;
+    if (isVoice) {
+      discardPending(ch);
+    } else {
+      const pendingReply = await resolvePendingReply(ch, text);
+      if (pendingReply.handled) {
+        recordExchange(chatCtx, text, pendingReply.reply!);
+        await sendReply(token, chatId, pendingReply.reply!);
+        return;
+      }
+    }
+    const turnStartedAt = Date.now();
+    let confirmKeyboard: ReturnType<typeof buildInlineKeyboard> = undefined;
     const agentInput = isVoice
       ? `🎙️ [Voice message from ${fromName}]: "${text}"`
       : `[Message from ${fromName} via Telegram]: ${text}`;
@@ -496,7 +646,7 @@ async function processMessage(
 
       const body    = fullText.trim() || (lastTool ? `🔧 Using ${lastTool}…` : "⏳ Thinking…");
       const display = (body + (final ? "" : " ⏳")).slice(0, 4096);
-      const keyboard = final ? buildInlineKeyboard(fullText) : undefined;
+      const keyboard = final ? (confirmKeyboard ?? buildInlineKeyboard(fullText)) : undefined;
 
       // Try Markdown, fall back to plain text on parse error
       const mdRes = await fetch(`${TELEGRAM_API}${token}/editMessageText`, {
@@ -550,13 +700,20 @@ async function processMessage(
       }
     }
 
+    // Never rely on the model to phrase the confirmation ask — append it and
+    // offer one-tap buttons (their callback text "yes"/"no" comes back here).
+    if (pendingCreatedSince(ch, turnStartedAt)) {
+      fullText = fullText.trim() ? `${fullText.trim()}\n\n${CONFIRM_PROMPT}` : CONFIRM_PROMPT;
+      confirmKeyboard = CONFIRM_KEYBOARD;
+    }
+
     const finalText = fullText.trim();
 
     // ── Fast-path: short reply, no tool use ───────────────────────────────
     // Never sent a placeholder → one direct sendMessage call, done.
     if (!placeholderSent) {
       if (finalText) {
-        const keyboard = buildInlineKeyboard(finalText);
+        const keyboard = confirmKeyboard ?? buildInlineKeyboard(finalText);
         await sendDirectReply(token, chatId, finalText, keyboard);
       }
       return;
@@ -665,6 +822,7 @@ function getOrCreateChatContext(chatId: number, baseCtx: AgentContext): AgentCon
         turnCount: 0,
         messages:  [],
         taskQueue: [],
+        channel:   { kind: "telegram", chatId: String(chatId) },
       },
       lastActive: Date.now(),
     });
@@ -672,6 +830,28 @@ function getOrCreateChatContext(chatId: number, baseCtx: AgentContext): AgentCon
   const session = chatContexts.get(chatId)!;
   session.lastActive = Date.now();
   return session.context;
+}
+
+/**
+ * Upload a file into a Telegram chat as a document (original file, real name).
+ * Throws with Telegram's own reason so the tool can tell the user why.
+ */
+export async function sendTelegramDocument(token: string, chatId: string, file: FileToSend): Promise<void> {
+  const buf  = await readFile(file.absPath);
+  const form = new FormData();
+  form.append("chat_id", chatId);
+  form.append("document", new Blob([new Uint8Array(buf)], { type: file.mimeType }), file.fileName);
+  if (file.caption) form.append("caption", file.caption);
+
+  const res  = await fetch(`${TELEGRAM_API}${token}/sendDocument`, {
+    method: "POST",
+    body:   form,
+    signal: AbortSignal.timeout(120_000),
+  });
+  const data = await res.json().catch(() => null) as any;
+  if (!data?.ok) {
+    throw new Error(data?.description ? `Telegram said: ${data.description}` : `Telegram HTTP ${res.status}`);
+  }
 }
 
 async function sendTyping(token: string, chatId: number): Promise<void> {

@@ -31,12 +31,18 @@ export class EmailIntegration implements Integration {
 
   constructor(private context: () => AgentContext | null) {}
 
-  private resolveCredentials(): { user: string; pass: string } | null {
+  private resolveCredentials(): { user: string; pass: string; host: string; port: number; secure: boolean } | null {
     const ctx = this.context();
     if (!ctx) return null;
+    // Any provider over IMAP/SMTP (Quick Setup) takes precedence, matching email.ts.
+    const smtp = ctx.config?.tools?.smtp;
+    if (smtp?.host && smtp.user && smtp.pass) {
+      const port = parseInt(smtp.port || "587", 10);
+      return { user: smtp.user, pass: smtp.pass, host: smtp.host, port, secure: port === 465 };
+    }
     const gmail = ctx.config?.tools?.gmail;
     if (!gmail?.user || !gmail?.appPassword) return null;
-    return { user: gmail.user, pass: gmail.appPassword };
+    return { user: gmail.user, pass: gmail.appPassword, host: "smtp.gmail.com", port: 465, secure: true };
   }
 
   isEnabled(): boolean {
@@ -54,9 +60,10 @@ export class EmailIntegration implements Integration {
 
     try {
       const transporter = nodemailer.createTransport({
-        host: "smtp.gmail.com",
-        port: 465,
-        secure: true,
+        host: creds.host,
+        port: creds.port,
+        secure: creds.secure,
+        requireTLS: !creds.secure,
         auth: { user: creds.user, pass: creds.pass },
       });
 
@@ -74,7 +81,7 @@ export class EmailIntegration implements Integration {
       return {
         ok: true,
         latencyMs: Date.now() - t0,
-        detail: `Gmail SMTP verified for ${creds.user}`,
+        detail: `SMTP verified for ${creds.user} (${creds.host})`,
         credentialPreview: maskPassword(creds.pass),
         ts: now,
       };

@@ -4731,6 +4731,20 @@ const DRAFT_KEY = 'vouza_wizard_draft_v1';
 let _draftSaveTimer = null;
 
 /**
+ * Drafts live in localStorage — plaintext, readable by anything running on
+ * this origin and left behind on the machine. So never draft secrets
+ * (password-type fields: AI keys, app passwords, bot tokens) and never draft
+ * Quick Setup, which verifies and saves server-side as the user goes.
+ */
+function isDraftableField(el) {
+  if (!el || !el.id) return false;
+  if (el.id === 'guideInput' || el.id === 'convSearch' || el.id === 'memorySearch') return false;
+  if (el.type === 'password') return false;
+  if (el.closest && el.closest('#quickSetup')) return false;
+  return true;
+}
+
+/**
  * Snapshot every text/email/password/textarea field on the page and store
  * to localStorage. Debounced so we don't write on every keystroke.
  */
@@ -4739,9 +4753,8 @@ function scheduleDraftSave() {
   _draftSaveTimer = setTimeout(() => {
     try {
       const draft = {};
-      document.querySelectorAll('input[type="text"], input[type="email"], input[type="password"], textarea').forEach((el) => {
-        // Skip fields with no id, and skip the chat input
-        if (!el.id || el.id === 'guideInput' || el.id === 'convSearch' || el.id === 'memorySearch') return;
+      document.querySelectorAll('input[type="text"], input[type="email"], textarea').forEach((el) => {
+        if (!isDraftableField(el)) return;
         if (el.value && el.value.trim().length > 0) draft[el.id] = el.value;
       });
       if (Object.keys(draft).length > 0) {
@@ -4762,6 +4775,17 @@ function checkForDraftToRestore() {
     if (!raw) return;
     const draft = JSON.parse(raw);
     if (!draft.fields || Object.keys(draft.fields).length === 0) return;
+
+    // Scrub secrets that older versions stored (they drafted password fields).
+    const safe = Object.fromEntries(Object.entries(draft.fields).filter(([id]) => {
+      const el = document.getElementById(id);
+      return !el || isDraftableField(el);
+    }));
+    if (Object.keys(safe).length !== Object.keys(draft.fields).length) {
+      draft.fields = safe;
+      if (Object.keys(safe).length) localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+      else { localStorage.removeItem(DRAFT_KEY); return; }
+    }
 
     // If draft is older than 14 days, discard silently
     if (Date.now() - draft.ts > 14 * 24 * 60 * 60 * 1000) {
@@ -4827,8 +4851,8 @@ function discardDraft() {
 document.addEventListener('input', (e) => {
   const tag = e.target?.tagName;
   if (tag !== 'INPUT' && tag !== 'TEXTAREA') return;
-  // Only wizard fields (skip chat, search, etc.)
-  if (e.target.id === 'guideInput' || e.target.id === 'convSearch' || e.target.id === 'memorySearch') return;
+  // Only non-secret wizard fields (skip chat, search, passwords, Quick Setup)
+  if (!isDraftableField(e.target)) return;
   scheduleDraftSave();
 });
 
@@ -5042,3 +5066,514 @@ new MutationObserver(() => {
   attributes: true, attributeFilter: ['class'],
 });
 
+
+
+// ============================================================
+// QUICK SETUP — one thing per screen. The user pastes a key or
+// a password and presses Next; the server detects, verifies for
+// real and saves. GET /api/quick-setup/state lets a refresh
+// resume at the first step that isn't done.
+// ============================================================
+const qs = {
+  step: 1,
+  state: null,
+  preset: null,       // detected email servers for the typed address
+  qrSource: null,     // WhatsApp QR EventSource
+  tgPoll: null,       // Telegram "linked yet?" poll timer
+  phoneStarting: false,
+  phoneLinked: false,
+};
+const QS_STEPS = 5;
+
+async function qsApi(path, body) {
+  const init = body === undefined
+    ? {}
+    : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+  const res = await fetch(path, init);
+  let data = null;
+  try { data = await res.json(); } catch { /* non-JSON */ }
+  if (!data) throw new Error(`HTTP ${res.status}`);
+  return data;
+}
+
+const qsPause = (ms) => new Promise((r) => setTimeout(r, ms));
+const qsEl = (id) => document.getElementById(id);
+
+function qsMsg(n, text, kind) {
+  const el = qsEl(`qsMsg${n}`);
+  if (!el) return;
+  el.className = `qs-msg${kind ? ` ${kind}` : ''}`;
+  el.textContent = text || '';
+}
+
+function qsBusy(btn, busyLabel) {
+  if (!btn) return () => {};
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = busyLabel;
+  return () => { btn.disabled = false; btn.textContent = label; };
+}
+
+async function startQuickSetup() {
+  qsEl('welcomeScreen').style.display = 'none';
+  qsEl('quickSetup').style.display = 'flex';
+  try { qs.state = await qsApi('/api/quick-setup/state'); } catch { qs.state = null; }
+  const s = qs.state;
+  if (s?.profile?.userName) qsEl('qsName').value = s.profile.userName;
+  if (s?.email?.address)    qsEl('qsEmail').value = s.email.address;
+  qsRenderAi();
+  qsGo(qsFirstIncomplete());
+}
+
+function qsFirstIncomplete() {
+  const s = qs.state;
+  if (!s) return 1;
+  if (!s.ai.configured || !s.profile.userName) return 1;
+  if (!s.email.configured) return 2;
+  if (!s.folders.granted.length) return 3;
+  if (!(s.phone.whatsapp.connected || s.phone.telegram.linked)) return 4;
+  return 5;
+}
+
+function qsGo(n) {
+  qs.step = n;
+  document.querySelectorAll('#quickSetup .qs-step').forEach((el) => {
+    el.hidden = Number(el.dataset.qsStep) !== n;
+  });
+  qsRenderDots();
+  qsEl('qsBack').hidden = n === 1;
+  if (n !== 4) qsStopPhone();
+  if (n === 2 && qsEl('qsEmail').value) qsDetectEmail();
+  if (n === 3) qsRenderFolders();
+  if (n === 4) qsStartPhone();
+  if (n === 5) qsRenderDone();
+  const step = document.querySelector(`#quickSetup .qs-step[data-qs-step="${n}"]`);
+  const firstEmpty = [...step.querySelectorAll('input.qs-input')].find((i) => !i.closest('[hidden]') && !i.value);
+  (firstEmpty || step.querySelector('[data-qs-primary]:not([hidden])'))?.focus({ preventScroll: true });
+  qsEl('quickSetup').scrollTop = 0;
+}
+
+function qsRenderDots() {
+  const dots = qsEl('qsDots');
+  dots.innerHTML = Array.from({ length: QS_STEPS }, (_, i) => {
+    const n = i + 1;
+    const cls = n === qs.step ? 'current' : n < qs.step ? 'done' : '';
+    return `<span class="qs-dot ${cls}"></span>`;
+  }).join('');
+  dots.setAttribute('aria-valuenow', String(qs.step));
+  dots.setAttribute('aria-valuetext', `Step ${qs.step} of ${QS_STEPS}`);
+}
+
+// Enter presses the step's main button (kid-simple: type, Enter, done).
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || e.isComposing) return;
+  const box = qsEl('quickSetup');
+  if (!box || box.style.display !== 'flex') return;
+  if (!(e.target instanceof HTMLInputElement) || e.target.type === 'checkbox') return;
+  const step = document.querySelector(`#quickSetup .qs-step[data-qs-step="${qs.step}"]`);
+  if (e.target.id === 'qsTgToken') { e.preventDefault(); qsEl('qsTgBtn').click(); return; }
+  const btn = step?.querySelector('[data-qs-primary]:not([hidden])');
+  if (btn && !btn.disabled) { e.preventDefault(); btn.click(); }
+});
+
+// ── 1 · You + AI ─────────────────────────────────────────────
+function qsRenderAi() {
+  const ai = qs.state?.ai;
+  const ready = !!ai?.configured;
+  qsEl('qsAiBlock').hidden = ready;
+  qsEl('qsAiReady').hidden = !ready;
+  if (ready) {
+    qsEl('qsAiReady').textContent = ai.viaBuiltIn
+      ? '✓ Your AI is ready — nothing to set up'
+      : '✓ Your AI is connected';
+  }
+}
+
+async function qsSubmitYou(btn) {
+  const name = qsEl('qsName').value.trim();
+  const key = qsEl('qsAiKey').value.trim();
+  if (!name) {
+    qsMsg(1, 'Type your name first 🙂', 'error');
+    qsEl('qsName').focus();
+    return;
+  }
+  if (!qs.state?.ai?.configured && !key) {
+    qsMsg(1, 'Paste your AI key to continue. No key? Tap “Get a free key here”.', 'error');
+    qsEl('qsAiKey').focus();
+    return;
+  }
+  const done = qsBusy(btn, key ? 'Checking your key…' : 'Saving…');
+  try {
+    await qsApi('/api/quick-setup/profile', {
+      userName: name,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+    });
+    if (key) {
+      qsMsg(1, '', '');
+      const r = await qsApi('/api/quick-setup/ai', { key });
+      if (!r.ok) {
+        qsMsg(1, r.error, 'error');
+        qsEl('qsAiKey').classList.add('invalid');
+        qsEl('qsAiKey').focus();
+        return;
+      }
+      qsEl('qsAiKey').classList.remove('invalid');
+      qsEl('qsAiKey').value = '';
+      if (qs.state) qs.state.ai = { configured: true, ownKey: true, viaBuiltIn: false, provider: r.provider };
+      qsMsg(1, `✓ Connected to ${r.label}`, 'ok');
+      await qsPause(900);
+    }
+    if (qs.state) qs.state.profile.userName = name;
+    qsMsg(1, '', '');
+    qsRenderAi();
+    qsGo(2);
+  } catch {
+    qsMsg(1, "I couldn't save that. Make sure the assistant window is still open, then try again.", 'error');
+  } finally {
+    done();
+  }
+}
+
+// ── 2 · Email ────────────────────────────────────────────────
+async function qsDetectEmail() {
+  const address = qsEl('qsEmail').value.trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) return null;
+  if (qs.preset && qs.preset.forAddress === address) return qs.preset;
+  let r;
+  try { r = await qsApi('/api/quick-setup/email/detect', { address }); } catch { return null; }
+  if (!r.ok) return null;
+  qs.preset = { ...r.preset, forAddress: address };
+  const p = qs.preset;
+
+  const help = qsEl('qsEmailHelp');
+  if (p.appPasswordUrl) {
+    const twoStep = p.id === 'gmail' ? ' (Google asks for 2-Step Verification first — follow its steps.)' : '';
+    help.innerHTML =
+      `<div class="qs-card-title">${escHtml(p.label)} needs an App Password</div>` +
+      `It's a special password just for apps like this one — your normal password won't work.${twoStep}` +
+      `<ol><li>Tap the button and sign in</li><li>Type any name, like “Assistant”, and create it</li><li>Copy the code and paste it below</li></ol>` +
+      `<a class="qs-btn qs-btn-small" href="${escHtml(p.appPasswordUrl)}" target="_blank" rel="noopener">Create App Password ↗</a>`;
+  } else {
+    help.innerHTML =
+      `<div class="qs-card-title">Use your email password</div>` +
+      `If it isn't accepted, your provider may need an “app password” — look for it in your account's security settings.`;
+  }
+  help.hidden = false;
+  qsEl('qsEmailPassLabel').textContent = p.appPasswordUrl ? 'App Password' : 'Password';
+  qsEl('qsEmailPass').placeholder = p.id === 'gmail' ? '16 letters, like abcd efgh ijkl mnop' : '';
+  qsEl('qsImapHost').value = p.imapHost;
+  qsEl('qsImapPort').value = p.imapPort;
+  qsEl('qsSmtpHost').value = p.smtpHost;
+  qsEl('qsSmtpPort').value = p.smtpPort;
+  qsEl('qsServers').open = !!p.guessed;
+  // Re-rendering the help card can remove the element that had focus (e.g.
+  // the user tabbed onto the old "Create App Password" button) — put the
+  // caret where they'd type next instead of losing it.
+  if (!document.activeElement || document.activeElement === document.body) qsEl('qsEmailPass').focus();
+  return p;
+}
+
+async function qsSubmitEmail(btn) {
+  const address = qsEl('qsEmail').value.trim();
+  const password = qsEl('qsEmailPass').value;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) {
+    qsMsg(2, 'Type your full email address, like you@gmail.com', 'error');
+    qsEl('qsEmail').focus();
+    return;
+  }
+  if (!password.trim()) {
+    qsMsg(2, 'Paste the password first.', 'error');
+    qsEl('qsEmailPass').focus();
+    return;
+  }
+  const done = qsBusy(btn, 'Signing in…');
+  try {
+    await qsDetectEmail();
+    qsMsg(2, '', '');
+    const r = await qsApi('/api/quick-setup/email', {
+      address,
+      password,
+      imapHost: qsEl('qsImapHost').value.trim(),
+      imapPort: qsEl('qsImapPort').value.trim(),
+      smtpHost: qsEl('qsSmtpHost').value.trim(),
+      smtpPort: qsEl('qsSmtpPort').value.trim(),
+    });
+    if (!r.ok) {
+      qsMsg(2, r.error, 'error');
+      if (r.field === 'server') qsEl('qsServers').open = true;
+      if (r.field === 'password') { qsEl('qsEmailPass').classList.add('invalid'); qsEl('qsEmailPass').focus(); }
+      return;
+    }
+    qsEl('qsEmailPass').classList.remove('invalid');
+    qsEl('qsEmailPass').value = '';
+    if (qs.state) qs.state.email = { configured: true, address, provider: r.provider };
+    const unread = typeof r.unread === 'number'
+      ? ` — you have ${r.unread} unread email${r.unread === 1 ? '' : 's'}`
+      : '';
+    qsMsg(2, `✓ Connected${unread}`, 'ok');
+    await qsPause(1300);
+    qsMsg(2, '', '');
+    qsGo(3);
+  } catch {
+    qsMsg(2, "Something went wrong talking to the assistant. Try again in a moment.", 'error');
+  } finally {
+    done();
+  }
+}
+
+// ── 3 · Documents ────────────────────────────────────────────
+const QS_FOLDER_ICON = { Documents: '📄', Desktop: '🖥️', Downloads: '⬇️' };
+
+function qsRenderFolders() {
+  const list = qs.state?.folders?.suggestions || [];
+  const noneYet = !list.some((f) => f.granted);
+  qsEl('qsFolders').innerHTML = list.map((f, i) => {
+    const checked = f.granted || (noneYet && f.exists);
+    return `<label class="qs-folder${f.exists ? '' : ' missing'}">
+      <input type="checkbox" data-path="${escHtml(f.path)}" ${checked ? 'checked' : ''} ${f.exists ? '' : 'disabled'} id="qsFolder${i}">
+      <span class="ic" aria-hidden="true">${QS_FOLDER_ICON[f.label] || '📁'}</span>
+      <span>${escHtml(f.label)}<small>${f.exists ? escHtml(f.path) : 'Not found on this computer'}</small></span>
+    </label>`;
+  }).join('');
+}
+
+async function qsSubmitFolders(btn) {
+  const paths = [...document.querySelectorAll('#qsFolders input:checked')].map((i) => i.dataset.path);
+  if (!paths.length) { qsGo(4); return; }
+  const done = qsBusy(btn, 'Saving…');
+  try {
+    const r = await qsApi('/api/quick-setup/folders', { paths });
+    const added = (r.results || []).filter((x) => x.ok).map((x) => x.path);
+    if (qs.state) qs.state.folders.granted = added;
+    if (!r.ok) {
+      const bad = (r.results || []).filter((x) => !x.ok);
+      qsMsg(3, `I couldn't add ${bad.map((b) => b.path.split(/[\\/]/).pop()).join(', ')}: ${bad[0]?.error || 'unknown error'}. Untick it to continue.`, 'error');
+      return;
+    }
+    qsMsg(3, '', '');
+    qsGo(4);
+  } catch {
+    qsMsg(3, "Something went wrong saving that. Try again in a moment.", 'error');
+  } finally {
+    done();
+  }
+}
+
+// ── 4 · Phone ────────────────────────────────────────────────
+async function qsStartPhone() {
+  const s = qs.state;
+  if (qs.phoneLinked) return;
+  if (s?.phone?.whatsapp?.connected) { qsPhoneLinked('whatsapp', s.phone.whatsapp.owner); return; }
+  if (s?.phone?.telegram?.linked)    { qsPhoneLinked('telegram'); return; }
+  if (qs.phoneStarting) return;
+  qs.phoneStarting = true;
+  qsEl('qsWa').hidden = true;
+  qsEl('qsTg').hidden = true;
+  qsEl('qsPhoneSub').textContent = 'Starting your assistant… this takes a few seconds.';
+  qsMsg(4, '', '');
+  let r;
+  try { r = await qsApi('/api/quick-setup/launch', {}); } catch (e) { r = { ok: false, error: String(e) }; }
+  qs.phoneStarting = false;
+  if (!r.ok) {
+    qsEl('qsPhoneSub').textContent = "I couldn't start yet.";
+    qsMsg(4, r.error || 'Unknown error', 'error');
+    return;
+  }
+  if (qs.state) qs.state.agentRunning = true;
+  qsShowWhatsApp();
+}
+
+function qsShowWhatsApp() {
+  qsStopTelegramPoll();
+  qsEl('qsTg').hidden = true;
+  qsEl('qsWa').hidden = false;
+  qsEl('qsPhoneSub').textContent = 'Scan this code with WhatsApp to link your phone.';
+  qsOpenQrStream();
+}
+
+function qsOpenQrStream() {
+  qsCloseQrStream();
+  qsEl('qsQr').innerHTML = '<div class="qs-spinner" aria-label="Loading code"></div>';
+  const es = new EventSource('/api/whatsapp/qr-stream');
+  qs.qrSource = es;
+  es.addEventListener('qr', (ev) => {
+    try {
+      const d = JSON.parse(ev.data);
+      if (d.dataUrl) qsEl('qsQr').innerHTML = `<img src="${d.dataUrl}" alt="WhatsApp link code">`;
+    } catch { /* ignore malformed */ }
+  });
+  es.addEventListener('status', (ev) => {
+    try {
+      const d = JSON.parse(ev.data);
+      if (d.status === 'connected') qsOnWhatsAppConnected();
+      if (d.status === 'logged_out') qsMsg(4, 'WhatsApp signed out. Tap “Use WhatsApp instead” to get a new code.', 'error');
+    } catch { /* ignore malformed */ }
+  });
+  es.addEventListener('connected', () => qsOnWhatsAppConnected());
+  es.addEventListener('error', (ev) => {
+    // Server-sent "error" events carry JSON; plain connection drops don't.
+    if (ev && ev.data) {
+      try { qsMsg(4, JSON.parse(ev.data).message, 'error'); } catch { /* ignore */ }
+      qsCloseQrStream();
+    }
+  });
+}
+
+function qsCloseQrStream() {
+  // The server ends the stream once linked; close ours so the browser
+  // doesn't auto-reconnect in a loop.
+  if (qs.qrSource) { qs.qrSource.close(); qs.qrSource = null; }
+}
+
+async function qsOnWhatsAppConnected() {
+  qsCloseQrStream();
+  if (qs.phoneLinked) return;
+  qs.phoneLinked = true;
+  let r = {};
+  try { r = await qsApi('/api/quick-setup/whatsapp/linked', {}); } catch { /* still linked */ }
+  qsPhoneLinked('whatsapp', r.owner);
+}
+
+function qsPhoneLinked(kind, owner) {
+  qs.phoneLinked = true;
+  qsCloseQrStream();
+  qsStopTelegramPoll();
+  qsEl('qsWa').hidden = true;
+  qsEl('qsTg').hidden = true;
+  qsEl('qsPhoneSub').textContent = '';
+  const who = owner ? `${owner.name ? `${owner.name} · ` : ''}${owner.phone}` : '';
+  const banner = qsEl('qsPhoneDone');
+  banner.innerHTML = kind === 'whatsapp'
+    ? `✓ WhatsApp linked${who ? ` to ${escHtml(who)}` : ''}<span>I sent you a message in “Message yourself”. Reply there anytime.</span>`
+    : `✓ Telegram linked<span>Message your bot anytime — it answers only you.</span>`;
+  banner.hidden = false;
+  qsEl('qsSkip4').hidden = true;
+  qsEl('qsNext4').hidden = false;
+  qsEl('qsNext4').focus({ preventScroll: true });
+  if (qs.state) {
+    if (kind === 'whatsapp') qs.state.phone.whatsapp.connected = true;
+    else qs.state.phone.telegram.linked = true;
+  }
+}
+
+function qsShowTelegram() {
+  qsCloseQrStream();
+  qsEl('qsWa').hidden = true;
+  qsEl('qsTg').hidden = false;
+  qsEl('qsPhoneSub').textContent = 'Connect a Telegram bot instead.';
+  qsEl('qsTgToken').focus();
+}
+
+async function qsSubmitTelegram(btn) {
+  const token = qsEl('qsTgToken').value.trim();
+  if (!token) { qsMsg(4, 'Paste the token from @BotFather first.', 'error'); return; }
+  const done = qsBusy(btn, 'Connecting…');
+  try {
+    const r = await qsApi('/api/quick-setup/telegram', { token });
+    if (!r.ok) { qsMsg(4, r.error, 'error'); return; }
+    qsMsg(4, '', '');
+    qsEl('qsTgToken').value = '';
+    if (r.qrDataUrl) qsEl('qsTgQr').src = r.qrDataUrl;
+    if (r.link) qsEl('qsTgHref').href = r.link;
+    qsEl('qsTgLink').hidden = false;
+    qsStopTelegramPoll();
+    const started = Date.now();
+    qs.tgPoll = setInterval(async () => {
+      if (Date.now() - started > 30 * 60 * 1000) { qsStopTelegramPoll(); return; }
+      try {
+        const st = await qsApi('/api/quick-setup/telegram/status');
+        if (st.linked) qsPhoneLinked('telegram');
+      } catch { /* keep polling */ }
+    }, 2000);
+  } catch {
+    qsMsg(4, "Something went wrong talking to the assistant. Try again in a moment.", 'error');
+  } finally {
+    done();
+  }
+}
+
+function qsStopTelegramPoll() {
+  if (qs.tgPoll) { clearInterval(qs.tgPoll); qs.tgPoll = null; }
+}
+
+function qsStopPhone() {
+  qsCloseQrStream();
+  qsStopTelegramPoll();
+}
+
+// ── 5 · Done ─────────────────────────────────────────────────
+function qsRenderDone() {
+  const s = qs.state || { ai: {}, email: {}, folders: { granted: [] }, phone: { whatsapp: {}, telegram: {} } };
+  const n = s.folders.granted.length;
+  const items = [
+    [s.ai.configured, 'Your AI is connected', 'AI not connected — go back to step 1'],
+    [s.email.configured, `Email connected${s.email.address ? ` (${s.email.address})` : ''}`, 'Email not connected — you can add it later under Setup'],
+    [n > 0, `I can search ${n} folder${n === 1 ? '' : 's'}`, 'No folders shared — I can’t find your documents yet'],
+    [s.phone.whatsapp.connected || s.phone.telegram.linked,
+      s.phone.whatsapp.connected ? 'WhatsApp linked' : 'Telegram linked',
+      'Phone not linked — you can link it later under Setup'],
+  ];
+  qsEl('qsChecklist').innerHTML = items.map(([ok, yes, no]) =>
+    `<li class="${ok ? '' : 'todo'}"><span class="ic">${ok ? '✅' : '⚪'}</span><span>${escHtml(ok ? yes : no)}</span></li>`
+  ).join('');
+  qsRenderPower();
+}
+
+let qsPowerTimer = null;
+async function qsRenderPower(attempt = 0) {
+  clearTimeout(qsPowerTimer);
+  let p;
+  try { p = await qsApi('/api/power'); } catch { qsEl('qsPowerRows').textContent = ''; return; }
+  const rows = [];
+  const ka = p.keepAwake || {};
+  if (ka.state === 'active') {
+    rows.push(['✅', "This computer won't fall asleep while I'm running. Keep it plugged in."]);
+  } else if (ka.state === 'starting') {
+    rows.push(['⏳', 'Asking Windows to keep this computer awake…']);
+    if (attempt < 30) qsPowerTimer = setTimeout(() => qsRenderPower(attempt + 1), 3000);
+  } else if (ka.state === 'off') {
+    rows.push(['⏳', "I'll keep this computer awake once I'm running."]);
+  } else {
+    rows.push(['⚠️', `I couldn't stop this computer from sleeping${ka.detail ? ` (${ka.detail})` : ''}. Turn off “Sleep” in your power settings so I can answer while you're away.`]);
+  }
+  let html = rows.map(([ic, t]) => `<div class="qs-power-row"><span>${ic}</span><span>${escHtml(t)}</span></div>`).join('');
+  if (p.lidWillSleep) {
+    html += `<div class="qs-power-row"><span>⚠️</span><span>Closing the lid puts this laptop to sleep, and then I can't answer you.
+      Change <b>“When I close the lid”</b> to <b>“Do nothing”</b> for <b>Plugged in</b>.<br>
+      <button class="qs-btn qs-btn-small" onclick="qsOpenLidSettings(this)">Change lid setting</button></span></div>`;
+  }
+  qsEl('qsPowerRows').innerHTML = html;
+}
+
+async function qsOpenLidSettings(btn) {
+  const done = qsBusy(btn, 'Opening…');
+  try {
+    const r = await qsApi('/api/power/open-lid-settings', {});
+    if (!r.ok) qsMsg(5, r.error, 'error');
+    else qsMsg(5, 'Windows settings opened — pick “Do nothing” under Plugged in, then Save changes. Come back and press the button below.', 'info');
+  } catch {
+    qsMsg(5, "Couldn't open the settings. Search Windows for “Choose what closing the lid does”.", 'error');
+  } finally {
+    done();
+  }
+}
+
+async function qsFinish(btn) {
+  const done = qsBusy(btn, 'Finishing…');
+  try {
+    const r = await qsApi('/api/quick-setup/finish', { autostart: qsEl('qsAutostart').checked });
+    if (!r.ok) { qsMsg(5, r.error || "Couldn't finish setup.", 'error'); return; }
+    if (r.autostart && !r.autostart.ok) toast(`Couldn't set up automatic start: ${r.autostart.error}`, 'error');
+  } catch {
+    qsMsg(5, "Something went wrong talking to the assistant. Try again in a moment.", 'error');
+    return;
+  } finally {
+    done();
+  }
+  qsStopPhone();
+  clearTimeout(qsPowerTimer);
+  qsEl('quickSetup').style.display = 'none';
+  qsEl('mainApp').style.display = 'block';
+  init();
+  activateLiveMode();
+}

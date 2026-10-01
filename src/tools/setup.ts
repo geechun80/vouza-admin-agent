@@ -645,6 +645,16 @@ export const getSetupStatusTool = buildTool({
         : "❌ Gmail not connected",
     };
 
+    // Email — any other provider over IMAP/SMTP (Quick Setup). Only reported
+    // when present, so Gmail users don't see a confusing extra "❌".
+    const smtpCfg = (tools as any).smtp;
+    if (smtpCfg?.host && smtpCfg?.user && smtpCfg?.pass) {
+      status.email_imap_smtp = {
+        configured: true,
+        details: `✅ Email connected (${smtpCfg.user} via ${smtpCfg.host})`,
+      };
+    }
+
     // Email — Outlook
     const hasOutlook = !!(creds.outlookClientId && creds.outlookSecret && creds.outlookTenant);
     status.email_outlook = {

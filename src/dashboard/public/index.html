@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Vouza AI — Admin Agent Setup</title>
   <link rel="icon" type="image/png" href="/images/vee-bot.png">
-  <link rel="stylesheet" href="/app.css?v=2">
+  <link rel="stylesheet" href="/app.css?v=3">
 </head>
 <body>
 
@@ -24,13 +24,14 @@
     </p>
     <div class="welcome-features">
       <div class="welcome-feat"><div class="welcome-feat-dot"></div>Manages your emails</div>
-      <div class="welcome-feat"><div class="welcome-feat-dot"></div>Books your meetings</div>
-      <div class="welcome-feat"><div class="welcome-feat-dot"></div>Replies on WhatsApp</div>
-      <div class="welcome-feat"><div class="welcome-feat-dot"></div>Never sleeps</div>
+      <div class="welcome-feat"><div class="welcome-feat-dot"></div>Finds your documents</div>
+      <div class="welcome-feat"><div class="welcome-feat-dot"></div>Works from your phone</div>
+      <div class="welcome-feat"><div class="welcome-feat-dot"></div>Asks before sending</div>
     </div>
-    <button class="btn-welcome" onclick="startSetup()">
+    <button class="btn-welcome" onclick="startQuickSetup()">
       Get Started &nbsp;→
     </button>
+    <button class="welcome-advanced" onclick="startSetup()">Advanced setup (all options)</button>
 
     <!-- Shown only when a previous partial setup is detected -->
     <div id="welcomeResumeBadge" class="welcome-resume-badge" style="display:none">
@@ -40,6 +41,142 @@
         Your API key and settings are pre-filled — just re-test the step that failed.
       </div>
     </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     QUICK SETUP — one thing per screen. Paste it, press Next,
+     the agent works out and verifies the rest. (Old wizard =
+     "Advanced setup".)
+============================================================ -->
+<div id="quickSetup" aria-labelledby="qsTitle1">
+  <div class="qs-inner">
+    <div class="qs-top">
+      <img class="qs-logo" src="/images/vouza-logo.png" alt="Vouza">
+      <button class="qs-link qs-back" id="qsBack" onclick="qsGo(Math.max(1, qs.step - 1))" hidden>← Back</button>
+      <div class="qs-dots" id="qsDots" role="progressbar" aria-valuemin="1" aria-valuemax="5" aria-label="Setup progress"></div>
+    </div>
+
+    <!-- 1 · You + AI -->
+    <section class="qs-step" data-qs-step="1">
+      <h1 class="qs-title" id="qsTitle1">Hi! What's your name?</h1>
+      <p class="qs-sub">Your assistant will call you this.</p>
+      <input class="qs-input" id="qsName" type="text" autocomplete="given-name" placeholder="Your first name" maxlength="60">
+
+      <div id="qsAiBlock" hidden>
+        <label class="qs-label" for="qsAiKey">Paste your AI key</label>
+        <input class="qs-input" id="qsAiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-or-…">
+        <p class="qs-hint">Don't have one? <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">Get a free key here ↗</a> — it takes a minute. I'll work out which AI it is.</p>
+      </div>
+      <div class="qs-ready" id="qsAiReady" hidden></div>
+
+      <div class="qs-msg" id="qsMsg1" role="status" aria-live="polite"></div>
+      <div class="qs-actions">
+        <button class="qs-btn" data-qs-primary onclick="qsSubmitYou(this)">Next →</button>
+      </div>
+    </section>
+
+    <!-- 2 · Email -->
+    <section class="qs-step" data-qs-step="2" hidden>
+      <h1 class="qs-title">Connect your email</h1>
+      <p class="qs-sub">So I can read your emails and answer them when you ask.</p>
+      <input class="qs-input" id="qsEmail" type="email" autocomplete="email" placeholder="you@gmail.com" onchange="qsDetectEmail()">
+      <div class="qs-card" id="qsEmailHelp" hidden></div>
+      <label class="qs-label" for="qsEmailPass" id="qsEmailPassLabel">Password</label>
+      <input class="qs-input" id="qsEmailPass" type="password" autocomplete="off" spellcheck="false">
+      <details class="qs-advanced" id="qsServers">
+        <summary>Server settings</summary>
+        <div class="qs-grid">
+          <label>Incoming mail server (IMAP)<input id="qsImapHost" autocomplete="off" spellcheck="false"></label>
+          <label>Port<input id="qsImapPort" inputmode="numeric" autocomplete="off"></label>
+          <label>Outgoing mail server (SMTP)<input id="qsSmtpHost" autocomplete="off" spellcheck="false"></label>
+          <label>Port<input id="qsSmtpPort" inputmode="numeric" autocomplete="off"></label>
+        </div>
+      </details>
+      <div class="qs-msg" id="qsMsg2" role="status" aria-live="polite"></div>
+      <div class="qs-actions">
+        <button class="qs-link" onclick="qsGo(3)">Skip for now</button>
+        <button class="qs-btn" data-qs-primary onclick="qsSubmitEmail(this)">Connect email</button>
+      </div>
+    </section>
+
+    <!-- 3 · Documents -->
+    <section class="qs-step" data-qs-step="3" hidden>
+      <h1 class="qs-title">Which folders can I look in?</h1>
+      <p class="qs-sub">When you ask from your phone, I'll search these and send you the file. I can only <b>read</b> them — I never delete or change anything.</p>
+      <div class="qs-folders" id="qsFolders"></div>
+      <div class="qs-msg" id="qsMsg3" role="status" aria-live="polite"></div>
+      <div class="qs-actions">
+        <button class="qs-link" onclick="qsGo(4)">Skip for now</button>
+        <button class="qs-btn" data-qs-primary onclick="qsSubmitFolders(this)">Next →</button>
+      </div>
+    </section>
+
+    <!-- 4 · Phone -->
+    <section class="qs-step" data-qs-step="4" hidden>
+      <h1 class="qs-title">Connect your phone</h1>
+      <p class="qs-sub" id="qsPhoneSub">Starting your assistant…</p>
+
+      <div id="qsWa" hidden>
+        <div class="qs-qr" id="qsQr"><div class="qs-spinner" aria-label="Loading code"></div></div>
+        <ol class="qs-steps-list">
+          <li>Open <b>WhatsApp</b> on your phone</li>
+          <li>Tap <b>Settings</b> → <b>Linked devices</b> → <b>Link a device</b></li>
+          <li>Point your phone at this code</li>
+        </ol>
+        <button class="qs-link" onclick="qsShowTelegram()">Use Telegram instead</button>
+      </div>
+
+      <div id="qsTg" hidden>
+        <ol class="qs-steps-list">
+          <li>In Telegram, open <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather ↗</a></li>
+          <li>Send <b>/newbot</b> and pick any name</li>
+          <li>Copy the token it gives you and paste it here</li>
+        </ol>
+        <input class="qs-input" id="qsTgToken" type="password" autocomplete="off" spellcheck="false" placeholder="123456789:ABC…">
+        <div class="qs-actions qs-actions-left">
+          <button class="qs-btn qs-btn-small" id="qsTgBtn" onclick="qsSubmitTelegram(this)">Connect Telegram</button>
+        </div>
+        <div id="qsTgLink" hidden>
+          <div class="qs-qr"><img id="qsTgQr" alt="Code that opens your Telegram bot"></div>
+          <p class="qs-sub qs-center">Point your phone camera at this code (or <a id="qsTgHref" target="_blank" rel="noopener">open the link</a>), then tap <b>START</b>.</p>
+        </div>
+        <button class="qs-link" onclick="qsShowWhatsApp()">Use WhatsApp instead</button>
+      </div>
+
+      <div class="qs-done-banner" id="qsPhoneDone" hidden></div>
+      <div class="qs-msg" id="qsMsg4" role="status" aria-live="polite"></div>
+      <div class="qs-actions">
+        <button class="qs-link" id="qsSkip4" onclick="qsGo(5)">Skip for now</button>
+        <button class="qs-btn" id="qsNext4" data-qs-primary onclick="qsGo(5)" hidden>Next →</button>
+      </div>
+    </section>
+
+    <!-- 5 · Done -->
+    <section class="qs-step" data-qs-step="5" hidden>
+      <h1 class="qs-title">You're all set! 🎉</h1>
+      <ul class="qs-checklist" id="qsChecklist"></ul>
+
+      <div class="qs-card" id="qsPower">
+        <div class="qs-card-title">Working while you're away</div>
+        <div id="qsPowerRows"></div>
+      </div>
+
+      <label class="qs-check"><input type="checkbox" id="qsAutostart" checked> Start my assistant automatically when this computer turns on</label>
+
+      <div class="qs-card qs-try">
+        <div class="qs-card-title">Try it from your phone</div>
+        <div>“Any important emails today?”</div>
+        <div>“Find my insurance policy and send it to me”</div>
+        <div>“Reply to Sarah: I'll be there at 3”</div>
+        <p class="qs-hint">Before I send an email for you, I'll always ask you to reply YES.</p>
+      </div>
+
+      <div class="qs-msg" id="qsMsg5" role="status" aria-live="polite"></div>
+      <div class="qs-actions">
+        <button class="qs-btn" data-qs-primary onclick="qsFinish(this)">Open my assistant →</button>
+      </div>
+    </section>
   </div>
 </div>
 
@@ -641,6 +778,6 @@
 <!-- Toasts -->
 <div class="toast-box" id="toastBox"></div>
 
-<script src="/app.js?v=2"></script>
+<script src="/app.js?v=3"></script>
 </body>
 </html>

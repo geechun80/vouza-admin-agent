@@ -25,6 +25,8 @@ import { setAgentInstance } from "../../bridge/agentBridge.js";
 import { streamChat, clearSession } from "./chat.js";
 import { handleHealthDetailed } from "./health-detailed.js";
 import { handleSetupPipelineTest } from "./setup-pipeline.js";
+import { registerQuickSetupRoutes } from "./quick-setup.js";
+import { realSmtpProbe } from "../../orchestrator/probes/smtpProbe.js";
 import { createMemoryStore } from "../../memory/store.js";
 import { handleWAHAEvent } from "../../whatsapp/wahaListener.js";
 import {
@@ -596,6 +598,41 @@ export async function startDashboard(port = 3456): Promise<void> {
   // orchestrator runner and cleans up listeners on client disconnect.
   app.post("/api/setup/pipeline/test", requireLocalOrigin, handleSetupPipelineTest);
 
+  // --- Quick Setup: "paste it, click Next, the agent does the rest" ---
+  // Shares the launch path (and the `launching` race guard) with /api/agent/launch.
+  const ensureAgentRunning = async (): Promise<{ ok: boolean; error?: string }> => {
+    if (agentInstance) return { ok: true };
+    if (launching) return { ok: false, error: "The assistant is already starting — give it a few seconds." };
+    launching = true;
+    try {
+      agentInstance = await launchAgent();
+      setAgentInstance(agentInstance);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    } finally {
+      launching = false;
+    }
+  };
+  registerQuickSetupRoutes(app, {
+    requireLocalOrigin,
+    loadConfig:   loadSetupConfig,
+    saveConfig:   saveSetupConfig,
+    mergeConfig:  deepMerge,
+    getAgent:     () => agentInstance,
+    launchAgent:  ensureAgentRunning,
+    restartAgent: async () => {
+      if (agentInstance) {
+        try { await agentInstance.stop(); } catch { /* relaunch anyway */ }
+        agentInstance = null;
+        setAgentInstance(null);
+      }
+      return ensureAgentRunning();
+    },
+    operatorKeyUsable: async () =>
+      !!(process.env.VOUZA_API_KEY || "").trim() && (await verifyOperatorKey()).status !== "invalid",
+  });
+
   // --- Manually probe a single integration (live API call right now) ---
   app.post("/api/integrations/:id/probe", requireLocalOrigin, async (req, res) => {
     try {
@@ -1049,11 +1086,18 @@ export async function startDashboard(port = 3456): Promise<void> {
         if (isSensitiveField(k)) ch.config[k] = maskKey(v);
       }
     }
-    for (const t of Object.values(masked.tools)) {
+    masked.tools = { ...masked.tools };
+    for (const [name, tool] of Object.entries(masked.tools)) {
+      const t: any = { ...(tool as any) };
       t.config = { ...t.config };
       for (const [k, v] of Object.entries(t.config)) {
-        if (isSensitiveField(k)) t.config[k] = maskKey(v);
+        if (isSensitiveField(k)) t.config[k] = maskKey(v as string);
       }
+      // Some tools (e.g. smtp) keep credentials at the top level, not in config.
+      for (const [k, v] of Object.entries(t)) {
+        if (k !== "config" && typeof v === "string" && isSensitiveField(k)) t[k] = maskKey(v);
+      }
+      (masked.tools as any)[name] = t;
     }
     res.json(masked);
   });
@@ -1906,7 +1950,9 @@ async function testConnection(type: string, config: Record<string, string>): Pro
 
     case "openrouter": {
       try {
-        const res = await fetch("https://openrouter.ai/api/v1/models", {
+        // Rule 66: /api/v1/models is PUBLIC (200 for any key, even revoked).
+        // /api/v1/key is auth-gated and 401s for a bad key.
+        const res = await fetch("https://openrouter.ai/api/v1/key", {
           headers: {
             Authorization: `Bearer ${config.apiKey}`,
             "HTTP-Referer": "https://adminagent.app",
@@ -1914,9 +1960,7 @@ async function testConnection(type: string, config: Record<string, string>): Pro
           },
         });
         if (res.ok) {
-          const data = await res.json();
-          const count = data?.data?.length ?? "200+";
-          return { success: true, message: `OpenRouter connected — ${count} models available!` };
+          return { success: true, message: "OpenRouter connected — your key works!" };
         }
         const err = await res.text();
         return { success: false, message: `OpenRouter error: ${err.slice(0, 200)}` };
@@ -2048,8 +2092,13 @@ async function testConnection(type: string, config: Record<string, string>): Pro
         return { success: false, message: `Connection failed: ${e}` };
       }
 
-    case "gmail":
-      return { success: true, message: "Gmail credentials saved. Will verify on first use." };
+    case "gmail": {
+      // Real SMTP handshake (no email sent) — never report "connected" untested.
+      const r = await realSmtpProbe(config.gmailUser || "", config.gmailPass || config.gmailAppPassword || "");
+      return r.ok
+        ? { success: true, message: "Gmail connected — sign-in verified." }
+        : { success: false, message: [r.error, r.suggestedFix].filter(Boolean).join(" ") };
+    }
 
     case "google-unified":
       try {

@@ -25,8 +25,10 @@ Email · Calendar · WhatsApp · Telegram · Files · Voice · Web search — al
 
 ## ✨ Features
 
+- 🚀 **Quick Setup** — five plain screens: paste a key, press Next. The agent detects the provider, verifies for real, saves, and links your phone.
+- 📱 **Works from your phone** — WhatsApp ("Message yourself") or Telegram. Finds documents and *sends you the file*; asks for **YES** before sending any email.
 - 🧠 **Multi-provider AI** — Anthropic, OpenAI, Gemini, DeepSeek, xAI, OpenRouter (100+ models). One key, automatic failover.
-- 📬 **Email + Calendar** — Gmail (App Password or Service Account), Google Calendar, dedicated AgentMail inbox.
+- 📬 **Email + Calendar** — Gmail, Yahoo, iCloud, Zoho or any IMAP/SMTP mailbox (App Password), Google Calendar, dedicated AgentMail inbox.
 - 💬 **Two-way messaging** — Telegram bot, WhatsApp (native QR via Baileys, no Docker required), Slack (Bolt SDK — coming).
 - 🔧 **Self-healing setup** — structured `detect → validate → test → save → confirm → live-test` pipeline replaces ad-hoc retries.
 - 📊 **Observability built-in** — per-integration p50/p95 latency, retry counts, webhook log, failed-action retry, API spend tracking.
@@ -95,9 +97,25 @@ For 24/7 background: double-click **`install-autostart.bat`** (uses Task Schedul
 </tr>
 </table>
 
+### 🚀 Quick Setup — the default
+
+Open the dashboard and press **Get Started**. Five screens, one question each:
+
+| Screen | You do | The agent does |
+|---|---|---|
+| **You** | Type your name; paste an AI key (skipped if a built-in key works) | Works out which AI the key belongs to and checks it live |
+| **Email** | Type your address + App Password | Finds the mail servers (including Google Workspace / Microsoft 365 on your own domain), signs in to read **and** send, shows your unread count |
+| **Documents** | Tick Documents / Desktop / Downloads | Grants **read-only** access — it can never delete or change files |
+| **Phone** | Scan a QR with WhatsApp (or tap a Telegram link) | Starts itself, links your phone, says hello in "Message yourself" |
+| **All set** | Untick anything you don't want | Keeps the computer awake, checks the lid setting, optionally starts at login |
+
+Refreshing or closing the page mid-way is fine — it resumes at the first unfinished screen. Need every option? Use **Advanced setup (all options)** under the Get Started button.
+
+> **Why an App Password instead of "Sign in with Google"?** Gmail's read/send permissions are restricted: a public app must pass Google verification plus an annual third-party security assessment, and until then users see an "unverified app" warning, there's a 100-user cap, and sign-ins expire every 7 days. App Passwords work today with no approval process.
+
 ### 🔑 Get your AI key
 
-You only need **one**. Paste it directly into the Setup Wizard — no file editing.
+You only need **one**. Paste it into Quick Setup (or the Advanced wizard) — no file editing.
 
 | Provider | Get a key | Format |
 |---|---|---|
@@ -184,9 +202,21 @@ After the wizard, use the **🔌 Setup** panel in the dashboard to connect chann
 
 ---
 
+## 📱 Using it from your phone
+
+Message it in WhatsApp's **"Message yourself"** chat (or your Telegram bot). Phone chats get a deliberately small toolset: read and send email, search the folders you shared, **send you the actual file**, read your calendar, search the web, remember things. Deleting, running commands, browsing, changing settings — desktop only.
+
+- **Nothing is sent without your YES.** When the agent wants to send or reply to an email, it shows who, the subject and any attachments, then waits. Reply `yes` (or tap ✅ on Telegram) to send, `no` to cancel; anything else cancels. This is enforced in code — text inside an email or document can't trigger a send — and a voice note never counts as YES.
+- **Files come to you.** "Find my insurance policy and send it to me" delivers the PDF in the chat (up to 45 MB, shared folders only).
+- **Only you.** WhatsApp answers your own number plus anyone you allow-list. A Telegram bot answers only the person who linked it with the one-time link from setup; strangers get "This is a private assistant".
+
+**Keeping it reachable while you're away.** While the agent runs, it asks the computer not to idle-sleep (Windows, macOS, Linux with systemd) and lets go when it stops — even after a crash. It can't override the lid: if closing the lid puts your laptop to sleep, the agent stops answering until you open it. Quick Setup checks this setting and offers a **Change lid setting** button (Windows: *When I close the lid → Do nothing* for *Plugged in*). Keep the laptop plugged in. If the computer does sleep: Telegram messages are answered when it wakes (Telegram holds them for 24 hours); WhatsApp messages sent during the sleep are not answered — send them again.
+
+---
+
 ## 🛠️ Running 24/7
 
-For "always running" deployments — survives reboots, restarts on crash.
+For "always running" deployments — survives reboots, restarts on crash. (Quick Setup's last screen can set up the Windows login task for you.)
 
 <table>
 <tr>

@@ -8,14 +8,17 @@
 // IPC Message Protocol
 // ────────────────────
 // Parent → Worker:
-//   { type: "start";       config: WorkerConfig }
-//   { type: "send_reply";  chatId: string; text: string }
+//   { type: "start";         config: WorkerConfig }
+//   { type: "send_reply";    chatId: string; text: string }
+//   { type: "send_document"; reqId: string; chatId: string; filePath: string;
+//                            fileName: string; mimeType: string; caption?: string }
 //   { type: "stop" }
 //
 // Worker → Parent:
 //   { type: "qr";            data: string }
-//   { type: "status";        status: BaileysStatus }
+//   { type: "status";        status: BaileysStatus; ownerJid?: string; ownerName?: string }
 //   { type: "incoming_text"; chatId: string; fromName: string; text: string; isVoice: boolean }
+//   { type: "send_result";   reqId: string; ok: boolean; error?: string }
 //   { type: "reset_command"; chatId: string }
 //   { type: "log";           level: "info"|"warn"|"error"; message: string }
 // =============================================================================
@@ -24,14 +27,15 @@ import makeWASocket, {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
-  isJidBroadcast,
   downloadMediaMessage,
+  generateMessageIDV2,
   type WASocket,
 } from "@whiskeysockets/baileys";
 import { Boom }     from "@hapi/boom";
-import { mkdir }    from "fs/promises";
+import { mkdir, readFile } from "fs/promises";
 import { transcribeAudioBuffer } from "../voice/transcriber.js";
 import type { WhisperConfig } from "../voice/transcriber.js";
+import { classifyIncoming, ownerIdsFromUser, SentIdSet } from "./selfChat.js";
 
 // ---------------------------------------------------------------------------
 // Worker config (received from parent via IPC)
@@ -70,6 +74,20 @@ let _connected     = false;
 let _reconnecting  = false;
 let _config:       WorkerConfig | null = null;
 
+// Ids of messages this worker sent. In the owner's self-chat our own replies
+// would otherwise look exactly like the owner typing (both are fromMe).
+const sentIds = new SentIdSet();
+
+/**
+ * Every outgoing message goes through here. The id is generated and recorded
+ * BEFORE sending, so the echo guard cannot lose a race with the network.
+ */
+async function sendTracked(sock: WASocket, chatId: string, content: any): Promise<void> {
+  const messageId = generateMessageIDV2(sock.user?.id);
+  sentIds.add(messageId);
+  await sock.sendMessage(chatId, content, { messageId });
+}
+
 // ---------------------------------------------------------------------------
 // IPC helpers
 // ---------------------------------------------------------------------------
@@ -102,6 +120,15 @@ process.on("message", (msg: any) => {
       sendToChat(msg.chatId as string, msg.text as string).catch((err) => {
         log("warn", `send_reply failed for ${msg.chatId}: ${err}`);
       });
+      break;
+
+    case "send_document":
+      // The parent already checked the path against the workspace + folder
+      // grants. The parent waits on send_result, so always answer.
+      sendDocument(msg).then(
+        () => ipc({ type: "send_result", reqId: msg.reqId, ok: true }),
+        (err) => ipc({ type: "send_result", reqId: msg.reqId, ok: false, error: String(err?.message ?? err) }),
+      );
       break;
 
     case "stop":
@@ -158,8 +185,9 @@ async function connect(): Promise<void> {
       _connected    = true;
       _reconnecting = false;
       // Include the linked account's JID so the manager can target proactive
-      // scheduled messages at the owner ("message yourself" thread).
-      ipc({ type: "status", status: "connected", ownerJid: getOwnerJid() });
+      // scheduled messages at the owner ("message yourself" thread), and the
+      // profile name so setup can greet the user without asking for it.
+      ipc({ type: "status", status: "connected", ownerJid: getOwnerJid(), ownerName: sock.user?.name || undefined });
     }
 
     if (connection === "close") {
@@ -285,36 +313,33 @@ async function connect(): Promise<void> {
     (_config?.allowedSenders ?? []).map(normalizeJid)
   );
 
-  const isAllowed = (jid: string): boolean => {
-    const owner = getOwnerJid();
-    // Owner is always allowed — Aerick must always be able to talk to his own agent
-    if (owner && jid === owner) return true;
-    return allowedJids.has(jid);
-  };
-
   // ── Incoming messages ──────────────────────────────────────────────────────
+  // 'notify' = delivered live. 'append' covers history sync and our own
+  // sends, neither of which is an instruction.
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
     if (type !== "notify") return;
+    const owner = ownerIdsFromUser(sock.user);
 
     for (const msg of messages) {
-      if (msg.key.fromMe)                              continue;
-      if (!msg.key.remoteJid)                          continue;
-      if (isJidBroadcast(msg.key.remoteJid))           continue;
-      if (msg.key.remoteJid.endsWith("@g.us"))         continue; // no group chats
-
-      const chatId   = msg.key.remoteJid;
-      const fromName = msg.pushName || chatId.split("@")[0] || "User";
-
-      // ── SAFETY GATE: allowlist enforcement ──────────────────────────────
-      // If the sender isn't on the allowlist (and isn't the owner), DROP
-      // the message silently. We don't even send a "permission denied"
-      // reply because that would (a) confirm to spammers that the number
-      // is active and (b) confuse innocent friends who don't know an agent
-      // is running.
-      if (!isAllowed(chatId)) {
-        log("info", `[allowlist] dropped message from ${fromName} (${chatId}) — not on allowlist`);
+      // ── SAFETY GATE (see selfChat.ts) ───────────────────────────────────
+      // Owner's self-chat → act. Owner's chats with friends → never.
+      // Others → only when their RESOLVED phone number is allowlisted; a raw
+      // LID is never matched as if it were a phone number. Dropped silently:
+      // a "permission denied" reply would confirm to spammers the number is
+      // live and confuse friends who don't know an agent is running.
+      const decision = classifyIncoming(msg.key, owner, allowedJids, sentIds);
+      if (!decision.accept) {
+        if (decision.reason === "not_allowed" || decision.reason === "lid_unresolved") {
+          const who = decision.reason === "lid_unresolved" ? "an unresolved WhatsApp ID" : (msg.key.remoteJid ?? "?");
+          log("info", `[allowlist] dropped message from ${msg.pushName || "unknown"} (${who}) — ${decision.reason}`);
+        }
         continue;
       }
+
+      const chatId   = decision.chatId;
+      const fromName = decision.isSelfChat
+        ? (sock.user?.name || msg.pushName || "Owner")
+        : (msg.pushName || (decision.senderPn ?? chatId).split("@")[0] || "User");
 
       const textBody = msg.message?.conversation ??
                        msg.message?.extendedTextMessage?.text ?? "";
@@ -325,7 +350,7 @@ async function connect(): Promise<void> {
       // /reset and /start — handled locally; tell parent to clear session state
       if (textBody === "/reset" || textBody === "/start") {
         ipc({ type: "reset_command", chatId });
-        await sock.sendMessage(chatId, {
+        await sendTracked(sock, chatId, {
           text: "✅ Conversation reset! Starting fresh — how can I help you?",
         }).catch(() => {});
         continue;
@@ -356,13 +381,13 @@ async function handleVoiceMessage(
   const whisperCfg = buildWhisperConfig();
 
   if (!whisperCfg) {
-    await sock.sendMessage(chatId, {
+    await sendTracked(sock, chatId, {
       text: "🎙️ Voice transcription requires a Whisper API key.\nConfigure it in the setup wizard → Voice Transcription card.",
     }).catch(() => {});
     return "";
   }
 
-  await sock.sendMessage(chatId, { text: "🎙️ Transcribing your voice message…" }).catch(() => {});
+  await sendTracked(sock, chatId, { text: "🎙️ Transcribing your voice message…" }).catch(() => {});
 
   try {
     const silentLogger = {
@@ -378,14 +403,14 @@ async function handleVoiceMessage(
     ) as Buffer;
 
     if (!buffer || buffer.length === 0) {
-      await sock.sendMessage(chatId, { text: "⚠️ Could not download voice message. Please try again." }).catch(() => {});
+      await sendTracked(sock, chatId, { text: "⚠️ Could not download voice message. Please try again." }).catch(() => {});
       return "";
     }
 
     const transcript = await transcribeAudioBuffer(buffer, "audio/ogg", "voice.ogg", whisperCfg);
 
     if (!transcript) {
-      await sock.sendMessage(chatId, { text: "⚠️ No speech detected. Please try again." }).catch(() => {});
+      await sendTracked(sock, chatId, { text: "⚠️ No speech detected. Please try again." }).catch(() => {});
       return "";
     }
 
@@ -394,7 +419,7 @@ async function handleVoiceMessage(
 
   } catch (err) {
     log("error", `Voice transcription failed for ${chatId}: ${err}`);
-    await sock.sendMessage(chatId, {
+    await sendTracked(sock, chatId, {
       text: "⚠️ Sorry, couldn't transcribe that. Please send a text message instead.",
     }).catch(() => {});
     return "";
@@ -422,8 +447,26 @@ async function sendToChat(chatId: string, text: string): Promise<void> {
   }
   const MAX_CHUNK = _config?.maxChunk ?? 3800;
   for (let i = 0; i < text.length; i += MAX_CHUNK) {
-    await activeSock.sendMessage(chatId, { text: text.slice(i, i + MAX_CHUNK) });
+    await sendTracked(activeSock, chatId, { text: text.slice(i, i + MAX_CHUNK) });
   }
+}
+
+/**
+ * Send a file as a WhatsApp document. Always a document (never a compressed
+ * photo), so the person gets the original file with its real name.
+ */
+async function sendDocument(msg: {
+  chatId: string; filePath: string; fileName: string; mimeType: string; caption?: string;
+}): Promise<void> {
+  const sock = activeSock;
+  if (!sock || !_connected) throw new Error("WhatsApp is not connected right now.");
+  const buffer = await readFile(msg.filePath);
+  await sendTracked(sock, msg.chatId, {
+    document: buffer,
+    mimetype: msg.mimeType,
+    fileName: msg.fileName,
+    ...(msg.caption ? { caption: msg.caption } : {}),
+  });
 }
 
 // ---------------------------------------------------------------------------
