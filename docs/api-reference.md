@@ -140,7 +140,7 @@ Server-Sent Events. CSRF-guarded.
 
 Request body:
 ```json
-{ "integration": "gmail", "input": { "credentials": { "gmailUser": "...", "gmailPass": "abcd efgh ijkl mnop" } } }
+{ "integration": "gmail", "input": { "credentials": { "gmailUser": "...", "gmailPass": "xxxx xxxx xxxx xxxx" } } }
 ```
 
 Valid integrations: `gmail`, `google_calendar`, `telegram`, `whatsapp`.

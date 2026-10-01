@@ -66,7 +66,7 @@ describe("google pipeline — custom SMTP creds rejected at detect", () => {
     const r = await runPipeline(
       p,
       {
-        credentials: { smtpHost: "smtp.mail.yahoo.com", smtpUser: "me@yahoo.com", smtpPass: "x" },
+        credentials: { smtpHost: "smtp.example.com", smtpUser: "user@example.com", smtpPass: "not-a-real-password" },
         variant: "gmail",
       },
       { integration: "gmail", logger: silent, config: {} as any },
@@ -146,7 +146,7 @@ describe("google pipeline — Gmail App Password happy path", () => {
     const r = await runPipeline(
       p,
       {
-        credentials: { gmailUser: "me@gmail.com", gmailPass: "abcd efgh ijkl mnop" },
+        credentials: { gmailUser: "user@example.com", gmailPass: "fake fake fake fake" },
         variant: "gmail",
       },
       makeCtx(),

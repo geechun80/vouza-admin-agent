@@ -35,7 +35,7 @@ after(() => rmSync(dir, { recursive: true, force: true }));
 
 const SAMPLE = {
   agent: { name: "Vee", model: "gpt-4o", phone: "+6591234567" },
-  credentials: { openrouterApiKey: "sk-or-v1-abcdefghijklmnop", gmailPass: "abcd efgh ijkl mnop" },
+  credentials: { openrouterApiKey: "sk-or-v1-not-a-real-key-000", gmailPass: "fake fake fake fake" },
   channels: { telegram: { enabled: true, config: { telegramToken: "123456:ABCDEF" } } },
   tools: { calendar: { config: { googleSaKey: { type: "service_account", private_key: "-----BEGIN…" } } } },
 };
@@ -62,7 +62,7 @@ describe("sealing and opening", () => {
     assert.ok(sealed.tools.calendar.config.googleSaKey.type.startsWith(ENC_PREFIX), "everything under a secret field");
     assert.equal(sealed.agent.model, "gpt-4o");
     assert.equal(sealed.agent.phone, "+6591234567");
-    assert.doesNotMatch(JSON.stringify(sealed), /sk-or-v1|abcd efgh|123456:ABCDEF|BEGIN/);
+    assert.doesNotMatch(JSON.stringify(sealed), /sk-or-v1|fake fake|123456:ABCDEF|BEGIN/);
     assert.equal(hasPlaintextSecrets(sealed), false);
     assert.equal(hasPlaintextSecrets(SAMPLE), true);
   });
@@ -100,7 +100,7 @@ describe("files", () => {
     const f = join(dir, "config.json");
     await writeSealedJson(f, SAMPLE);
     const onDisk = readFileSync(f, "utf-8");
-    assert.doesNotMatch(onDisk, /sk-or-v1|abcd efgh|123456:ABCDEF|BEGIN/);
+    assert.doesNotMatch(onDisk, /sk-or-v1|fake fake|123456:ABCDEF|BEGIN/);
     assert.match(onDisk, /"model": "gpt-4o"/);
     assert.deepEqual(await readSealedJson(f, null), SAMPLE);
     assert.equal(readdirSync(dir).filter((n) => n.endsWith(".tmp")).length, 0, "atomic write leaves no temp file");

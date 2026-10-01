@@ -157,7 +157,7 @@ const INTEGRATION_GUIDES: Record<string, {
       {
         key:   "gmailPass",
         label: "Gmail App Password (16 characters)",
-        example: "abcd efgh ijkl mnop",
+        example: "xxxx xxxx xxxx xxxx",
         howTo:
           "This is NOT your normal Gmail password — it is a special 16-character app password:\n" +
           "  1. Go to myaccount.google.com → Security\n" +

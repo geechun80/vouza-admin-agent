@@ -150,8 +150,8 @@ describe("Quick Setup — email provider detection", () => {
 
 describe("Quick Setup — email verification is real and explains failures", () => {
   const login: EmailLogin = {
-    address: "me@gmail.com", password: "abcd efgh ijkl mnop",
-    imapHost: "imap.gmail.com", imapPort: 993, smtpHost: "smtp.gmail.com", smtpPort: 587,
+    address: "user@example.com", password: "fake fake fake fake",
+    imapHost: "imap.example.com", imapPort: 993, smtpHost: "smtp.example.com", smtpPort: 587,
   };
 
   it("success returns the unread count, and Gmail app-password spaces are stripped", async () => {
@@ -161,7 +161,7 @@ describe("Quick Setup — email verification is real and explains failures", () 
       smtp: async () => {},
     });
     assert.deepEqual(r, { ok: true, unread: 12 });
-    assert.equal(seenPass, "abcdefghijklmnop");
+    assert.equal(seenPass, "fakefakefakefake");
   });
 
   it("checks BOTH reading (IMAP) and sending (SMTP)", async () => {
@@ -197,18 +197,18 @@ describe("Quick Setup — email verification is real and explains failures", () 
 });
 
 describe("Quick Setup — saved config shape", () => {
-  const base = { password: "pw", imapHost: "imap.x.com", imapPort: 993, smtpHost: "smtp.x.com", smtpPort: 465 };
+  const base = { password: "not-a-real-password", imapHost: "imap.example.com", imapPort: 993, smtpHost: "smtp.example.com", smtpPort: 465 };
 
   it("Gmail keeps the existing Gmail path the loader already maps", () => {
-    const p = emailConfigPatch(emailPresetFor("me@gmail.com"), { address: "me@gmail.com", ...base, password: "abcd efgh" });
-    assert.deepEqual(p.channels.email.config, { gmailUser: "me@gmail.com", gmailPass: "abcdefgh" });
+    const p = emailConfigPatch(emailPresetFor("me@gmail.com"), { address: "me@gmail.com", ...base, password: "fake fake" });
+    assert.deepEqual(p.channels.email.config, { gmailUser: "me@gmail.com", gmailPass: "fakefake" });
     assert.equal(p.tools, undefined);
   });
 
   it("other providers use tools.smtp with both servers", () => {
     const p = emailConfigPatch(emailPresetFor("me@yahoo.com"), { address: "me@yahoo.com", ...base });
     assert.equal(p.channels.email.provider, "smtp");
-    assert.deepEqual(p.tools.smtp, { host: "smtp.x.com", port: "465", user: "me@yahoo.com", pass: "pw", imapHost: "imap.x.com", imapPort: "993" });
+    assert.deepEqual(p.tools.smtp, { host: "smtp.example.com", port: "465", user: "me@yahoo.com", pass: "not-a-real-password", imapHost: "imap.example.com", imapPort: "993" });
   });
 
   it("autostart uses the same no-admin logon task as install-autostart.bat", () => {

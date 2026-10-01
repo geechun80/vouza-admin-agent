@@ -5634,7 +5634,7 @@ async function qsDetectEmail() {
   }
   help.hidden = false;
   qsEl('qsEmailPassLabel').textContent = p.appPasswordUrl ? 'App Password' : 'Password';
-  qsEl('qsEmailPass').placeholder = p.id === 'gmail' ? '16 letters, like abcd efgh ijkl mnop' : '';
+  qsEl('qsEmailPass').placeholder = p.id === 'gmail' ? '16 letters, like xxxx xxxx xxxx xxxx' : '';
   qsEl('qsImapHost').value = p.imapHost;
   qsEl('qsImapPort').value = p.imapPort;
   qsEl('qsSmtpHost').value = p.smtpHost;

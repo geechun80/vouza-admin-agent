@@ -106,10 +106,10 @@ describe("save_integration_credentials — legacy tool routing", () => {
       {
         integration: "smtp" as any,
         credentials: {
-          smtpHost: "smtp.mail.yahoo.com",
+          smtpHost: "smtp.example.com",
           smtpPort: "465",
-          smtpUser: "me@yahoo.com",
-          smtpPass: "app-password-here",
+          smtpUser: "user@example.com",
+          smtpPass: "not-a-real-password",
         },
       },
       {} as any,
@@ -120,10 +120,10 @@ describe("save_integration_credentials — legacy tool routing", () => {
     assert.equal(result.data.slug, "smtp");
     // The credentials actually landed in config.json via the direct save —
     // encrypted on disk (secretStore.ts), readable once opened.
-    assert.doesNotMatch(await readFile(CONFIG_PATH, "utf-8"), /app-password-here/);
+    assert.doesNotMatch(await readFile(CONFIG_PATH, "utf-8"), /not-a-real-password/);
     const saved: any = await readSealedJson(CONFIG_PATH, null);
-    assert.equal(saved.credentials.smtpHost, "smtp.mail.yahoo.com");
-    assert.equal(saved.tools.smtp.user, "me@yahoo.com");
+    assert.equal(saved.credentials.smtpHost, "smtp.example.com");
+    assert.equal(saved.tools.smtp.user, "user@example.com");
     assert.equal(saved.tools.smtp.port, "465");
   });
 

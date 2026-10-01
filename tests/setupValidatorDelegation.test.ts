@@ -101,17 +101,17 @@ describe("test_credential — pipeline delegation (Phase 3)", () => {
     });
 
     const result: any = await testCredentialTool.call(
-      { type: "gmail_smtp", credentials: { user: "a@gmail.com", pass: "abcd efgh ijkl mnop" } } as any,
+      { type: "gmail_smtp", credentials: { user: "user@example.com", pass: "fake fake fake fake" } } as any,
       {} as any,
     );
 
     assert.equal(calls.length, 1);
     assert.equal(calls[0]!.integration, "gmail");
-    assert.equal(calls[0]!.credentials?.gmailUser, "a@gmail.com");
-    assert.equal(calls[0]!.credentials?.gmailPass, "abcd efgh ijkl mnop");
+    assert.equal(calls[0]!.credentials?.gmailUser, "user@example.com");
+    assert.equal(calls[0]!.credentials?.gmailPass, "fake fake fake fake");
     assert.equal(calls[0]!.opts?.testOnly, true);
     assert.equal(result.data.valid, true);
-    assert.match(result.data.detail, /Gmail SMTP verified for a@gmail\.com/);
+    assert.match(result.data.detail, /Gmail SMTP verified for user@example\.com/);
   });
 
   it("gmail_smtp missing pass → input error BEFORE the executor is reached", async () => {
