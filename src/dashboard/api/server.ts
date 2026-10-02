@@ -58,6 +58,7 @@ import {
   stopAgentMailListener,
   getAgentMailInbox,
 } from "../../email/agentMailListener.js";
+import { isLocalHostHeader, isNewerVersion } from "../../util/localHost.js";
 import { readSealedJson, writeSealedJson, migrateJsonFile, getMasterKey } from "../../security/secretStore.js";
 import { listOpenRouterModels, listProviderModels, isValidModelId } from "../../config/liveModels.js";
 
@@ -195,7 +196,16 @@ function requireLocalOrigin(
 // blocks remote access, so the password requirement is pure friction.
 const DASHBOARD_PASSWORD = (process.env.DASHBOARD_PASSWORD || "").trim();
 const DASHBOARD_BIND     = (process.env.DASHBOARD_BIND     || "127.0.0.1").trim();
-const REQUIRE_AUTH       = DASHBOARD_BIND !== "127.0.0.1" && DASHBOARD_BIND !== "localhost";
+/**
+ * Docker: the server must listen on 0.0.0.0 inside the container for port
+ * publishing to work, but docker-compose publishes it on the HOST's loopback
+ * only (127.0.0.1:3456). In this mode every request must name localhost as
+ * its host, so the dashboard still answers only on this computer — no
+ * password needed (the browser UI can't send one) and DNS rebinding fails.
+ */
+const DOCKER_LOCAL_ONLY  = (process.env.DASHBOARD_DOCKER_LOCAL_ONLY || "").trim().toLowerCase() === "true";
+const REQUIRE_AUTH       = !DOCKER_LOCAL_ONLY && DASHBOARD_BIND !== "127.0.0.1" && DASHBOARD_BIND !== "localhost";
+
 
 // Constant-time string compare to avoid timing oracles on the password.
 function timingSafeEqual(a: string, b: string): boolean {
@@ -356,6 +366,17 @@ export async function startDashboard(port = 3456): Promise<void> {
   // public webhooks below requires Authorization: Bearer <DASHBOARD_PASSWORD>.
   // Webhooks (/api/whatsapp/webhook, /api/telegram/webhook) are exempt because
   // they're called by external services with their own signed payloads.
+  // Docker local-only mode: refuse anything not addressed to localhost
+  // (other devices on the network, DNS rebinding). Webhooks keep their own
+  // auth (WAHA API key, Telegram secret) and may come from the WAHA container.
+  if (DOCKER_LOCAL_ONLY) {
+    app.use((req, res, next) => {
+      if (req.path === "/api/whatsapp/webhook" || req.path === "/api/telegram/webhook") return next();
+      if (isLocalHostHeader(req.headers.host)) return next();
+      res.status(403).type("text/plain").send("This dashboard only answers on this computer: open http://localhost:3456");
+    });
+  }
+
   app.use("/api", (req, res, next) => {
     // Public webhook paths — Telegram/WAHA need to reach these without our password.
     if (
@@ -1021,6 +1042,28 @@ export async function startDashboard(port = 3456): Promise<void> {
       res.json({ version: pkg.version || "0.0.0", changelog });
     } catch (err) {
       res.status(500).json({ error: String(err) });
+    }
+  });
+
+  // --- Is a newer version on GitHub? (only when the person presses the button) ---
+  // Compares this install's package.json version with the latest GitHub
+  // Release, so people on an old copy find out instead of assuming they're
+  // current. VOUZA_UPDATE_REPO overrides the repository ("owner/name").
+  app.get("/api/update-check", requireLocalOrigin, async (_req, res) => {
+    try {
+      const pkg = JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8"));
+      const current = String(pkg.version || "0.0.0");
+      const repo = (process.env.VOUZA_UPDATE_REPO || "geechun80/vouza-admin-agent").trim();
+      const r = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+        headers: { Accept: "application/vnd.github+json", "User-Agent": "vouza-admin-agent" },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!r.ok) return res.json({ ok: false, current, error: `GitHub answered HTTP ${r.status}` });
+      const rel = await r.json() as { tag_name?: string; html_url?: string; name?: string };
+      const latest = String(rel.tag_name || "").replace(/^v/i, "");
+      res.json({ ok: true, current, latest, updateAvailable: isNewerVersion(latest, current), url: rel.html_url });
+    } catch (err: any) {
+      res.json({ ok: false, error: `Couldn't reach GitHub: ${String(err?.message || err)}` });
     }
   });
 
@@ -1927,9 +1970,11 @@ export async function startDashboard(port = 3456): Promise<void> {
   // Bind to localhost by default — eliminates LAN exposure entirely.
   // Operators wanting remote access set DASHBOARD_BIND=0.0.0.0 + DASHBOARD_PASSWORD.
   app.listen(port, DASHBOARD_BIND, async () => {
-    const displayHost = DASHBOARD_BIND === "0.0.0.0" ? "<your-ip>" : DASHBOARD_BIND;
+    const displayHost = DOCKER_LOCAL_ONLY ? "localhost" : DASHBOARD_BIND === "0.0.0.0" ? "<your-ip>" : DASHBOARD_BIND;
     console.log(`\n  Setup Dashboard: http://${displayHost}:${port}`);
-    if (REQUIRE_AUTH) {
+    if (DOCKER_LOCAL_ONLY) {
+      console.log(`  🛡  Docker: open http://localhost:${port} on this computer (not reachable from your network).`);
+    } else if (REQUIRE_AUTH) {
       console.log(`  🔒 Authentication required — clients must send DASHBOARD_PASSWORD as Bearer token.`);
     } else {
       console.log(`  🛡  Bound to loopback only — not reachable from your network.`);

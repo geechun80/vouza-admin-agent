@@ -136,6 +136,6 @@ describe("wiring", () => {
     const app = await read("src/dashboard/public/app.js");
     assert.match(app, /onclick="loadLiveModels\('openrouter'\)"/);
     assert.match(app, /\$\{escHtml\(m\.name\)\}/);
-    assert.match(app, /<input class="or-tier-input" list="orModelList"/);
+    assert.match(app, /<input class="or-tier-input"[^>]*list="orModelList"/);
   });
 });

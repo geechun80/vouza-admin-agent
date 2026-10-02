@@ -544,6 +544,35 @@ function goPrev() {
 // ============================================================
 // Model Selector
 // ============================================================
+// Labels for the shortlist — plain words instead of tier jargon.
+const PICK_LABELS = {
+  recommended: { badge: '⭐ Best for most people', cls: 'pick-recommended' },
+  budget:      { badge: '💰 Cheapest',             cls: 'pick-budget' },
+  capable:     { badge: '🚀 Most capable',         cls: 'pick-capable' },
+  premium:     { badge: '💎 Premium',              cls: 'pick-premium' },
+};
+const PICK_ORDER = ['recommended', 'budget', 'capable', 'premium'];
+
+// OpenRouter first: one key works for every model, so it's the easy default.
+const PROVIDER_ORDER = ['openrouter', 'anthropic', 'openai', 'google', 'xai', 'deepseek', 'alibaba', 'moonshot'];
+
+function catalogModel(id) {
+  for (const g of state.modelCatalog) {
+    const m = g.models.find((x) => x.id === id);
+    if (m) return m;
+  }
+  return null;
+}
+
+function modelLabel(id) {
+  return catalogModel(id)?.displayName || liveInfo(id)?.name || id;
+}
+
+function priceLine(m) {
+  if (!m?.pricing) return '';
+  return fmtPrice(m.pricing);
+}
+
 function renderModelSelector() {
   const tabs = document.getElementById('providerTabs');
   const list = document.getElementById('modelList');
@@ -560,85 +589,95 @@ function renderModelSelector() {
     return;
   }
 
-  tabs.innerHTML = state.modelCatalog.map(g => {
-    const isActive = g.provider.id === state.selectedProvider;
-    return `<div class="ptab ${isActive ? 'active' : ''}" onclick="selectProvider('${g.provider.id}')">
-      <div class="ptab-dot" style="background:${PROVIDER_COLORS[g.provider.id]||'#888'}"></div>
-      ${g.provider.name}
-    </div>`;
-  }).join('');
+  const ordered = [...state.modelCatalog].sort(
+    (a, b) => (PROVIDER_ORDER.indexOf(a.provider.id) + 99) % 99 - (PROVIDER_ORDER.indexOf(b.provider.id) + 99) % 99,
+  );
+  tabs.innerHTML =
+    `<div class="ptabs-hint">Which company is your AI key from? Not sure — use <strong>OpenRouter</strong>: one key, every model.</div>` +
+    ordered.map(g => {
+      const isActive = g.provider.id === state.selectedProvider;
+      const name = g.provider.id === 'openrouter' ? 'OpenRouter (any model)' : g.provider.name;
+      return `<button type="button" class="ptab ${isActive ? 'active' : ''}" aria-pressed="${isActive}" onclick="selectProvider('${g.provider.id}')">
+        <span class="ptab-dot" style="background:${PROVIDER_COLORS[g.provider.id]||'#888'}"></span>
+        ${escHtml(name)}
+      </button>`;
+    }).join('');
 
   const group = state.modelCatalog.find(g => g.provider.id === state.selectedProvider);
   if (!group) return;
 
-  // ── OpenRouter: show smart routing tier picker ──
+  // ── OpenRouter: smart routing, summarised; details folded away ──
   if (state.selectedProvider === 'openrouter') {
     const tiers = [
-      { key:'fast',     label:'⚡ Fast',     desc:'Simple queries, status checks, quick answers', color:'#10b981' },
-      { key:'balanced', label:'⚖️ Balanced',  desc:'Email drafting, scheduling, file management',  color:'#f59e0b' },
-      { key:'flagship', label:'🚀 Flagship',  desc:'Analysis, reports, image processing, complex multi-step tasks', color:'#8b5cf6' },
+      { key: 'fast',     label: 'Simple questions',          desc: 'status checks, quick answers' },
+      { key: 'balanced', label: 'Everyday office work',      desc: 'email drafting, scheduling, files' },
+      { key: 'flagship', label: 'Hard or long tasks',        desc: 'analysis, reports, images, multi-step work' },
     ];
-    const orModels = group.models;
-    const byTier = (tier) => orModels.filter(m => m.tier === tier);
-
-    list.innerHTML = `
-      <div style="padding:12px;background:rgba(124,58,237,0.07);border:1px solid rgba(124,58,237,0.2);border-radius:12px;margin-bottom:16px">
-        <div style="font-size:12px;font-weight:700;color:#a78bfa;margin-bottom:4px">🧠 Smart Model Routing</div>
-        <div style="font-size:12px;color:var(--text-dim);line-height:1.5">
-          Your AI automatically picks the most cost-effective model based on task complexity.
-          Simple questions use cheap models; complex analysis uses powerful ones.
-        </div>
-      </div>
-      ${tiers.map(tier => `
-        <div style="margin-bottom:16px">
-          <div style="font-size:11px;font-weight:700;color:${tier.color};letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;display:flex;align-items:center;gap:8px">
-            ${tier.label}
-            <span style="font-size:10px;color:var(--text-muted);text-transform:none;letter-spacing:0;font-weight:400">${tier.desc}</span>
-          </div>
-          <input class="or-tier-input" list="orModelList" value="${escHtml(state.orTiers[tier.key] || '')}"
-                 onchange="setOrTier('${tier.key}', this.value)" spellcheck="false" autocomplete="off"
-                 aria-label="${tier.key} model" placeholder="Type to search models"
-                 style="width:100%;padding:8px 12px;background:var(--bg-glass-card);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12px">
-          <div id="orInfo-${tier.key}" style="font-size:11px;color:var(--text-muted);margin-top:4px">${orModelInfoLine(state.orTiers[tier.key])}</div>
-        </div>
-      `).join('')}
-      <datalist id="orModelList">${orDatalistOptions(byTier)}</datalist>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
-        ${renderOrBrowse()}
-        <button type="button" class="btn" style="font-size:12px;padding:6px 12px" onclick="useOneOrModelForAll()">Use the Balanced model for all three</button>
-      </div>
-      <div style="font-size:11px;color:var(--text-muted);padding:8px 12px;background:var(--bg-glass);border-radius:8px">
-        💡 Type to search, or paste any model ID from <a href="https://openrouter.ai/models" target="_blank" rel="noopener" style="color:var(--brand-light)">openrouter.ai/models</a> — one key, every model, pay per use.
-      </div>`;
-
-    // Set defaults if not already set
+    const byTier = (tier) => group.models.filter(m => m.tier === tier);
     if (!state.orTiers) state.orTiers = {};
     tiers.forEach(t => {
       if (!state.orTiers[t.key]) {
-        const def = byTier(t.key).find(m => m.recommended) || byTier(t.key)[0];
+        const def = byTier(t.key).find(m => m.recommended || m.pick) || byTier(t.key)[0];
         if (def) state.orTiers[t.key] = def.id;
       }
     });
+
+    list.innerHTML = `
+      <div class="routing-card">
+        <div class="routing-title">🧠 Smart routing — the right model for each task</div>
+        <div class="routing-sub">Cheap models answer simple things; a stronger one steps in for hard work. You only pay for what's used.</div>
+        ${tiers.map(t => {
+          const id = state.orTiers[t.key];
+          const m = catalogModel(id) || liveInfo(id);
+          return `<div class="routing-row">
+            <span class="routing-task">${t.label}</span>
+            <span class="routing-model">${escHtml(modelLabel(id))}${m && priceLine(m) ? ` <span class="routing-price">${escHtml(priceLine(m))}</span>` : ''}</span>
+          </div>`;
+        }).join('')}
+      </div>
+      <details class="more-models" ${state.orCustomiseOpen ? 'open' : ''} ontoggle="state.orCustomiseOpen=this.open">
+        <summary>Change the models</summary>
+        ${tiers.map(tier => `
+          <div style="margin:12px 0 4px">
+            <label class="or-tier-label" for="orTier-${tier.key}">${tier.label} <span>${tier.desc}</span></label>
+            <input class="or-tier-input" id="orTier-${tier.key}" list="orModelList" value="${escHtml(state.orTiers[tier.key] || '')}"
+                   onchange="setOrTier('${tier.key}', this.value)" spellcheck="false" autocomplete="off" placeholder="Type to search models">
+            <div id="orInfo-${tier.key}" class="or-tier-info">${orModelInfoLine(state.orTiers[tier.key])}</div>
+          </div>
+        `).join('')}
+        <datalist id="orModelList">${orDatalistOptions(byTier)}</datalist>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0">
+          ${renderOrBrowse()}
+          <button type="button" class="btn" style="font-size:12px;padding:6px 12px" onclick="useOneOrModelForAll()">Use one model for everything</button>
+        </div>
+        <div class="or-tier-info">💡 Type to search, or paste any model ID from <a href="https://openrouter.ai/models" target="_blank" rel="noopener">openrouter.ai/models</a>.</div>
+      </details>`;
     return;
   }
 
-  list.innerHTML = group.models.map(m => {
+  // ── Other providers: a short, labelled shortlist; the rest folded away ──
+  const shortlist = PICK_ORDER
+    .map(p => group.models.find(m => m.pick === p))
+    .filter(Boolean);
+  list.innerHTML = shortlist.map(m => {
     const sel = m.id === state.selectedModel;
-    return `<div class="model-opt ${sel ? 'selected' : ''}" onclick="selectModel('${m.id}','${m.provider}')">
+    const pick = PICK_LABELS[m.pick];
+    return `<div class="model-opt ${sel ? 'selected' : ''}" role="radio" aria-checked="${sel}" tabindex="0"
+                 data-id="${escHtml(m.id)}" data-p="${escHtml(m.provider)}"
+                 onclick="selectModel(this.dataset.id, this.dataset.p)"
+                 onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selectModel(this.dataset.id, this.dataset.p)}">
       <div class="model-radio"></div>
       <div class="model-info">
         <div class="model-name">
-          ${m.displayName}
-          ${m.recommended ? `<span class="badge-recommended">★ Recommended</span>` : ''}
-          <span class="model-tier tier-${m.tier}">${m.tier}</span>
+          ${escHtml(m.displayName)}
+          <span class="pick-badge ${pick.cls}">${pick.badge}</span>
         </div>
-        <div class="model-desc">${m.description}</div>
+        <div class="model-desc">${escHtml(m.description)}</div>
         <div class="model-meta">
-          <span>${(m.contextWindow/1000).toFixed(0)}K context</span>
-          <span>$${m.pricing.input}/$${m.pricing.output}/1M tok</span>
-          ${m.supportsVision ? '<span>Vision</span>' : ''}
+          <span>${m.contextWindow >= 1_000_000 ? (m.contextWindow / 1_000_000).toFixed(m.contextWindow % 1_000_000 ? 1 : 0) + 'M' : Math.round(m.contextWindow / 1000) + 'K'} context</span>
+          <span>${escHtml(priceLine(m))}</span>
+          ${m.supportsVision ? '<span>Reads images</span>' : ''}
         </div>
-        ${m.recommended && m.recommendedReason ? `<div style="font-size:11px;color:#c4b5fd;margin-top:4px">${m.recommendedReason}</div>` : ''}
       </div>
     </div>`;
   }).join('') + renderMoreModels(group);
@@ -754,15 +793,18 @@ function renderMoreModels(group) {
             <div id="liveList-${prov}" style="max-height:260px;overflow:auto"></div>`;
   }
   setTimeout(() => fillLiveList(prov), 0);
-  return `<div class="glass-card" style="margin-top:12px;padding:14px">
-      <div style="font-size:12px;font-weight:700;margin-bottom:8px">More models</div>
-      ${current}${body}
+  state.moreOpen = state.moreOpen || {};
+  const open = state.moreOpen[prov] || !!current || !!entry;
+  return `<details class="more-models" ${open ? 'open' : ''} ontoggle="state.moreOpen['${prov}']=this.open">
+      <summary>More models — every ${escHtml(group.provider.name)} model, or type an ID</summary>
+      <div style="padding-top:10px">${current}${body}
       <div style="display:flex;gap:8px;margin-top:10px">
         <input id="customModelId-${prov}" placeholder="Or type any model ID" spellcheck="false" autocomplete="off" aria-label="Model ID"
                style="flex:1;padding:8px 12px;background:var(--bg-glass-card);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12px">
         <button type="button" class="btn" style="font-size:12px;padding:6px 12px" onclick="useCustomModel('${prov}')">Use</button>
       </div>
-    </div>`;
+      </div>
+    </details>`;
 }
 
 function fillLiveList(prov) {
@@ -1169,7 +1211,7 @@ function renderAIKeySection() {
         </div>
       ` : isOR ? `
         <div style="font-size:12px;color:var(--text-dim);margin-bottom:12px;padding:8px 12px;background:rgba(124,58,237,0.06);border-radius:8px;line-height:1.5">
-          🧠 <strong style="color:#a78bfa">Smart Routing active</strong> — one key unlocks 200+ models.
+          🧠 <strong style="color:var(--brand-light)">Smart Routing active</strong> — one key unlocks every model.
           Simple questions automatically use cheap models; complex tasks escalate to powerful ones.
         </div>
       ` : ''}
@@ -4548,7 +4590,7 @@ function showRestoreConfirm(summaryHtml) {
     overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px)';
     overlay.innerHTML = `
       <div role="dialog" aria-modal="true" aria-label="Confirm restore"
-           style="background:linear-gradient(135deg,rgba(28,18,58,0.98),rgba(15,10,40,0.98));border:1px solid rgba(124,58,237,0.4);border-radius:14px;padding:24px;max-width:480px;width:92vw;box-shadow:0 16px 50px rgba(0,0,0,0.5);color:var(--text)">
+           style="background:var(--bg);border:1px solid rgba(124,58,237,0.4);border-radius:14px;padding:24px;max-width:480px;width:92vw;box-shadow:0 16px 50px rgba(0,0,0,0.5);color:var(--text)">
         <div style="font-size:24px;margin-bottom:8px">♻️ Restore from backup</div>
         <div style="font-size:13px;color:var(--text-dim);margin-bottom:14px;line-height:1.55">
           This will <strong style="color:#f59e0b">replace your current configuration</strong> with the backup contents. Your current config is auto-saved to a <code>.bak</code> file first so you can roll back if needed.
@@ -5292,6 +5334,41 @@ document.getElementById('cmdPaletteInput')?.addEventListener('input', (e) => {
 
 const SEEN_VERSION_KEY = 'vouza_changelog_seen_v1';
 
+// ── Version + "Check for updates" ───────────────────────────────────────────
+// Shows which version is running (so "am I on the old one?" has an answer)
+// and, only when the person presses the button, asks GitHub for the latest.
+async function showAppVersion() {
+  try {
+    const { version } = await fetch('/api/version').then((r) => r.json());
+    if (version) document.querySelectorAll('.app-version').forEach((el) => { el.textContent = `Version ${version}`; });
+  } catch { /* silent */ }
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', showAppVersion);
+else showAppVersion();
+
+async function checkForUpdates(btn) {
+  const out = btn.parentElement.querySelector('.update-result');
+  if (!out) return;
+  btn.disabled = true;
+  out.textContent = 'Checking…';
+  try {
+    const r = await fetch('/api/update-check').then((x) => x.json());
+    if (!r.ok) {
+      out.textContent = r.error || "Couldn't check right now.";
+    } else if (r.updateAvailable) {
+      const url = /^https:\/\/github\.com\//.test(r.url || '') ? r.url : 'https://github.com/geechun80/vouza-admin-agent#-update';
+      out.innerHTML = `🆕 Version ${escHtml(r.latest)} is available — you have ${escHtml(r.current)}. ` +
+        `<a href="${escHtml(url)}" target="_blank" rel="noopener">How to update</a>`;
+    } else {
+      out.textContent = `✓ You're up to date (version ${r.current}).`;
+    }
+  } catch {
+    out.textContent = "Couldn't check right now.";
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 async function checkChangelog() {
   // Only ever run in live mode — wizard users get the tour, not the changelog
   if (!document.getElementById('mainApp')?.classList.contains('live-mode')) return;
@@ -5339,7 +5416,7 @@ function showWhatsNewModal(version, changelog) {
   overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px)';
   overlay.innerHTML = `
     <div role="dialog" aria-modal="true" aria-label="What's new in this version"
-         style="background:linear-gradient(135deg,rgba(28,18,58,0.98),rgba(15,10,40,0.98));border:1px solid rgba(124,58,237,0.4);border-radius:14px;padding:24px;max-width:560px;width:92vw;max-height:75vh;overflow-y:auto;box-shadow:0 16px 50px rgba(0,0,0,0.5);color:var(--text)">
+         style="background:var(--bg);border:1px solid rgba(124,58,237,0.4);border-radius:14px;padding:24px;max-width:560px;width:92vw;max-height:75vh;overflow-y:auto;box-shadow:0 16px 50px rgba(0,0,0,0.5);color:var(--text)">
       <div style="font-size:11px;font-weight:700;letter-spacing:0.6px;color:var(--brand-light);text-transform:uppercase;margin-bottom:6px">What's new</div>
       ${html || '<div style="color:var(--text-dim);font-size:13px">No changelog available.</div>'}
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px">

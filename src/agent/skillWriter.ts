@@ -16,7 +16,7 @@ import { existsSync }                           from "fs";
 import path                                     from "path";
 import type { AgentContext, ConversationMessage } from "../types/index.js";
 import type { AIProvider } from "../config/models.js";
-import { baseUrlFor, openRouterHeaders } from "../config/providerEndpoints.js";
+import { baseUrlFor, openRouterHeaders, outputLimit, ANTHROPIC_MIN_OUTPUT_TOKENS } from "../config/providerEndpoints.js";
 import { redact }                               from "./redactor.js";
 
 const SKILLS_DIR = path.resolve(process.cwd(), "data", "skills");
@@ -82,7 +82,7 @@ async function callAI(
     const client    = new Anthropic({ apiKey });
     const resp      = await client.messages.create({
       model,
-      max_tokens: maxTokens,
+      max_tokens: Math.max(maxTokens, ANTHROPIC_MIN_OUTPUT_TOKENS),
       system:     systemPrompt,
       messages:   [{ role: "user", content: prompt }],
     });
@@ -103,7 +103,7 @@ async function callAI(
     headers,
     body: JSON.stringify({
       model,
-      max_tokens: maxTokens,
+      ...outputLimit(provider, maxTokens),
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user",   content: prompt },

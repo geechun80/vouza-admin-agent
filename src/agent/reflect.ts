@@ -4,6 +4,7 @@
 // =============================================================================
 
 import type { AgentContext, ConversationMessage, MemoryType } from "../types/index.js";
+import { ANTHROPIC_MIN_OUTPUT_TOKENS } from "../config/providerEndpoints.js";
 
 const REFLECT_SYSTEM_PROMPT = `You are a memory extraction assistant for an AI office admin agent.
 Analyze the conversation and extract facts worth remembering long-term.
@@ -67,7 +68,7 @@ export async function autoReflect(
       const client = new Anthropic({ apiKey });
       const resp = await client.messages.create({
         model,
-        max_tokens: 800,
+        max_tokens: ANTHROPIC_MIN_OUTPUT_TOKENS, // current Claude models think first
         system: REFLECT_SYSTEM_PROMPT,
         messages: [{ role: "user", content: prompt }],
       });

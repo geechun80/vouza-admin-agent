@@ -4,100 +4,89 @@
 
 **Your AI office assistant — runs on your PC, controlled from your phone.**
 
-Email · Calendar · WhatsApp · Telegram · Files · Voice · Web search — all in one agent.
+Reads and answers email · finds your documents · checks your calendar · works from WhatsApp or Telegram
 
-[![Tests](https://img.shields.io/badge/tests-647%2F647-brightgreen)](#)
+**Latest version: 2.2.0** · [What's new](CHANGELOG.md)
+
+[![Tests](https://img.shields.io/badge/tests-671%2F671-brightgreen)](#)
 [![Node](https://img.shields.io/badge/node-20.19%2B-blue)](https://nodejs.org)
 [![Audit](https://img.shields.io/badge/npm%20audit-0%20vulnerabilities-brightgreen)](#)
-[![License](https://img.shields.io/badge/license-private-lightgrey)](#)
 
-[Quickstart](#-quickstart) · [Features](#-features) · [Connect Channels](#-connect-channels) · [Run 24/7](#%EF%B8%8F-running-247) · [Updating](#-updating) · [Troubleshooting](#-troubleshooting)
+[Install](#%EF%B8%8F-install) · [Update](#-update) · [First-time setup](#-first-time-setup) · [Phone](#-using-it-from-your-phone) · [Safety](#%EF%B8%8F-safety-defaults) · [Troubleshooting](#-troubleshooting)
 
 </div>
 
 <p align="center">
-  <img src="docs/assets/hero-setup.png" alt="Vouza Admin Agent — Setup Panel with per-integration cards" width="900">
+  <img src="docs/assets/hero-setup.png" alt="Vouza Admin Agent setup screen" width="900">
 </p>
 
-> *Per-integration cards with self-healing `detect → validate → test → save → confirm → live-test` pipeline. Click Test, watch each step succeed live.*
+---
+
+## ✨ What it does
+
+- 🚀 **Five-minute setup** — paste one AI key, type your email, scan a QR code with your phone. No config files.
+- 📱 **Works from your phone** — message it on WhatsApp or Telegram; it finds a document and sends you the file. It always asks **YES** before sending an email.
+- 🔒 **Private by default** — runs on your computer, keys and passwords are encrypted, and it only goes online when you ask.
+- 🧠 **Any AI** — Claude, ChatGPT, Gemini, Grok, DeepSeek, Qwen, Kimi or 400+ models through one OpenRouter key — or a local AI on your own computer.
 
 ---
 
-## ✨ Features
+## ⬇️ Install
 
-- 🚀 **Quick Setup** — five plain screens: paste a key, press Next. The agent detects the provider, verifies for real, saves, and links your phone.
-- 📱 **Works from your phone** — WhatsApp ("Message yourself") or Telegram. Finds documents and *sends you the file*; asks for **YES** before sending any email.
-- 🧠 **Multi-provider AI** — Anthropic, OpenAI, Gemini, DeepSeek, xAI, OpenRouter (100+ models). One key, automatic failover.
-- 📬 **Email + Calendar** — Gmail, Yahoo, iCloud, Zoho or any IMAP/SMTP mailbox (App Password), Google Calendar, dedicated AgentMail inbox.
-- 💬 **Two-way messaging** — Telegram bot, WhatsApp (native QR via Baileys, no Docker required), Slack (Bolt SDK — coming).
-- 🔧 **Self-healing setup** — structured `detect → validate → test → save → confirm → live-test` pipeline replaces ad-hoc retries.
-- 📊 **Observability built-in** — per-integration p50/p95 latency, retry counts, webhook log, failed-action retry, API spend tracking.
-- 🔌 **Visual setup wizard** — per-integration cards with Configure / Test / Reconnect buttons + step-by-step progress UI.
-- 🎙️ **Voice notes** — drop a `.mp3`/`.ogg` into chat, Whisper transcribes via Groq or OpenAI.
-- 🛡️ **Secure by default** — loopback-only dashboard, PDPA-compliant audit log, secret redaction, sandboxed file ops.
+### Windows (recommended — no technical skills needed)
 
----
+1. Install **[Node.js](https://nodejs.org)** — click the **LTS** button (version 20.19 or newer) and run the installer.
+2. Download this project: click the green **Code** button above → **Download ZIP**, then unzip it somewhere easy, e.g. `Documents\Vouza Admin Agent`.
+   *(Using git? `git clone https://github.com/geechun80/vouza-admin-agent.git` instead.)*
+3. Open the folder and double-click **`start.bat`**. The first start installs what's needed (1–2 minutes), then your browser opens. Press **Get Started**.
 
-## ⚡ Quickstart
+Keep the black window open (minimised) — the assistant runs while it's open. To start it automatically when Windows starts, double-click **`install-autostart.bat`**.
 
-> **Pick ONE** install method. They're equivalent — just different convenience layers.
-
-<table>
-<tr>
-<td width="33%" valign="top">
-
-### 🐳 Docker
-**Best for: servers, VPS, "set & forget"**
+### Mac / Linux
 
 ```bash
 git clone https://github.com/geechun80/vouza-admin-agent.git
 cd vouza-admin-agent
-cp .env.example .env
-# Edit .env: set VOUZA_API_KEY
-docker compose up -d
+npm ci
+npm run setup
 ```
 
-Open **http://localhost:3456**
+Then open **http://localhost:3456**. Needs [Node.js 20.19+](https://nodejs.org).
 
-No Node, no PM2, auto-restart, survives reboots.
-
-</td>
-<td width="33%" valign="top">
-
-### 💻 Native Node
-**Best for: development, customization**
+### Docker (an always-on PC or home server)
 
 ```bash
 git clone https://github.com/geechun80/vouza-admin-agent.git
 cd vouza-admin-agent
-npm install
-npm run build
-node dist/dashboard/launch.js
+docker compose up -d --build
 ```
 
-Open **http://localhost:3456**
+Then open **http://localhost:3456** on that computer. For safety it isn't reachable from other devices; use an SSH tunnel or Tailscale for remote access.
 
-Requires [Node.js 20.19+](https://nodejs.org).
+---
 
-</td>
-<td width="33%" valign="top">
+## 🔄 Update
 
-### 🪟 Windows one-click
-**Best for: non-technical users**
+**Which version am I on?** The dashboard shows it on the start screen and in **System Health**, with a **Check for updates** button. The latest version is shown at the top of this page.
 
-After cloning + `npm install` + `npm run build`:
+| How you installed | How to update |
+|---|---|
+| **Windows, with git** (you cloned it) | Double-click **`update.bat`** |
+| **Windows, from a ZIP download** | Download the new ZIP and unzip it to a **new** folder. Copy the **`data`** folder (and `.env`, if you have one) from your old folder into the new one. Start the new `start.bat`, then delete the old folder. |
+| **Mac / Linux** | `./update.sh` |
+| **Docker** | `git pull` then `docker compose up -d --build` |
 
-1. Double-click **`start.bat`**
-2. Browser opens to wizard
-3. Done
+Your settings, chats and WhatsApp login live in the **`data`** folder — updating never touches it.
 
-For 24/7 background: double-click **`install-autostart.bat`** (uses Task Scheduler).
+> ⚠️ **Installed before 2 October 2026 with git?** The project history was cleaned up that day, so `git pull` fails on older copies. `update.bat` / `update.sh` detect this and offer to replace the code with the latest version (your settings are kept). By hand: `git fetch origin` then `git reset --hard origin/master`.
 
-</td>
-</tr>
-</table>
+> 💡 **Moving to a new computer?** Saved keys and passwords are encrypted for your Windows/Mac account, so copying `data` to another PC won't carry them. Use **System Health → Download backup** on the old PC and **Restore from backup** on the new one.
 
-### 🚀 Quick Setup — the default
+---
+
+## 🚀 First-time setup
+
+### Quick Setup — the default
 
 Open the dashboard and press **Get Started**. Five screens, one question each:
 
@@ -324,51 +313,21 @@ Script installs PM2, builds, starts, persists.
 
 ---
 
-## 🔄 Updating
-
-> Your `data/` directory (config, credentials, chat history, WhatsApp auth) is **never touched** by an update.
-
-### Easiest
-
-| OS | Action |
-|---|---|
-| **Windows** | Double-click `update.bat` |
-| **Mac / Linux** | `./update.sh` |
-| **Docker** | `git pull && docker compose up -d --build` |
-
-### Manual
-
-```bash
-cd vouza-admin-agent
-git pull
-npm ci            # ← exact pinned versions (NOT npm install)
-npm run build
-pm2 restart admin-agent
-```
-
-> ⚠️ **Always use `npm ci`, not `npm install`.** `npm ci` reads `package-lock.json` exactly. `npm install` can silently upgrade pinned deps (Baileys, Playwright) and break things.
-
-### Verify the update worked
-
-1. Open **http://localhost:3456** — "What's new" modal appears once
-2. Send a test message to the Guide Bot — replies appear at the **bottom** of chat
-3. Check `data/logs/admin-agent.log` — fresh JSON entries from the current minute
-
----
-
 ## 🧪 Troubleshooting
 
 | Symptom | Fix |
 |---|---|
 | `Port 3456 already in use` | `npx kill-port 3456` or close the other instance |
-| `Cannot find module` | `npm run build` again |
+| `Cannot find module` | Close the window and start `start.bat` again — it reinstalls what's missing |
 | Telegram bot silent | Verify the bot token via **@BotFather** → `/mybots` |
 | WhatsApp "Invalid QR code" | Dashboard → Setup → WhatsApp → **Reset & start fresh** button |
 | WhatsApp disconnects often | Phone needs internet; check the same phone isn't linked elsewhere |
 | `pm2: command not found` | Reopen terminal, or `npm config get prefix` and add to PATH |
 | PM2 won't auto-start on Windows | `pm2 startup` doesn't work on Windows — use `install-autostart.bat` |
 | Agent crash-loops | `pm2 logs admin-agent --lines 50` — usually missing `data/config.json` (finish the wizard) |
-| Bot replies above user message | You're on an old build — `git pull && npm ci && npm run build` |
+| Something looks old, or a feature in this page is missing | You're on an old version — see [Update](#-update) |
+| `git pull` fails ("divergent" / "unrelated histories") | Your copy is from before 2 Oct 2026 — run `update.bat`, or see [Update](#-update) |
+| Black window shows `Node.js ... is too old` | Install the **LTS** version from [nodejs.org](https://nodejs.org), then start again |
 
 <details>
 <summary><b>More PM2 troubleshooting</b></summary>
@@ -401,8 +360,6 @@ src/
   voice/          → Whisper via Groq / OpenAI
 ```
 
-Key patterns documented in `memory/build_rules_agents.md` — 63 rules covering everything from listener structure to credential validation pipelines.
-
 ---
 
 ## 📚 Documentation
@@ -415,6 +372,6 @@ Key patterns documented in `memory/build_rules_agents.md` — 63 rules covering 
 
 ## 📜 License & Support
 
-Private repo — contact the Vouza team for access or to report issues.
+Contact the Vouza team for licensing, or open an issue to report a problem.
 
 Built with ❤️ by [Vouza.ai](https://vouza.ai) — Singapore.

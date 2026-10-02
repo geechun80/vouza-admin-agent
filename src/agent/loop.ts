@@ -17,7 +17,7 @@ import type {
 import { ToolRegistry } from "../tools/registry.js";
 import { randomUUID } from "crypto";
 import type { AIProvider } from "../config/models.js";
-import { baseUrlFor, openRouterHeaders } from "../config/providerEndpoints.js";
+import { baseUrlFor, openRouterHeaders, outputLimit } from "../config/providerEndpoints.js";
 import { classifyTask, selectModelForComplexity, TIER_LABELS, DEFAULT_OPENROUTER_TIERS } from "./router.js";
 import { autoReflect }                from "./reflect.js";
 import { findRelevantSkills, autoWriteSkill } from "./skillWriter.js";
@@ -231,7 +231,7 @@ async function callOpenAICompatible(
         model,
         messages: openaiMessages,
         tools: openaiTools.length > 0 ? openaiTools : undefined,
-        max_tokens: 4096,
+        ...outputLimit(provider, 4096),
       }),
     });
   } catch (err: any) {
@@ -285,6 +285,15 @@ async function callOpenAICompatible(
     : undefined;
 
   return { content, stop_reason: stopReason, usage };
+}
+
+/** Message content with thinking / redacted_thinking blocks removed. */
+export function withoutThinking(content: any): any {
+  if (!Array.isArray(content)) return content;
+  const kept = content.filter((b: any) => b?.type !== "thinking" && b?.type !== "redacted_thinking");
+  if (kept.length === content.length) return content;
+  // A turn that was only thinking still needs some content to stay valid.
+  return kept.length ? kept : [{ type: "text", text: "…" }];
 }
 
 /**
@@ -443,9 +452,14 @@ export async function* agentLoop(
       state.messages = compressed;
     }
 
+    // Thinking blocks are never sent back. Current Claude models only accept a
+    // replayed thinking block if every earlier part of the request is
+    // byte-identical, and this loop rebuilds the system prompt (memories,
+    // skills) and trims/compresses history each turn — replaying them would
+    // be rejected. Text and tool calls carry the conversation.
     const apiMessages = state.messages.map((m) => ({
       role: m.role as "user" | "assistant",
-      content: m.content,
+      content: withoutThinking(m.content),
     }));
 
     try {
@@ -465,7 +479,7 @@ export async function* agentLoop(
         const response = await client.messages.create(
           {
             model: activeModel,
-            max_tokens: 4096,
+            max_tokens: 16000, // room to think first on current Claude models
             system: [
               {
                 type: "text" as const,
@@ -544,6 +558,15 @@ export async function* agentLoop(
           toolCalls.push({ id: block.id, name: block.name, input: block.input });
           yield { type: "tool_start", toolName: block.name, input: block.input };
         }
+      }
+
+      // ── Declined by the model's safety filter ────────────────────────────────
+      if (stopReason === "refusal" && toolCalls.length === 0) {
+        if (!assistantText) {
+          yield { type: "text_delta", text: "⚠️ The AI declined to help with that request. Try rephrasing it, or ask something else." };
+        }
+        state.shouldContinue = false;
+        break;
       }
 
       // ── Empty response guard ───────────────────────────────────────────────

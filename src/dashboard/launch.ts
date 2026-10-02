@@ -10,6 +10,16 @@ loadEnv();
 
 import { startDashboard } from "./api/server.js";
 
+// Keep the agent running through a stray error (a network blip in a
+// background task, a library bug) instead of the whole window closing — the
+// person would have to notice and restart it. The error is logged.
+process.on("uncaughtException", (err) => {
+  console.error("\n  [Unexpected error — the agent keeps running]", err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("\n  [Unhandled promise rejection — the agent keeps running]", reason);
+});
+
 const port = parseInt(process.env.DASHBOARD_PORT || "3456", 10);
 
 console.log("\n  🤖 Admin Agent — Setup Wizard\n");

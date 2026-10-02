@@ -49,6 +49,21 @@ export function isLocalProvider(provider: AIProvider): boolean {
 }
 
 /** Who we tell OpenRouter we are. Override with VOUZA_APP_URL / VOUZA_APP_NAME. */
+/**
+ * Output-length parameter for an OpenAI-style request. OpenAI's current
+ * models reject `max_tokens` and want `max_completion_tokens` (which older
+ * OpenAI models accept too); every other compatible API takes `max_tokens`.
+ */
+export function outputLimit(provider: AIProvider | string, tokens: number): Record<string, number> {
+  return provider === "openai" ? { max_completion_tokens: tokens } : { max_tokens: tokens };
+}
+
+/**
+ * Current Claude models think before answering and the thinking counts
+ * toward max_tokens — small limits can end a reply before any text.
+ */
+export const ANTHROPIC_MIN_OUTPUT_TOKENS = 8000;
+
 export function openRouterHeaders(): Record<string, string> {
   return {
     "HTTP-Referer": (process.env.VOUZA_APP_URL || "https://vouza.ai").trim(),

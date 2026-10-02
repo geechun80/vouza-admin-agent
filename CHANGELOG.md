@@ -8,6 +8,23 @@ the full history.
 
 ---
 
+## 2.2.0 — 2026-10-02
+
+**Simpler setup, safer by default, and today's AI models**
+
+- 🚀 **Quick Setup**: five plain screens — your name, one AI key, your email, which folders to share, then scan a QR with your phone
+- 📱 **Use it from your phone** (WhatsApp "Message yourself" or Telegram): it finds a document and sends you the file, and always asks **YES** before sending any email
+- 🔒 **Your keys and passwords are now encrypted** on your computer — older setups are upgraded automatically the first time you start
+- 🌐 **Goes online only when you ask**: searching the web or opening a website waits for your YES; every outside connection is listed under **System Health → Privacy & network**
+- 👥 **People you allow-list are guests**: they can chat, but can't read your email or files, send anything, or see your memories
+- 🧠 **Today's AI models**: Claude Sonnet 5.5 / Opus 5.5 / Fable 5.1, GPT-5.5, plus a "Load all OpenRouter models" search (400+) and a box to type any model ID — shown as simple "Best for most people / Cheapest / Most capable" picks
+- 💻 **Local AI option**: run the AI on your own computer with Ollama — no key, nothing sent to an AI company
+- 🛠️ **Fixed**: the default OpenRouter "fast" model no longer existed upstream; the Docker build failed; light-mode lists and titles were hard to read; the Windows start window showed garbled symbols
+- 🔄 **Updating is easier**: `start.bat` installs what's needed by itself, `update.bat` also repairs copies made before 1 Oct 2026, and **Check for updates** shows which version you're on
+- ⚠️ **Installed before 2 Oct 2026?** Run `update.bat` — it offers to replace the old code and keeps your settings — or follow "Updating" in the README
+
+---
+
 ## 2.1.0 — 2026-05-20
 
 **Operator dashboard + power-user features**

@@ -48,6 +48,11 @@ WORKDIR /app
 # Tini handles signals correctly (otherwise SIGTERM doesn't reach Node)
 RUN apk add --no-cache tini
 
+# data/ is a volume — create it while still root (the node user can't write
+# to /app), then hand it to node. Doing this after USER node failed with
+# "mkdir: can't create directory '/app/data': Permission denied".
+RUN mkdir -p /app/data && chown -R node:node /app /app/data
+
 # Run as non-root for security — node user is built into the official image
 USER node
 
@@ -59,11 +64,12 @@ COPY --from=build --chown=node:node /app/src/skills    ./src/skills
 COPY --from=build --chown=node:node /app/ecosystem.config.cjs ./ecosystem.config.cjs
 COPY --from=build --chown=node:node /app/CHANGELOG.md  ./CHANGELOG.md
 
-# data/ is a volume — created if missing on first start
-RUN mkdir -p /app/data && chown -R node:node /app/data
-
+# Listen on all interfaces INSIDE the container (needed for port publishing),
+# but only answer requests addressed to localhost — docker-compose publishes
+# the port on the host's 127.0.0.1 only. See DASHBOARD_DOCKER_LOCAL_ONLY.
 ENV NODE_ENV=production \
     DASHBOARD_BIND=0.0.0.0 \
+    DASHBOARD_DOCKER_LOCAL_ONLY=true \
     PORT=3456
 
 # Health check — hits the operator-defaults endpoint every 30s.

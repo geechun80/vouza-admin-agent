@@ -32,15 +32,37 @@ if "%AGENT_DIR:~-1%"=="\" set AGENT_DIR=%AGENT_DIR:~0,-1%
 
 cd /d "%AGENT_DIR%"
 echo.
-echo  [1/4] Pulling latest from GitHub...
-git pull
+echo  [1/4] Getting the latest version from GitHub...
+git fetch origin
 if errorlevel 1 (
     echo.
-    echo  X git pull failed. If you have local changes, commit or stash them first:
-    echo      git status
-    echo      git stash
+    echo  X Could not reach GitHub. Check your internet connection and try again.
     pause
     exit /b 1
+)
+for /f %%B in ('git rev-parse --abbrev-ref HEAD') do set BRANCH=%%B
+git merge --ff-only origin/!BRANCH! >nul 2>&1
+if errorlevel 1 (
+    echo.
+    echo  ! This copy can't be updated automatically - it has local code edits,
+    echo    or it predates the project history clean-up of 1 Oct 2026.
+    echo    Your data/ folder ^(settings, chats, WhatsApp login^) is NOT affected.
+    echo.
+    set /p REPLACE="  Replace this copy's code with the latest version? (Y/N): "
+    if /i not "!REPLACE!"=="Y" (
+        echo  Cancelled. Nothing changed.
+        pause
+        exit /b 1
+    )
+    rem Keep any local code edits recoverable ^(git stash list^) before replacing.
+    git stash push --include-untracked -m "local edits before update" >nul 2>&1
+    git reset --hard origin/!BRANCH!
+    if errorlevel 1 (
+        echo  X Could not replace the code. Ask for help with: git status
+        pause
+        exit /b 1
+    )
+    echo    OK - code replaced. Any local edits were saved: see "git stash list".
 )
 
 echo.

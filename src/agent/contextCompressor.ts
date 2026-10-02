@@ -18,7 +18,7 @@
 
 import type { ConversationMessage } from "../types/index.js";
 import type { AIProvider } from "../config/models.js";
-import { baseUrlFor, openRouterHeaders } from "../config/providerEndpoints.js";
+import { baseUrlFor, openRouterHeaders, outputLimit, ANTHROPIC_MIN_OUTPUT_TOKENS } from "../config/providerEndpoints.js";
 
 // ─── Token estimation ─────────────────────────────────────────────────────────
 
@@ -89,7 +89,7 @@ async function llmSummarize(
     const client    = new Anthropic({ apiKey });
     const resp      = await client.messages.create({
       model,
-      max_tokens: 600,
+      max_tokens: ANTHROPIC_MIN_OUTPUT_TOKENS,
       system:     COMPRESS_SYSTEM_PROMPT,
       messages:   [{ role: "user", content: prompt }],
     });
@@ -110,7 +110,7 @@ async function llmSummarize(
     headers,
     body: JSON.stringify({
       model,
-      max_tokens: 600,
+      ...outputLimit(provider, 600),
       messages: [
         { role: "system", content: COMPRESS_SYSTEM_PROMPT },
         { role: "user",   content: prompt },

@@ -41,11 +41,25 @@ cd "$(dirname "$0")"
 
 echo
 echo "${CYAN}[1/4] Pulling latest from GitHub...${NC}"
-if ! git pull; then
-  echo "${RED}✗ git pull failed.${NC} If you have local changes, run:"
-  echo "  git status"
-  echo "  git stash"
+if ! git fetch origin; then
+  echo "${RED}✗ Could not reach GitHub.${NC} Check your internet connection and try again."
   exit 1
+fi
+BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+if ! git merge --ff-only "origin/$BRANCH" >/dev/null 2>&1; then
+  echo
+  echo "${YELLOW}! This copy can't be updated automatically${NC} — it has local code edits,"
+  echo "  or it predates the project history clean-up of 1 Oct 2026."
+  echo "  Your data/ folder (settings, chats, WhatsApp login) is NOT affected."
+  read -p "Replace this copy's code with the latest version? (y/N): " REPLACE
+  if [[ ! "$REPLACE" =~ ^[Yy]$ ]]; then
+    echo "Cancelled. Nothing changed."
+    exit 1
+  fi
+  # Keep any local code edits recoverable (git stash list) before replacing.
+  git stash push --include-untracked -m "local edits before update" >/dev/null 2>&1 || true
+  git reset --hard "origin/$BRANCH"
+  echo "${GREEN}✓ Code replaced.${NC} Any local edits were saved: see \"git stash list\"."
 fi
 
 echo

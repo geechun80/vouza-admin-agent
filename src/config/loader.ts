@@ -18,6 +18,7 @@ import {
   getProviderForModel,
   DEFAULT_MODEL,
   DEFAULT_MODEL_BY_PROVIDER,
+  normalizeModelId,
   DEFAULT_PROVIDER,
   DEFAULT_OPERATOR_PROVIDER,
   DEFAULT_OPERATOR_MODEL,
@@ -170,8 +171,8 @@ export async function loadConfigFromJson(): Promise<AgentConfig> {
     if (saved.agent) {
       baseConfig.name = saved.agent.name || baseConfig.name;
       if (saved.agent.model && isValidModelId(saved.agent.model)) {
-        baseConfig.model = saved.agent.model;
-        const modelInfo = findModel(saved.agent.model);
+        baseConfig.model = normalizeModelId(saved.agent.model);
+        const modelInfo = findModel(baseConfig.model);
         if (modelInfo) {
           baseConfig.provider = modelInfo.provider;
         } else if (saved.agent.provider && saved.agent.provider in DEFAULT_MODEL_BY_PROVIDER) {
@@ -244,9 +245,10 @@ export async function loadConfigFromJson(): Promise<AgentConfig> {
     if (saved.agent?.provider === "openrouter") {
       baseConfig.provider = "openrouter";
       baseConfig.openrouterTiers = {
-        fast:     saved.agent.openrouterTiers?.fast     || DEFAULT_OPENROUTER_TIERS.fast,
-        balanced: saved.agent.openrouterTiers?.balanced  || DEFAULT_OPENROUTER_TIERS.balanced,
-        flagship: saved.agent.openrouterTiers?.flagship  || DEFAULT_OPENROUTER_TIERS.flagship,
+        // Retired IDs (removed upstream) are swapped for working ones.
+        fast:     normalizeModelId(saved.agent.openrouterTiers?.fast)     || DEFAULT_OPENROUTER_TIERS.fast,
+        balanced: normalizeModelId(saved.agent.openrouterTiers?.balanced) || DEFAULT_OPENROUTER_TIERS.balanced,
+        flagship: normalizeModelId(saved.agent.openrouterTiers?.flagship) || DEFAULT_OPENROUTER_TIERS.flagship,
       };
       // model field set to balanced tier for display purposes
       baseConfig.model = baseConfig.openrouterTiers.balanced;

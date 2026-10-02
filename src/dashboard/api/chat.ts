@@ -23,6 +23,7 @@ import {
   DEFAULT_PROVIDER,
   DEFAULT_OPERATOR_PROVIDER,
   DEFAULT_GUIDE_BOT_MODEL,
+  normalizeModelId,
   type AIProvider,
 } from "../../config/models.js";
 import { checkBudget, recordSpend, isVouzaFallbackKey } from "../../agent/budget.js";
@@ -765,16 +766,16 @@ function buildAgentConfig(saved: any, apiKeyOverride?: string): AgentConfig {
   // the task-complexity router always calls the intended guide-bot model.
   // When the user has their own key, honour their saved tier selections.
   const openrouterTiers = (provider === "openrouter" || operatorProvider === "openrouter") ? {
-    fast:     hasUserKey ? (saved?.agent?.openrouterTiers?.fast     || DEFAULT_OPENROUTER_TIERS.fast)     : operatorModel,
-    balanced: hasUserKey ? (saved?.agent?.openrouterTiers?.balanced  || DEFAULT_OPENROUTER_TIERS.balanced)  : operatorModel,
-    flagship: hasUserKey ? (saved?.agent?.openrouterTiers?.flagship  || DEFAULT_OPENROUTER_TIERS.flagship)  : operatorModel,
+    fast:     hasUserKey ? (normalizeModelId(saved?.agent?.openrouterTiers?.fast)     || DEFAULT_OPENROUTER_TIERS.fast)     : operatorModel,
+    balanced: hasUserKey ? (normalizeModelId(saved?.agent?.openrouterTiers?.balanced) || DEFAULT_OPENROUTER_TIERS.balanced) : operatorModel,
+    flagship: hasUserKey ? (normalizeModelId(saved?.agent?.openrouterTiers?.flagship) || DEFAULT_OPENROUTER_TIERS.flagship) : operatorModel,
   } : undefined;
 
   // Display model: operator model when no user key, otherwise user selection
   const model = hasUserKey
     ? (provider === "openrouter"
         ? (openrouterTiers?.balanced ?? DEFAULT_OPENROUTER_TIERS.balanced)
-        : (saved?.agent?.model || DEFAULT_MODEL_BY_PROVIDER[provider] || DEFAULT_MODEL))
+        : (normalizeModelId(saved?.agent?.model) || DEFAULT_MODEL_BY_PROVIDER[provider] || DEFAULT_MODEL))
     : operatorModel;
 
   // ── Whisper voice transcription (separate from main AI provider) ───────────

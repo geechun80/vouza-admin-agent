@@ -78,9 +78,9 @@ describe("budget — cap configuration", () => {
 
 describe("budget — cost estimation", () => {
   it("computes cost from per-1M-token pricing", () => {
-    // gemini-2.5-flash-lite: $0.07 in / $0.30 out per 1M
+    // gemini-2.5-flash-lite: $0.10 in / $0.40 out per 1M
     const cost = estimateCost("google/gemini-2.5-flash-lite", 1_000_000, 1_000_000);
-    assert.ok(Math.abs(cost - 0.37) < 0.001, `expected ~$0.37, got ${cost}`);
+    assert.ok(Math.abs(cost - 0.5) < 0.001, `expected ~$0.50, got ${cost}`);
   });
 
   it("scales linearly with token counts", () => {
@@ -95,7 +95,7 @@ describe("budget — cost estimation", () => {
   });
 
   it("returns $0 for free-tier models", () => {
-    const cost = estimateCost("meta-llama/llama-3.1-8b-instruct:free", 1_000_000, 1_000_000);
+    const cost = estimateCost("google/gemma-4-31b-it:free", 1_000_000, 1_000_000);
     assert.equal(cost, 0);
   });
 });
@@ -165,14 +165,14 @@ describe("budget — recordSpend persistence", () => {
     await recordSpend("openrouter", "google/gemini-2.5-flash-lite", 1_000_000, 1_000_000);
     const r = await checkBudget();
     assert.ok(r.spent > 0);
-    assert.ok(Math.abs(r.spent - 0.37) < 0.001);
+    assert.ok(Math.abs(r.spent - 0.5) < 0.001);
   });
 
   it("accumulates across multiple calls", async () => {
     await recordSpend("openrouter", "google/gemini-2.5-flash-lite", 500_000, 500_000);
     await recordSpend("openrouter", "google/gemini-2.5-flash-lite", 500_000, 500_000);
     const r = await checkBudget();
-    assert.ok(Math.abs(r.spent - 0.37) < 0.001);
+    assert.ok(Math.abs(r.spent - 0.5) < 0.001);
   });
 
   it("tracks spend per provider in snapshot", async () => {
@@ -183,7 +183,7 @@ describe("budget — recordSpend persistence", () => {
   });
 
   it("skips recording for $0 (free-tier) models", async () => {
-    await recordSpend("openrouter", "meta-llama/llama-3.1-8b-instruct:free", 1_000_000, 1_000_000);
+    await recordSpend("openrouter", "google/gemma-4-31b-it:free", 1_000_000, 1_000_000);
     const r = await checkBudget();
     assert.equal(r.spent, 0);
   });

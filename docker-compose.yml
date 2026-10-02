@@ -5,11 +5,15 @@
 #   docker compose up -d        # start everything in background
 #   docker compose logs -f      # tail live logs
 #   docker compose down         # graceful stop
-#   docker compose pull         # update to latest images
+#   docker compose up -d --build   # after "git pull", rebuild with the new code
 #
 # Files & env:
-#   - .env at repo root (copy from .env.example and fill in your keys)
-#   - data/ volume persists config, conversations, WhatsApp auth, etc.
+#   - .env at repo root is OPTIONAL (copy .env.example to .env to set an
+#     operator key or VOUZA_SECRET_KEY). Users can paste their own AI key
+#     in the setup wizard instead.
+#   - data/ persists config, conversations, WhatsApp login, etc.
+#
+# Open http://localhost:3456 — it is only reachable from this computer.
 # =============================================================================
 
 services:
@@ -18,12 +22,16 @@ services:
   admin-agent:
     build: .
     image: vouza-admin-agent:latest
+    # Built locally from this folder — never pulled from Docker Hub (that
+    # printed a confusing "pull access denied" warning).
+    pull_policy: build
     container_name: vouza-admin-agent
     restart: unless-stopped
     ports:
-      # Dashboard / API on 3456. If you need remote access, set
-      # DASHBOARD_BIND=0.0.0.0 + DASHBOARD_PASSWORD in .env so auth is enforced.
-      - "3456:3456"
+      # This computer only. The dashboard has no login screen, so it must not
+      # be published on your network; for remote use, connect through an SSH
+      # tunnel or Tailscale to this machine's localhost:3456.
+      - "127.0.0.1:3456:3456"
     volumes:
       # Persists config, conversations, memories, WhatsApp auth, logs.
       # Bind mount (./data) so you can also inspect/back up from host.
@@ -35,9 +43,13 @@ services:
       VOUZA_API_PROVIDER: ${VOUZA_API_PROVIDER:-openrouter}
       VOUZA_API_MODEL:    ${VOUZA_API_MODEL:-google/gemini-2.5-flash-lite}
       VOUZA_BRAND_NAME:   ${VOUZA_BRAND_NAME:-Vouza}
-      # Remote dashboard access — leave unset for local-only (default safe)
-      DASHBOARD_BIND:     ${DASHBOARD_BIND:-0.0.0.0}
-      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
+      # Container listens on all interfaces; only requests addressed to
+      # localhost are answered (the port above is published on 127.0.0.1).
+      DASHBOARD_BIND:              "0.0.0.0"
+      DASHBOARD_DOCKER_LOCAL_ONLY: "true"
+      # Docker has no Windows/macOS key store: set a 64-hex-char key here (or
+      # in .env) to protect saved passwords; otherwise one is kept in data/.
+      VOUZA_SECRET_KEY:   ${VOUZA_SECRET_KEY:-}
       LOG_LEVEL:          ${LOG_LEVEL:-info}
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3456/api/operator-defaults > /dev/null 2>&1 || exit 1"]

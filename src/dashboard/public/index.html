@@ -32,6 +32,11 @@
       Get Started &nbsp;→
     </button>
     <button class="welcome-advanced" onclick="startSetup()">Advanced setup (all options)</button>
+    <div class="version-line">
+      <span class="app-version"></span>
+      <button type="button" class="welcome-advanced" onclick="checkForUpdates(this)">Check for updates</button>
+      <div class="update-result" role="status" aria-live="polite"></div>
+    </div>
 
     <!-- Shown only when a previous partial setup is detected -->
     <div id="welcomeResumeBadge" class="welcome-resume-badge" style="display:none">
@@ -691,6 +696,11 @@
             <div class="step-eyebrow">Operations</div>
             <h2 class="step-title" style="margin:0">📊 System Health</h2>
             <p class="step-subtitle" style="margin:4px 0 0">Live view of your agent's spend, provider status, uptime — and every outside service it contacted. Refreshes every 15 seconds.</p>
+            <div class="version-line" style="justify-content:flex-start;margin-top:6px">
+              <span class="app-version"></span>
+              <button type="button" class="welcome-advanced" onclick="checkForUpdates(this)">Check for updates</button>
+              <div class="update-result" role="status" aria-live="polite"></div>
+            </div>
           </div>
           <button class="btn" onclick="toggleHealthPanel()" style="min-width:80px">← Back</button>
         </div>

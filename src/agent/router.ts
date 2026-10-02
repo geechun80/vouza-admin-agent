@@ -6,15 +6,16 @@
 //
 // Tier     | Best for                                    | Default model
 // ─────────┼─────────────────────────────────────────────┼──────────────────────────────────────────
-// fast     │ Short queries, status checks, yes/no        │ meta-llama/llama-3.1-8b-instruct:free
-// balanced │ Email drafting, scheduling, file ops        │ google/gemini-2.5-flash-lite
-// flagship │ Analysis, reports, image processing,        │ google/gemini-2.5-flash
+// fast     │ Short queries, status checks, yes/no        │ google/gemini-2.5-flash-lite
+// balanced │ Email drafting, scheduling, file ops        │ google/gemini-2.5-flash
+// flagship │ Analysis, reports, image processing,        │ anthropic/claude-sonnet-5.5
 //          │ multi-step agentic workflows                │
 //
 // Model selection rationale:
-// Gemini 2.5 Flash variants ($0.07–$0.15/1M tokens) are near-instant and cost
-// < $0.01 for a typical agent task. Llama 3.1 8B :free is used for the fast tier
-// as it has the shortest queue times among free OpenRouter models.
+// Gemini 2.5 Flash-Lite / Flash ($0.10–$0.30 per 1M input tokens) are near-
+// instant and cost < $0.01 for a typical agent task. Claude Sonnet 5.5 handles
+// the hard tasks. (Free models were dropped from the defaults: OpenRouter
+// removes them without notice — Llama 3.1 8B :free disappeared in 2026.)
 // =============================================================================
 
 export type TaskComplexity = "fast" | "balanced" | "flagship";
