@@ -8,6 +8,15 @@ the full history.
 
 ---
 
+## 2.2.1 — 2026-10-02
+
+**You'll know when to update**
+
+- 🆕 The dashboard now tells you when a new version is out — a banner with a **How to update** button (checked once a day; switch off under **System Health → Privacy & network**)
+- 🔄 **Check for updates** and the version number are now also in the sidebar of the main dashboard
+
+---
+
 ## 2.2.0 — 2026-10-02
 
 **Simpler setup, safer by default, and today's AI models**

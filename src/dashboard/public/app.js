@@ -4269,7 +4269,13 @@ async function loadPrivacyAndNetwork() {
           ? '💻 Your AI runs on this computer (local AI) — conversations are not sent to an AI company.'
           : '☁️ Your AI runs in the cloud — each message you send goes to your AI provider to be answered.'}
         · Connection health checks every ${escHtml(String(settings.healthCheckMinutes))} min.
-      </div>`;
+      </div>
+      <label style="display:flex;gap:10px;align-items:flex-start;font-size:13px;line-height:1.5;padding:8px 4px;cursor:pointer">
+        <input type="checkbox" id="autoUpdateToggle" ${settings.autoUpdateCheck ? 'checked' : ''}
+               onchange="setAutoUpdateCheck(this.checked)" style="margin-top:3px">
+        <span><strong>Tell me when a new version is out</strong><br>
+          <span style="color:var(--text-dim)">Once a day the dashboard asks GitHub for the latest version number (nothing about you is sent) and shows a banner if you should update.</span></span>
+      </label>`;
   }
 
   const netEl = document.getElementById('networkActivity');
@@ -4294,6 +4300,22 @@ async function loadPrivacyAndNetwork() {
     <div style="font-size:12px;font-weight:600;padding:4px">Services contacted since ${escHtml(new Date(net.since).toLocaleString())}</div>
     ${rows}
     <details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;padding:4px">Latest 25 connections</summary>${recent}</details>`;
+}
+
+async function setAutoUpdateCheck(on) {
+  try {
+    const d = await fetch('/api/privacy-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ autoUpdateCheck: !!on }),
+    }).then((r) => r.json());
+    if (!d.success) throw new Error(d.error || 'Could not save');
+    toast(on ? 'You will be told when a new version is out' : 'Automatic update check is off');
+  } catch (err) {
+    toast('Could not save: ' + escHtml(err.message), 'error');
+    const box = document.getElementById('autoUpdateToggle');
+    if (box) box.checked = !on;
+  }
 }
 
 async function setLearnFromConversations(on) {
@@ -5345,6 +5367,43 @@ async function showAppVersion() {
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', showAppVersion);
 else showAppVersion();
+
+// Once a day (server-cached) the dashboard asks GitHub whether a newer
+// version exists, so people on an old copy are told to update. Switch off in
+// System Health -> Privacy & network. "Later" hides it for that version.
+const UPDATE_DISMISSED_KEY = 'vouza_update_dismissed_v1';
+
+async function autoCheckForUpdates() {
+  try {
+    const r = await fetch('/api/update-check?auto=1').then((x) => x.json());
+    if (!r.ok || r.skipped || !r.updateAvailable) return;
+    let dismissed = '';
+    try { dismissed = localStorage.getItem(UPDATE_DISMISSED_KEY) || ''; } catch { /* private window */ }
+    if (dismissed === r.latest) return;
+    showUpdateBanner(r);
+  } catch { /* offline — try again next time */ }
+}
+
+function showUpdateBanner(r) {
+  if (document.getElementById('updateBanner')) return;
+  const url = /^https:\/\/github\.com\//.test(r.url || '') ? r.url : 'https://github.com/geechun80/vouza-admin-agent#-update';
+  const bar = document.createElement('div');
+  bar.id = 'updateBanner';
+  bar.className = 'update-banner';
+  bar.setAttribute('role', 'status');
+  bar.innerHTML =
+    `<span>🆕 <strong>Version ${escHtml(r.latest)} is available</strong> — you have ${escHtml(r.current)}. Please update to get the latest fixes.</span>` +
+    `<a class="btn btn-primary" href="${escHtml(url)}" target="_blank" rel="noopener">How to update</a>` +
+    `<button type="button" class="btn" data-act="later">Later</button>`;
+  bar.querySelector('[data-act="later"]').addEventListener('click', () => {
+    try { localStorage.setItem(UPDATE_DISMISSED_KEY, r.latest); } catch { /* ignore */ }
+    bar.remove();
+  });
+  document.body.appendChild(bar);
+}
+
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', autoCheckForUpdates);
+else autoCheckForUpdates();
 
 async function checkForUpdates(btn) {
   const out = btn.parentElement.querySelector('.update-result');

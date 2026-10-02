@@ -236,3 +236,23 @@ describe("versions and updates", () => {
   });
 });
 
+describe("the dashboard tells people to update", () => {
+  it("checks automatically at most once a day, and can be switched off", async () => {
+    const server = await read("src/dashboard/api/server.ts");
+    assert.match(server, /const auto = req\.query\.auto === "1"/);
+    assert.match(server, /cfg\.autoUpdateCheck === false\) return res\.json\(\{ ok: true, skipped: true/);
+    assert.match(server, /UPDATE_CHECK_TTL_MS = 24 \* 60 \* 60_000/);
+    assert.match(server, /if \(path === "\/api\/update-check"\) return "update check"/);
+  });
+
+  it("shows a banner with How to update / Later, and a button in the main sidebar", async () => {
+    const app = await read("src/dashboard/public/app.js");
+    assert.match(app, /fetch\('\/api\/update-check\?auto=1'\)/);
+    assert.match(app, /How to update<\/a>/);
+    assert.match(app, /data-act="later"/);
+    assert.match(app, /setAutoUpdateCheck\(this\.checked\)/);
+    const html = await read("src/dashboard/public/index.html");
+    assert.match(html, /sidebar-version[\s\S]*checkForUpdates\(this\)/);
+  });
+});
+

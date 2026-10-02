@@ -263,6 +263,11 @@
             <div>💾 Saved automatically</div>
             <div style="font-size:10px;color:var(--text-dim);opacity:0.7;margin-top:2px">⌘K / Ctrl+K for commands</div>
             <a href="https://github.com/geechun80/vouza-admin-agent" target="_blank" class="conv-footer-link">📚 Docs &amp; Support</a>
+            <div class="version-line sidebar-version">
+              <span class="app-version"></span>
+              <button type="button" class="link-btn" onclick="checkForUpdates(this)">🔄 Check for updates</button>
+              <div class="update-result" role="status" aria-live="polite"></div>
+            </div>
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:5px">
             <button class="conv-memory-btn" onclick="openSettings()" title="Reconfigure agent" aria-label="Open settings to reconfigure the agent">⚙️ Settings</button>

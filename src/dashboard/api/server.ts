@@ -75,8 +75,12 @@ function requestTrigger(path: string): string {
   if (path === "/api/agent/task") return "your request (dashboard)";
   if (path === "/api/transcribe") return "your voice note (dashboard)";
   if (path.startsWith("/api/integrations/") && path.endsWith("/probe")) return "health check (you clicked)";
+  if (path === "/api/update-check") return "update check";
   return "setup / dashboard";
 }
+// Last answer from GitHub's "latest release" (the automatic check reuses it for a day).
+const UPDATE_CHECK_TTL_MS = 24 * 60 * 60_000;
+let _updateCache: { at: number; current: string; result: Record<string, unknown> } | null = null;
 // Prevents double-launch race condition between auto-launch retry and manual /api/agent/launch
 let launching = false;
 
@@ -105,6 +109,8 @@ interface SetupConfig {
   selfImproveIntervalHours?: number;
   /** false → no reflection / skill writing / optimizer passes (each re-sends conversations to the AI) */
   learnFromConversations?: boolean;
+  /** false -> the dashboard never asks GitHub for a newer version on its own */
+  autoUpdateCheck?: boolean;
   setupCompleted: boolean;
   setupCompletedAt?: string;
 }
@@ -685,11 +691,21 @@ export async function startDashboard(port = 3456): Promise<void> {
       learnFromConversations: cfg.learnFromConversations !== false,
       aiRunsLocally:          cfg.agent?.provider === "ollama",
       healthCheckMinutes:     Math.round(HEALTH_PROBE_INTERVAL_MS / 60_000),
+      autoUpdateCheck:        cfg.autoUpdateCheck !== false,
     });
   });
 
   app.post("/api/privacy-settings", requireLocalOrigin, async (req, res) => {
-    const { learnFromConversations } = (req.body ?? {}) as { learnFromConversations?: unknown };
+    const { learnFromConversations, autoUpdateCheck } = (req.body ?? {}) as { learnFromConversations?: unknown; autoUpdateCheck?: unknown };
+    if (autoUpdateCheck !== undefined) {
+      if (typeof autoUpdateCheck !== "boolean") {
+        return res.status(400).json({ success: false, error: "autoUpdateCheck must be true or false" });
+      }
+      const cfg = await loadSetupConfig();
+      cfg.autoUpdateCheck = autoUpdateCheck;
+      await saveSetupConfig(cfg);
+      if (learnFromConversations === undefined) return res.json({ success: true, autoUpdateCheck });
+    }
     if (typeof learnFromConversations !== "boolean") {
       return res.status(400).json({ success: false, error: "learnFromConversations must be true or false" });
     }
@@ -1049,10 +1065,24 @@ export async function startDashboard(port = 3456): Promise<void> {
   // Compares this install's package.json version with the latest GitHub
   // Release, so people on an old copy find out instead of assuming they're
   // current. VOUZA_UPDATE_REPO overrides the repository ("owner/name").
-  app.get("/api/update-check", requireLocalOrigin, async (_req, res) => {
+  //
+  // ?auto=1 is the dashboard's own once-a-day check, so people on an old
+  // version are told without having to think of pressing a button. It only
+  // asks GitHub for the latest version number (nothing about the user is
+  // sent), is cached for a day, shows in the Network list as "update check",
+  // and is skipped when switched off in System Health -> Privacy & network.
+  app.get("/api/update-check", requireLocalOrigin, async (req, res) => {
     try {
       const pkg = JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8"));
       const current = String(pkg.version || "0.0.0");
+      const auto = req.query.auto === "1";
+      if (auto) {
+        const cfg = await loadSetupConfig();
+        if (cfg.autoUpdateCheck === false) return res.json({ ok: true, skipped: true, current });
+        if (_updateCache && Date.now() - _updateCache.at < UPDATE_CHECK_TTL_MS && _updateCache.current === current) {
+          return res.json(_updateCache.result);
+        }
+      }
       const repo = (process.env.VOUZA_UPDATE_REPO || "geechun80/vouza-admin-agent").trim();
       const r = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
         headers: { Accept: "application/vnd.github+json", "User-Agent": "vouza-admin-agent" },
@@ -1061,7 +1091,9 @@ export async function startDashboard(port = 3456): Promise<void> {
       if (!r.ok) return res.json({ ok: false, current, error: `GitHub answered HTTP ${r.status}` });
       const rel = await r.json() as { tag_name?: string; html_url?: string; name?: string };
       const latest = String(rel.tag_name || "").replace(/^v/i, "");
-      res.json({ ok: true, current, latest, updateAvailable: isNewerVersion(latest, current), url: rel.html_url });
+      const result = { ok: true, current, latest, updateAvailable: isNewerVersion(latest, current), url: rel.html_url };
+      _updateCache = { at: Date.now(), current, result };
+      res.json(result);
     } catch (err: any) {
       res.json({ ok: false, error: `Couldn't reach GitHub: ${String(err?.message || err)}` });
     }

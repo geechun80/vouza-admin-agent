@@ -6,9 +6,9 @@
 
 Reads and answers email · finds your documents · checks your calendar · works from WhatsApp or Telegram
 
-**Latest version: 2.2.0** · [What's new](CHANGELOG.md)
+**Latest version: 2.2.1** · [What's new](CHANGELOG.md)
 
-[![Tests](https://img.shields.io/badge/tests-671%2F671-brightgreen)](#)
+[![Tests](https://img.shields.io/badge/tests-673%2F673-brightgreen)](#)
 [![Node](https://img.shields.io/badge/node-20.19%2B-blue)](https://nodejs.org)
 [![Audit](https://img.shields.io/badge/npm%20audit-0%20vulnerabilities-brightgreen)](#)
 
@@ -67,7 +67,7 @@ Then open **http://localhost:3456** on that computer. For safety it isn't reacha
 
 ## 🔄 Update
 
-**Which version am I on?** The dashboard shows it on the start screen and in **System Health**, with a **Check for updates** button. The latest version is shown at the top of this page.
+**Which version am I on?** The dashboard shows it on the start screen, in the sidebar and in **System Health**, with a **Check for updates** button — and it shows a banner by itself when a new version is out. The latest version is shown at the top of this page.
 
 | How you installed | How to update |
 |---|---|
@@ -239,6 +239,7 @@ Your files, memories and chat history stay on the computer. The agent contacts o
 | WhatsApp / Telegram | To receive your messages and reply |
 | Web search / websites | Only when you ask (see above) |
 | Health checks | Every 15 minutes, a quick "is this key still valid?" to each service you connected (`HEALTH_PROBE_INTERVAL_MS` to change) |
+| Update check | Once a day, asks GitHub for the latest version number so the dashboard can tell you to update (nothing about you is sent; switch off under **Privacy & network**) |
 
 **See it for yourself:** System Health → **🔒 Privacy & network** lists every service contacted since the dashboard started, how often, and why (your message, scheduled task, health check, setup…). The same panel has a **Learn from conversations** switch — when on, the agent re-reads finished chats with your AI to save reusable skills; turn it off and that never happens.
 
