@@ -20,6 +20,7 @@ import {
   aiConfigPatch,
   detectLocalAi,
   localAiConfigPatch,
+  onlineAiConfigPatch,
   SUGGESTED_LOCAL_MODEL,
   detectEmailPreset,
   verifyEmailLogin,
@@ -106,6 +107,7 @@ export function registerQuickSetupRoutes(app: Express, deps: QuickSetupDeps): vo
           ownKey:      !!(userKey && String(userKey).length >= 20),
           viaBuiltIn:  !localAi && !(userKey && String(userKey).length >= 20) && operatorUsable,
           provider:    provider || null,
+          activeModel: cfg.agent?.model || null,
         },
         email: { configured: emailConfigured, address: emailAddress, provider: email?.provider || null },
         folders: {
@@ -175,6 +177,22 @@ export function registerQuickSetupRoutes(app: Express, deps: QuickSetupDeps): vo
       await patchConfig(localAiConfigPatch(model));
       if (deps.getAgent()) await deps.restartAgent();
       res.json({ ok: true, model });
+    } catch (err) {
+      res.json({ ok: false, error: `Saving failed: ${String(err)}` });
+    }
+  });
+
+  // Back from the local AI to an online one (a saved key, or the built-in AI)
+  app.post("/api/quick-setup/online-ai", guard, async (_req, res) => {
+    try {
+      const cfg = await deps.loadConfig();
+      const patch = onlineAiConfigPatch(cfg.credentials || {}, await deps.operatorKeyUsable());
+      if (!patch) {
+        return res.json({ ok: false, needKey: true, error: "There's no online AI key saved yet — paste one below first." });
+      }
+      await patchConfig(patch);
+      if (deps.getAgent()) await deps.restartAgent();
+      res.json({ ok: true, provider: patch.agent.provider, model: patch.agent.model });
     } catch (err) {
       res.json({ ok: false, error: `Saving failed: ${String(err)}` });
     }

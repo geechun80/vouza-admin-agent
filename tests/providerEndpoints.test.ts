@@ -18,7 +18,7 @@ import {
 } from "../src/config/providerEndpoints.js";
 import { DEFAULT_MODEL_BY_PROVIDER, AI_PROVIDERS, type AIProvider } from "../src/config/models.js";
 import { pickHealthyProvider, recordFailure, __testResetHealth } from "../src/agent/providerFailover.js";
-import { detectLocalAi, localAiConfigPatch } from "../src/setup/quickSetup.js";
+import { detectLocalAi, localAiConfigPatch, onlineAiConfigPatch } from "../src/setup/quickSetup.js";
 
 describe("provider endpoints", () => {
   it("every cloud provider has a real https base URL (no api.<name>.com guesses)", () => {
@@ -98,5 +98,31 @@ describe("Quick Setup — local AI detection", () => {
 
   it("saves provider + model only — no key", () => {
     assert.deepEqual(localAiConfigPatch(" qwen2.5:7b "), { agent: { provider: "ollama", model: "qwen2.5:7b" } });
+  });
+});
+
+describe("switching back from the local AI to an online one", () => {
+  const key = "x".repeat(30);
+
+  it("uses the first provider with a saved key, with its default model", () => {
+    assert.deepEqual(onlineAiConfigPatch({ anthropicApiKey: key, googleApiKey: key }),
+      { agent: { provider: "anthropic", model: DEFAULT_MODEL_BY_PROVIDER.anthropic } });
+    assert.equal(onlineAiConfigPatch({ googleAiApiKey: key })?.agent.provider, "google");
+  });
+
+  it("prefers OpenRouter when that key is saved", () => {
+    assert.equal(onlineAiConfigPatch({ anthropicApiKey: key, openrouterApiKey: key })?.agent.provider, "openrouter");
+  });
+
+  it("ignores blank or too-short keys and falls back to the built-in AI only when it works", () => {
+    assert.equal(onlineAiConfigPatch({ openaiApiKey: "  ", xaiApiKey: "short" }, false), null);
+    assert.equal(onlineAiConfigPatch({}, true)?.agent.provider, "openrouter");
+    assert.equal(onlineAiConfigPatch(undefined, false), null);
+  });
+
+  it("is exposed to the dashboard behind the local-origin guard", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const routes = await readFile("src/dashboard/api/quick-setup.ts", "utf8");
+    assert.match(routes, /app\.post\("\/api\/quick-setup\/online-ai", guard,/);
   });
 });

@@ -263,13 +263,17 @@ snapshot, last 100 log lines, last 5 shell-audit entries. CSRF-guarded.
 `{ version, changelog }` — version comes from `package.json`, changelog
 from `CHANGELOG.md` if present.
 
-### `GET /api/export-config` · `POST /api/import-config`
+### `POST /api/export-config` · `POST /api/import-config`
 
-Full backup / restore. **Export includes credentials unmasked** — intended
-for the user's own personal backup, never shared publicly. Import does an
-auto-backup of the current config to `data/config.json.before-restore-*.bak`
-before overwriting. Import validates envelope (`format: "vouza-admin-agent-backup"`,
-`version: 1`). CSRF-guarded.
+Full backup / restore. Export takes `{ password }` (8+ characters) and returns
+a **locked** backup (`format: "vouza-admin-agent-backup-locked"`: scrypt
+N=2^15 → AES-256-GCM); the credentials inside are only readable with that
+password. `GET /api/export-config` answers `410` since 2.3.0. Import accepts a
+locked backup plus `password` (wrong password → `400` with
+`wrongPassword: true`) or an older unlocked backup
+(`format: "vouza-admin-agent-backup"`, `version: 1`), and saves the current
+config to `data/config.json.before-restore-*.bak` before overwriting.
+CSRF-guarded.
 
 ### `POST /api/create-shortcut`
 
@@ -419,8 +423,9 @@ with saved credentials. CSRF-guarded.
 
 Inbound WAHA event webhook. Public — not CSRF-guarded (WAHA is an external
 service). Schema-validated: must have `event: string`, `payload: object`,
-`session: string`. Authenticated via the `X-Api-Key` header (matched against
-the WAHA api key configured in the wizard) when the user has WAHA configured.
+`session: string`. Requires a running agent with WAHA configured (else `404`)
+and a WAHA API key: the `X-Api-Key` header must match the key saved in the
+wizard (`403` when it doesn't, or when no key is saved — since 2.3.0).
 ACKs immediately with `{ success: true }`, then dispatches to the agent.
 
 ### MCP — `/api/mcp/servers`

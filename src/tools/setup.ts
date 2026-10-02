@@ -402,7 +402,8 @@ const INTEGRATION_GUIDES: Record<string, {
           "WAHA is a free open-source WhatsApp bridge you run on your PC:\n" +
           "  1. Install Docker Desktop from docker.com (free, 5-min install)\n" +
           "  2. Open a terminal and run:\n" +
-          "     docker run -d -p 3000:3000 ghcr.io/devlikeapro/waha\n" +
+          "     docker run -d -p 3000:3000 -e WAHA_API_KEY=<a long random password> ghcr.io/devlikeapro/waha\n" +
+          "     (keep that password — it is the WAHA API Key asked for next)\n" +
           "  3. Open http://localhost:3000 in your browser\n" +
           "  4. Click 'Start Session' → scan the QR code with your WhatsApp\n" +
           `  5. Once connected, go to Webhooks → add: ${dashboardWebhookUrl()}\n` +
@@ -410,11 +411,12 @@ const INTEGRATION_GUIDES: Record<string, {
       },
       {
         key:   "wahaKey",
-        label: "WAHA API Key (optional)",
-        example: "my-secret-key",
+        label: "WAHA API Key (required)",
+        example: "a long random password",
         howTo:
-          "Leave this blank unless you configured an API key in WAHA's settings.\n" +
-          "Most users can leave this empty.",
+          "Required, so only your WAHA can send messages to the assistant.\n" +
+          "Start WAHA with an API key (for example: docker run -d -p 3000:3000 -e WAHA_API_KEY=<a long random password> ghcr.io/devlikeapro/waha)\n" +
+          "and paste the same key here.",
       },
     ],
     testTip: "After saving, I'll check if the WAHA server is reachable and your WhatsApp session is active.",
@@ -926,7 +928,7 @@ export const saveIntegrationCredentialsTool = buildTool({
         "google_calendar: {googleSaKey} — paste the WHOLE .json file content here | " +
         "telegram: {telegramToken} | " +
         "slack: {slackToken} | " +
-        "whatsapp_waha: {wahaUrl, wahaKey?} | " +
+        "whatsapp_waha: {wahaUrl, wahaKey} | " +
         "whatsapp_twilio: {twilioSid, twilioToken, twilioNum} | " +
         "voice_groq: {groqApiKey} | " +
         "voice_openai: {openaiVoiceKey} | " +
@@ -1044,6 +1046,8 @@ export const saveIntegrationCredentialsTool = buildTool({
         case "whatsapp_waha": {
           if (!c.wahaUrl)
             return { success: false, error: "wahaUrl is required." };
+          if (!String(c.wahaKey ?? "").trim())
+            return { success: false, error: "wahaKey is required — start WAHA with an API key (WAHA_API_KEY) and give the same key here, so only WAHA can send messages to the assistant." };
           cfg.credentials.wahaUrl = c.wahaUrl;
           if (c.wahaKey) cfg.credentials.wahaKey = c.wahaKey;
           // WAHA uses webhooks — no listener restart needed; just save the URL.

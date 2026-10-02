@@ -35,3 +35,14 @@ Thumbs.db
 
 # Understand-Anything cache (per-dev, regenerate locally)
 .understand-anything/
+
+# Internal notes and developer tooling — kept on the developer's PC, never
+# published (the repo is public). Customer-facing docs stay in README.md,
+# CHANGELOG.md, UNINSTALL.md and docs/{architecture,api-reference,customization}.md.
+.claude/
+tools/
+walkthrough.md
+*.docx
+docs/codebase-*
+docs/reference/
+gen-pdf.cjs

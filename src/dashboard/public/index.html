@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Vouza AI — Admin Agent Setup</title>
   <link rel="icon" type="image/png" href="/images/vee-bot.png">
-  <link rel="stylesheet" href="/app.css?v=3">
+  <link rel="stylesheet" href="/app.css?v=4">
 </head>
 <body>
 
@@ -233,8 +233,20 @@
             <img src="/images/vouza-logo.png" alt="Vouza">
             <span id="convSidebarAgentName">Admin Agent</span>
           </div>
-          <button class="conv-new-btn" onclick="newConversation()" aria-label="Start a new conversation" title="Start a new conversation (Ctrl+K → New)">✏️ New</button>
+          <button class="conv-new-btn" onclick="newConversation(); openPage('chat')" aria-label="Start a new conversation" title="Start a new conversation (Ctrl+K → New)">✏️ New</button>
         </div>
+
+        <!-- Main menu — each item opens a page on the right -->
+        <nav class="side-nav" aria-label="Main menu">
+          <button type="button" class="side-nav-item active" data-page="chat" onclick="openPage('chat')" aria-current="page"><span class="side-nav-icon">💬</span>Chat</button>
+          <button type="button" class="side-nav-item" data-page="connections" onclick="openPage('connections')"><span class="side-nav-icon">🔌</span>Connections</button>
+          <button type="button" class="side-nav-item" data-page="ai" onclick="openPage('ai')"><span class="side-nav-icon">🤖</span>AI model</button>
+          <button type="button" class="side-nav-item" data-page="memory" onclick="openPage('memory')"><span class="side-nav-icon">🧠</span>Memory</button>
+          <button type="button" class="side-nav-item" data-page="health" onclick="openPage('health')"><span class="side-nav-icon">🛡️</span>Privacy &amp; health</button>
+          <button type="button" class="side-nav-item" data-page="settings" onclick="openPage('settings')"><span class="side-nav-icon">⚙️</span>Settings</button>
+        </nav>
+
+        <div class="conv-section-label">Recent chats</div>
 
         <!-- Search -->
         <div class="conv-search-wrap">
@@ -254,9 +266,6 @@
           </div>
         </div>
 
-        <!-- Setup Status Panel — visible in live mode -->
-        <div class="setup-status-panel" id="setupStatusPanel"></div>
-
         <!-- Footer -->
         <div class="conv-sidebar-footer">
           <div class="conv-footer-info">
@@ -270,10 +279,6 @@
             </div>
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:5px">
-            <button class="conv-memory-btn" onclick="openSettings()" title="Reconfigure agent" aria-label="Open settings to reconfigure the agent">⚙️ Settings</button>
-            <button class="conv-memory-btn" onclick="toggleMemoryPanel()" title="What your agent has learned" aria-label="Open agent memories panel">🧠 Memories</button>
-            <button class="conv-memory-btn" onclick="toggleHealthPanel()" title="Spend, provider health, uptime" aria-label="Open system health and operations panel">📊 Health</button>
-            <button class="conv-memory-btn" onclick="toggleSetupPanel()" title="Per-integration setup cards with Configure/Test/Reconnect" aria-label="Open integration setup wizard panel">🔌 Setup</button>
             <button class="conv-memory-btn" onclick="toggleTheme()" title="Switch between light and dark theme" aria-label="Toggle light/dark theme" id="themeToggleBtn">🌙</button>
           </div>
         </div>
@@ -699,7 +704,7 @@
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
           <div>
             <div class="step-eyebrow">Operations</div>
-            <h2 class="step-title" style="margin:0">📊 System Health</h2>
+            <h2 class="step-title" style="margin:0">🛡️ Privacy &amp; health</h2>
             <p class="step-subtitle" style="margin:4px 0 0">Live view of your agent's spend, provider status, uptime — and every outside service it contacted. Refreshes every 15 seconds.</p>
             <div class="version-line" style="justify-content:flex-start;margin-top:6px">
               <span class="app-version"></span>
@@ -721,13 +726,78 @@
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
           <div>
             <div class="step-eyebrow">Connections</div>
-            <h2 class="step-title" style="margin:0">🔌 Setup</h2>
-            <p class="step-subtitle" style="margin:4px 0 0">One card per integration. Click Test to run the full detect → validate → test → save → confirm → live-test pipeline.</p>
+            <h2 class="step-title" style="margin:0">🔌 Connections</h2>
+            <p class="step-subtitle" style="margin:4px 0 0">What your assistant is connected to. Tap anything marked “+ Add” and the assistant walks you through it in the chat.</p>
           </div>
           <button class="btn" onclick="toggleSetupPanel()" style="min-width:80px">← Back</button>
         </div>
+        <div class="setup-status-panel page-status" id="setupStatusPanel"></div>
         <div id="setupPanelContent">
           <div style="color:var(--text-dim);font-size:14px">Loading integrations…</div>
+        </div>
+      </div>
+
+      <!-- ════ AI MODEL PAGE ════ -->
+      <!-- Which AI answers: online (a key) or local (Ollama on this computer). -->
+      <div class="step-view" id="ai-panel" style="display:none">
+        <div class="page-head">
+          <div>
+            <div class="step-eyebrow">Your assistant's brain</div>
+            <h2 class="step-title" style="margin:0">🤖 AI model</h2>
+            <p class="step-subtitle" style="margin:4px 0 0">Choose an online AI (fast, uses a key) or a local AI that runs on this computer (free, private).</p>
+          </div>
+          <button class="btn" onclick="openPage('chat')" style="min-width:80px">← Back</button>
+        </div>
+        <div id="aiPageContent">
+          <div style="color:var(--text-dim);font-size:14px">Loading…</div>
+        </div>
+      </div>
+
+      <!-- ════ SETTINGS PAGE ════ -->
+      <div class="step-view" id="settings-panel" style="display:none">
+        <div class="page-head">
+          <div>
+            <div class="step-eyebrow">Settings</div>
+            <h2 class="step-title" style="margin:0">⚙️ Settings</h2>
+          </div>
+          <button class="btn" onclick="openPage('chat')" style="min-width:80px">← Back</button>
+        </div>
+        <div class="page-card">
+          <h3>🎨 Look</h3>
+          <p class="page-hint">Switch between a light and a dark screen.</p>
+          <button type="button" class="btn" onclick="toggleTheme()">Switch light / dark</button>
+        </div>
+        <div class="page-card">
+          <h3>🔄 Version &amp; updates</h3>
+          <div class="version-line" style="justify-content:flex-start">
+            <span class="app-version"></span>
+            <button type="button" class="link-btn" onclick="checkForUpdates(this)">Check for updates</button>
+            <div class="update-result" role="status" aria-live="polite"></div>
+          </div>
+        </div>
+        <div class="page-card">
+          <h3>🛠️ Change your setup</h3>
+          <p class="page-hint">Every option in one place: your name, AI, email, apps, skills and schedules.</p>
+          <button type="button" class="btn" onclick="openSettings()">Open full setup</button>
+        </div>
+        <div class="page-card">
+          <h3>💾 Backup</h3>
+          <p class="page-hint">Save your settings and memories to a file — handy when moving to a new computer. 🔒 The file is locked with a password you choose, because it includes your keys.</p>
+          <div class="page-row">
+            <button type="button" class="btn" onclick="downloadBackup()">📥 Download backup</button>
+            <button type="button" class="btn" onclick="triggerRestorePicker()">♻️ Restore from backup…</button>
+          </div>
+        </div>
+        <div class="page-card">
+          <h3>🆘 Help</h3>
+          <div class="page-row">
+            <button type="button" class="btn" onclick="downloadDiagnostic()">Report a problem (download details)</button>
+            <a class="btn" href="https://github.com/geechun80/vouza-admin-agent" target="_blank" rel="noopener">📚 Guide &amp; support ↗</a>
+          </div>
+        </div>
+        <div class="page-card">
+          <h3>🗑️ Remove the assistant</h3>
+          <p class="page-hint">Open the Admin Agent folder and double-click <code>uninstall.bat</code> (Windows) or run <code>./uninstall.sh</code> (Mac / Linux). It offers to keep a copy of your settings first.</p>
         </div>
       </div>
 
@@ -759,6 +829,18 @@
         </div>
       </div>
 
+      <!-- Start screen for an empty chat (live mode only) -->
+      <div class="chat-welcome" id="chatWelcome">
+        <div class="chat-welcome-hi" id="chatWelcomeHi">Hello</div>
+        <div class="chat-welcome-title">How can I help you today?</div>
+        <div class="chat-chips">
+          <button type="button" class="chat-chip" onclick="useChatSuggestion('Summarise my unread email', true)">📬 Summarise my unread email</button>
+          <button type="button" class="chat-chip" onclick="useChatSuggestion('What\'s on my calendar today?', true)">📅 What's on my calendar today?</button>
+          <button type="button" class="chat-chip" onclick="useChatSuggestion('Find the document about ', false)">📁 Find a document</button>
+          <button type="button" class="chat-chip" onclick="useChatSuggestion('Draft a reply to the latest email from ', false)">✍️ Draft a reply</button>
+        </div>
+      </div>
+
       <div class="guide-messages" id="guideMessages">
         <div class="guide-typing" id="guideTyping">
           <div class="typing-dot"></div>
@@ -780,6 +862,7 @@
           <button class="btn-icon-sm" onclick="clearConversation()" title="Clear conversation">🗑️</button>
           <button class="btn-send" onclick="sendGuideMsg()">↑</button>
         </div>
+        <div class="chat-model-line" id="chatModelLine"></div>
         <div class="guide-tips" id="guideTips"></div>
       </div>
 
@@ -799,6 +882,9 @@
 <!-- Toasts -->
 <div class="toast-box" id="toastBox"></div>
 
-<script src="/app.js?v=3"></script>
+<!-- Backup file picker (used by Settings and Privacy & health) -->
+<input type="file" id="restoreFilePicker" accept="application/json,.json" style="display:none" onchange="handleRestoreFile(event)">
+
+<script src="/app.js?v=4"></script>
 </body>
 </html>

@@ -69,8 +69,12 @@ services:
     restart: unless-stopped
     profiles: ["waha"]
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"   # this computer only — not the rest of the network
     volumes:
       - ./data/waha-sessions:/app/.sessions
     environment:
       WAHA_PRINT_QR: "false"
+      # Required: put WAHA_API_KEY=<a long random password> in .env, and save
+      # the same key in the Admin Agent (WhatsApp → WAHA API Key). Webhooks
+      # without it are refused.
+      WAHA_API_KEY: "${WAHA_API_KEY:-}"

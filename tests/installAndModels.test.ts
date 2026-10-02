@@ -196,10 +196,28 @@ describe("Windows launchers", () => {
     }
   });
 
-  it("update scripts recover from the 1 Oct 2026 history clean-up", async () => {
-    assert.match(await read("update.bat"), /git merge --ff-only origin\/!BRANCH!/);
-    assert.match(await read("update.bat"), /git reset --hard origin\/!BRANCH!/);
-    assert.match(await read("update.sh"), /git merge --ff-only "origin\/\$BRANCH"/);
+  it("update scripts install the newest finished release, and recover from the 1 Oct 2026 history clean-up", async () => {
+    const bat = await read("update.bat");
+    const sh = await read("update.sh");
+    assert.match(bat, /git fetch origin --tags/);
+    assert.match(bat, /git tag -l "v\[0-9\]\*\.\[0-9\]\*\.\[0-9\]\*" --sort\^=-v:refname \^\| findstr \/v \/c:"-"/);
+    assert.match(bat, /git merge --ff-only !RELEASE!/);
+    assert.match(bat, /git reset --hard !RELEASE!/);
+    assert.match(sh, /git fetch origin --tags/);
+    assert.match(sh, /grep -E '\^v\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+\$'/);
+    assert.match(sh, /git merge --ff-only "\$RELEASE"/);
+    assert.match(sh, /git reset --hard "\$RELEASE"/);
+    // never the moving tip of the main branch
+    for (const src of [bat, sh]) assert.doesNotMatch(src, /origin\/(!BRANCH!|\$BRANCH|master)/);
+  });
+
+  it("internal notes and developer tooling are not published", () => {
+    const tracked = spawnSync("git", ["ls-files"], { encoding: "utf8" });
+    if (tracked.status !== 0) return; // not a git checkout (e.g. a ZIP install)
+    const files = tracked.stdout.split("\n");
+    for (const f of files) {
+      assert.doesNotMatch(f, /^(\.claude|tools)\/|^walkthrough\.md$|\.docx$|^docs\/(codebase-|reference\/)/, `${f} should not be in the public repo`);
+    }
   });
 
   it("the dashboard keeps running through a stray error", async () => {
@@ -253,6 +271,34 @@ describe("the dashboard tells people to update", () => {
     assert.match(app, /setAutoUpdateCheck\(this\.checked\)/);
     const html = await read("src/dashboard/public/index.html");
     assert.match(html, /sidebar-version[\s\S]*checkForUpdates\(this\)/);
+  });
+});
+
+describe("dashboard menu", () => {
+  it("has a left menu whose pages exist", async () => {
+    const html = await read("src/dashboard/public/index.html");
+    const app = await read("src/dashboard/public/app.js");
+    const pages = [...html.matchAll(/data-page="([a-z]+)"/g)].map((m) => m[1]);
+    assert.deepEqual(pages, ["chat", "connections", "ai", "memory", "health", "settings"]);
+    for (const [page, panel] of [["connections", "setup-panel"], ["ai", "ai-panel"], ["memory", "memory-panel"], ["health", "health-panel"], ["settings", "settings-panel"]]) {
+      assert.match(app, new RegExp(`${page}: +'${panel}'`));
+      assert.match(html, new RegExp(`id="${panel}"`));
+    }
+  });
+
+  it("offers the local AI (Ollama) from the AI model page and the full setup", async () => {
+    const app = await read("src/dashboard/public/app.js");
+    assert.match(app, /renderLocalAiCard\(document\.getElementById\('aiLocalBody'\)/);
+    assert.match(app, /renderLocalAiCard\(document\.getElementById\('wizLocalAi'\)/);
+    assert.match(app, /onclick="selectProvider\('ollama'\)"/);
+    // the AI-key gate in the wizard doesn't block the local AI
+    assert.match(app, /if \(state\.step === 2 && state\.selectedProvider !== 'ollama'\)/);
+  });
+
+  it("chat start-screen suggestions and the sidebar setup items really send", async () => {
+    const app = await read("src/dashboard/public/app.js");
+    assert.match(app, /function useChatSuggestion\(text, send\)[\s\S]*?sendGuideMsg\(\)/);
+    assert.doesNotMatch(app, /sendGuideMessage/);
   });
 });
 

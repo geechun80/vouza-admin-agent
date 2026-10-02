@@ -27,7 +27,13 @@
 import { resolveMx as dnsResolveMx } from "dns/promises";
 import nodemailer from "nodemailer";
 import { ImapFlow } from "imapflow";
-import { DEFAULT_MODEL_BY_PROVIDER, DEFAULT_OPENROUTER_TIERS, type AIProvider } from "../config/models.js";
+import {
+  DEFAULT_MODEL_BY_PROVIDER,
+  DEFAULT_OPENROUTER_TIERS,
+  DEFAULT_OPERATOR_MODEL,
+  DEFAULT_OPERATOR_PROVIDER,
+  type AIProvider,
+} from "../config/models.js";
 import { keyCheckRequest, ollamaBaseUrl } from "../config/providerEndpoints.js";
 import { recordNet } from "../util/netActivity.js";
 
@@ -161,6 +167,34 @@ export async function detectLocalAi(fetchFn: FetchFn = fetch): Promise<LocalAiSt
 /** setup-config patch for a local model (cloud keys, if any, are left alone). */
 export function localAiConfigPatch(model: string): Record<string, any> {
   return { agent: { provider: "ollama", model: model.trim() } };
+}
+
+/** Saved-key slots per online provider, in the order we prefer them. */
+const ONLINE_KEY_SLOTS: Array<[AIProvider, string[]]> = [
+  ["openrouter", ["openrouterApiKey"]],
+  ["anthropic",  ["anthropicApiKey"]],
+  ["openai",     ["openaiApiKey"]],
+  ["google",     ["googleApiKey", "googleAiApiKey"]],
+  ["xai",        ["xaiApiKey"]],
+  ["deepseek",   ["deepseekApiKey"]],
+];
+
+/**
+ * setup-config patch that moves a local-AI user back to an online AI: the
+ * first provider with a saved key, else the built-in (operator) AI when it
+ * works. null = nothing to switch to — the user has to paste a key.
+ */
+export function onlineAiConfigPatch(
+  credentials: Record<string, unknown> = {},
+  operatorUsable = false,
+): { agent: { provider: AIProvider; model: string } } | null {
+  for (const [provider, slots] of ONLINE_KEY_SLOTS) {
+    if (slots.some((slot) => String(credentials[slot] ?? "").trim().length >= 20)) {
+      return { agent: { provider, model: DEFAULT_MODEL_BY_PROVIDER[provider] } };
+    }
+  }
+  if (operatorUsable) return { agent: { provider: DEFAULT_OPERATOR_PROVIDER, model: DEFAULT_OPERATOR_MODEL } };
+  return null;
 }
 
 // ---------------------------------------------------------------------------

@@ -515,8 +515,9 @@ leaks.
 
 ### Secret rotation
 
-Backups (`/api/export-config`) include credentials **unmasked** — intended
-for the user's own offline storage. The diagnostic bundle
+Backups (`/api/export-config`) carry the credentials so settings can move to
+a new computer, and are therefore locked with a password the user chooses
+(`src/security/backupCrypto.ts`: scrypt + AES-256-GCM). The diagnostic bundle
 (`/api/diagnostic-bundle`) and `GET /api/config` both run the same
 masking pass that the wizard uses (`****` for short, `abcd****wxyz`
 otherwise).

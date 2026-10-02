@@ -24,7 +24,7 @@ import { listEventsTool, createEventTool, updateEventTool, findFreeSlotsTool, de
 import { readSpreadsheetTool, writeSpreadsheetTool, searchSpreadsheetTool } from "../tools/spreadsheet.js";
 // Slack listener deferred — Bolt SDK + Socket Mode not yet implemented.
 // The old Slack tools were unwired in Phase 5; a reference copy lives in
-// docs/reference/messenger.ts.txt for when the Bolt listener ships.
+// git history (docs/reference/messenger.ts.txt, before 2.3.0) for when the Bolt listener ships.
 import { listFilesTool, readFileTool, readExcelFileTool, writeFileTool, organizeFilesTool, deleteFileTool, copyFileTool, renameFileTool } from "../tools/fileManager.js";
 import { readPdfTool, searchLocalFilesTool } from "../tools/documents.js";
 import { sendTelegramMessageTool, readTelegramUpdatesTool, getTelegramBotInfoTool, forwardTelegramMessageTool } from "../tools/telegram.js";

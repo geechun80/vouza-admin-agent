@@ -8,6 +8,22 @@ the full history.
 
 ---
 
+## 2.3.0 — 2026-10-02
+
+**A simpler dashboard, Local AI from the menu, and a security pass**
+
+- 🧭 **New left menu**: Chat, Connections, AI model, Memory, Privacy & health, Settings — each opens as a page; Chat is one click away
+- 💬 **Chat start screen**: "How can I help you today?" with one-tap suggestions, and a line under the message box showing which AI is answering
+- 💻 **Local AI is easy to find**: the new **AI model** page finds Ollama on this computer, lets you pick the model, and switches back to the online AI with one click. Full setup also offers "Local AI (this computer, no key)"
+- 🔒 **Safer chat**: text from an email or web page can no longer slip hidden code into the dashboard through a link in a reply, and the dashboard page can only talk to your own computer
+- 🔐 **Backups are locked with a password** you choose — your keys inside can't be read without it (older backups still restore)
+- 🔄 **Updates install finished releases only**, never work in progress; published releases can't be changed afterwards
+- 🧹 The dashboard no longer shows setup-wizard messages or quietly contacts the AI when it opens
+- 📱 Phones and narrow windows: the chat no longer disappears — the menu moves to the top
+- ⚠️ **Using WhatsApp through WAHA?** It now needs an API key: start WAHA with `WAHA_API_KEY=<a long random password>` and save the same key under WhatsApp → WAHA API Key. Until then, WhatsApp messages through WAHA are refused. (The built-in WhatsApp QR connection is not affected.)
+
+---
+
 ## 2.2.2 — 2026-10-02
 
 **One-click uninstall**

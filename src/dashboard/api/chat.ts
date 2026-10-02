@@ -33,7 +33,7 @@ import { readEmailsTool, sendEmailTool, draftEmailTool, triageEmailsTool } from 
 import { listEventsTool, createEventTool, updateEventTool, findFreeSlotsTool } from "../../tools/calendar.js";
 import { readSpreadsheetTool, writeSpreadsheetTool, searchSpreadsheetTool } from "../../tools/spreadsheet.js";
 // Slack tools removed — listener deferred (Bolt SDK not yet implemented).
-// Reference copy of the old tools lives in docs/reference/messenger.ts.txt.
+// The old tools are in git history (docs/reference/messenger.ts.txt, before 2.3.0).
 import { listFilesTool, readFileTool, readExcelFileTool, writeFileTool, organizeFilesTool } from "../../tools/fileManager.js";
 import { readPdfTool, searchLocalFilesTool } from "../../tools/documents.js";
 import {
@@ -200,7 +200,7 @@ When the user first opens the chat OR asks about setup, connecting an integratio
    - This validates the credential live against the real API before anything is written
    - On success: show the user the proof ("Your bot is @MyAdminBot ✅") then call save_integration_credentials
    - On failure: show the exact error ("Gmail rejected the App Password — make sure 2-Step Verification is ON") so they can fix it without re-entering everything
-   - Mapping: telegram→{type:"telegram",credentials:{token}}, gmail→{type:"gmail_smtp",credentials:{user,pass}}, slack→{type:"slack",credentials:{token}}, google service account→{type:"google_sa",credentials:{saKeyJson}}, any AI key→{type:"ai_provider",credentials:{provider,apiKey}}, waha→{type:"waha",credentials:{url,apiKey?}}, groq voice→{type:"groq_voice",credentials:{apiKey}}, agentmail→{type:"agentmail",credentials:{apiKey}}
+   - Mapping: telegram→{type:"telegram",credentials:{token}}, gmail→{type:"gmail_smtp",credentials:{user,pass}}, slack→{type:"slack",credentials:{token}}, google service account→{type:"google_sa",credentials:{saKeyJson}}, any AI key→{type:"ai_provider",credentials:{provider,apiKey}}, waha→{type:"waha",credentials:{url,apiKey}}, groq voice→{type:"groq_voice",credentials:{apiKey}}, agentmail→{type:"agentmail",credentials:{apiKey}}
 9. **Check the activationNote in the result of save_integration_credentials** — it tells you exactly what happened:
    - "✅ Active immediately" → test live right away (email, calendar, sheets, voice)
    - "✅ Telegram listener restarted" → test with get_telegram_bot_info, then tell user to open the bot and /start
@@ -253,7 +253,7 @@ If the user pastes an API key for OpenRouter, Anthropic, OpenAI, Groq, etc. in t
      "Open WhatsApp on your phone → Settings → Linked Devices → Link a Device → scan the QR code in your dashboard." Wait ~10 seconds for "Connected ✓".
      If the QR shows "Invalid" in their phone, they're scanning the wrong QR — make sure they're scanning the one in YOUR dashboard, not web.whatsapp.com.
   2. **WAHA (advanced, self-hosted, free)** — only suggest this if the user explicitly asks for a Docker-based setup or needs multi-account.
-     Requires: docker run -p 3000:3000 ghcr.io/devlikeapro/waha
+     Requires: docker run -p 3000:3000 -e WAHA_API_KEY=<key> ghcr.io/devlikeapro/waha (the same key must be saved in the Admin Agent)
      Docs: [waha.devlike.pro](https://waha.devlike.pro). Do NOT suggest this to users who haven't mentioned Docker.
   3. **Twilio (cloud, paid)**: [console.twilio.com](https://console.twilio.com) → Account SID + Auth Token + WhatsApp Business number. Suggest only for businesses that need WhatsApp Business API features.
 

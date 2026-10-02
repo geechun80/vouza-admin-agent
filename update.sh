@@ -22,7 +22,7 @@ echo "${CYAN} Vouza Admin Agent — Update to Latest Version${NC}"
 echo "${CYAN}==================================================${NC}"
 echo
 echo "This will:"
-echo "  1. Pull the latest code from GitHub"
+echo "  1. Get the latest finished release from GitHub"
 echo "  2. Update dependencies (npm ci - exact versions)"
 echo "  3. Rebuild the project"
 echo "  4. Restart the agent under PM2 (if installed)"
@@ -40,13 +40,20 @@ fi
 cd "$(dirname "$0")"
 
 echo
-echo "${CYAN}[1/4] Pulling latest from GitHub...${NC}"
-if ! git fetch origin; then
+echo "${CYAN}[1/4] Getting the latest release from GitHub...${NC}"
+# Only finished releases (tags like v2.3.0) are installed — never work in
+# progress on the main branch. Tags already downloaded are never moved.
+if ! git fetch origin --tags; then
   echo "${RED}✗ Could not reach GitHub.${NC} Check your internet connection and try again."
   exit 1
 fi
-BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-if ! git merge --ff-only "origin/$BRANCH" >/dev/null 2>&1; then
+RELEASE="$(git tag -l 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)"
+if [ -z "$RELEASE" ]; then
+  echo "${RED}✗ No release found on GitHub.${NC} Nothing changed."
+  exit 1
+fi
+echo "  Latest release: $RELEASE"
+if ! git merge --ff-only "$RELEASE" >/dev/null 2>&1; then
   echo
   echo "${YELLOW}! This copy can't be updated automatically${NC} — it has local code edits,"
   echo "  or it predates the project history clean-up of 1 Oct 2026."
@@ -58,7 +65,7 @@ if ! git merge --ff-only "origin/$BRANCH" >/dev/null 2>&1; then
   fi
   # Keep any local code edits recoverable (git stash list) before replacing.
   git stash push --include-untracked -m "local edits before update" >/dev/null 2>&1 || true
-  git reset --hard "origin/$BRANCH"
+  git reset --hard "$RELEASE"
   echo "${GREEN}✓ Code replaced.${NC} Any local edits were saved: see \"git stash list\"."
 fi
 

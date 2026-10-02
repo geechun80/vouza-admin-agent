@@ -6,7 +6,7 @@
 
 Reads and answers email · finds your documents · checks your calendar · works from WhatsApp or Telegram
 
-**Latest version: 2.2.2** · [What's new](CHANGELOG.md)
+**Latest version: 2.3.0** · [What's new](CHANGELOG.md)
 
 [![Tests](https://img.shields.io/badge/tests-678%2F678-brightgreen)](#)
 [![Node](https://img.shields.io/badge/node-20.19%2B-blue)](https://nodejs.org)
@@ -74,13 +74,15 @@ Then open **http://localhost:3456** on that computer. For safety it isn't reacha
 | **Windows, with git** (you cloned it) | Double-click **`update.bat`** |
 | **Windows, from a ZIP download** | Download the new ZIP and unzip it to a **new** folder. Copy the **`data`** folder (and `.env`, if you have one) from your old folder into the new one. Start the new `start.bat`, then delete the old folder. |
 | **Mac / Linux** | `./update.sh` |
-| **Docker** | `git pull` then `docker compose up -d --build` |
+| **Docker** | `git fetch origin --tags`, then `git merge --ff-only v2.3.0` (the latest release), then `docker compose up -d --build` |
 
 Your settings, chats and WhatsApp login live in the **`data`** folder — updating never touches it.
 
-> ⚠️ **Installed before 2 October 2026 with git?** The project history was cleaned up that day, so `git pull` fails on older copies. `update.bat` / `update.sh` detect this and offer to replace the code with the latest version (your settings are kept). By hand: `git fetch origin` then `git reset --hard origin/master`.
+🔒 **Updates install finished releases only** (the versions listed under [Releases](https://github.com/geechun80/vouza-admin-agent/releases)), never unfinished work. Published releases are locked on GitHub and can't be changed afterwards.
 
-> 💡 **Moving to a new computer?** Saved keys and passwords are encrypted for your Windows/Mac account, so copying `data` to another PC won't carry them. Use **System Health → Download backup** on the old PC and **Restore from backup** on the new one.
+> ⚠️ **Installed before 2 October 2026 with git?** The project history was cleaned up that day, so `git pull` fails on older copies. `update.bat` / `update.sh` detect this and offer to replace the code with the latest release (your settings are kept). By hand: `git fetch origin --tags` then `git reset --hard v2.3.0` (the latest release).
+
+> 💡 **Moving to a new computer?** Saved keys and passwords are encrypted for your Windows/Mac account, so copying `data` to another PC won't carry them. Use **Settings → Download backup** on the old PC (you choose a password that locks the file) and **Restore from backup** on the new one.
 
 ---
 
@@ -236,7 +238,7 @@ The agent reads untrusted text all day — incoming emails, documents, web pages
 | **Other people you allow-list** (WhatsApp, Telegram, WAHA) | Chat only — no email, files, sending, web or your memories |
 | **AgentMail senders** | Only addresses you allow-listed; read-only |
 
-- **Keys and passwords are encrypted on disk.** API keys, email passwords, bot tokens and the WhatsApp login are stored encrypted (AES-256-GCM). The master key is protected by your operating system — Windows DPAPI (only your Windows account on this PC can unlock it) or the macOS Keychain; elsewhere it's an owner-only file, or set `VOUZA_SECRET_KEY` yourself. Older installs are upgraded automatically on first start. Copying the `data/` folder to another computer won't carry working keys — use **Download backup** and restore it there.
+- **Keys and passwords are encrypted on disk.** API keys, email passwords, bot tokens and the WhatsApp login are stored encrypted (AES-256-GCM). The master key is protected by your operating system — Windows DPAPI (only your Windows account on this PC can unlock it) or the macOS Keychain; elsewhere it's an owner-only file, or set `VOUZA_SECRET_KEY` yourself. Older installs are upgraded automatically on first start. Copying the `data/` folder to another computer won't carry working keys — use **Download backup** and restore it there. Backups are locked with a password you choose (scrypt + AES-256-GCM); without it the file is unreadable.
 - **Memory can't be planted.** If the agent read an email, file or web page this turn, saving something to its long-term memory waits for your YES — so a message can't slip in a lasting instruction.
 - **WAHA owner:** your number from Step 1 (*Your Phone Number*) is the owner; every other allowed sender is a guest. With no number saved, a single allowed number is treated as yours.
 - **Online only when you ask.** Searching the web, opening a website, or clicking/submitting on one runs only when *your own message* asks for it ("search online…", "google…", "what's the weather", a web address). Otherwise the agent shows exactly what it would search or open and waits for your **YES** — so an email can't make it look up your private details online. Enforced in code, on every channel.

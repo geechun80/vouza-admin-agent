@@ -26,7 +26,7 @@ import { readEmailsTool, sendEmailTool, draftEmailTool, triageEmailsTool } from 
 import { listEventsTool, createEventTool, updateEventTool, findFreeSlotsTool } from "../tools/calendar.js";
 import { readSpreadsheetTool, writeSpreadsheetTool, searchSpreadsheetTool } from "../tools/spreadsheet.js";
 // Slack tools removed — listener deferred (Bolt SDK not yet implemented).
-// Reference copy of the old tools lives in docs/reference/messenger.ts.txt.
+// The old tools are in git history (docs/reference/messenger.ts.txt, before 2.3.0).
 import { listFilesTool, readFileTool, readExcelFileTool, writeFileTool, organizeFilesTool } from "../tools/fileManager.js";
 import { sendTelegramMessageTool, readTelegramUpdatesTool, getTelegramBotInfoTool, forwardTelegramMessageTool } from "../tools/telegram.js";
 import { sendWhatsAppMessageTool, readWhatsAppMessagesTool } from "../tools/whatsapp.js";

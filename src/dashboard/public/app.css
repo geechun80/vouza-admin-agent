@@ -2238,3 +2238,147 @@
     .update-banner a.btn { font-size:12px; padding:6px 12px; text-decoration:none; }
     .update-banner button { font-size:12px; padding:6px 12px; }
 
+
+    /* ============================================================
+       LEFT MENU + PAGES (live mode) — 2.3.0
+       The sidebar holds the main menu; a menu item opens its page in place
+       of the chat (#mainApp.page-open). Chat stays one click away.
+    ============================================================ */
+    .side-nav {
+      display: flex; flex-direction: column; gap: 2px;
+      padding: 8px; border-bottom: 1px solid var(--border);
+    }
+    .side-nav-item {
+      display: flex; align-items: center; gap: 10px; width: 100%;
+      padding: 8px 10px; border: none; border-radius: 8px;
+      background: transparent; color: var(--text-dim);
+      font: inherit; font-size: 13px; font-weight: 600; text-align: left;
+      cursor: pointer; white-space: nowrap; transition: background 0.15s, color 0.15s;
+    }
+    .side-nav-item:hover { background: var(--bg-glass-hover); color: var(--text); }
+    .side-nav-item.active { background: var(--brand-glow-sm); color: var(--brand-light); }
+    html[data-theme="light"] .side-nav-item.active { color: var(--brand); }
+    .side-nav-icon { width: 20px; text-align: center; flex-shrink: 0; }
+    .conv-section-label {
+      padding: 10px 14px 0; font-size: 10px; font-weight: 700;
+      letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim);
+    }
+
+    /* A page replaces the chat column */
+    #mainApp.live-mode .conv-sidebar { flex: 0 0 268px; width: 268px; }
+    #mainApp.live-mode.page-open .app-layout { grid-template-columns: 1fr; }
+    #mainApp.live-mode.page-open .guide-col { display: none; }
+    #mainApp.live-mode.page-open .main-col { flex-direction: row; }
+    #mainApp.live-mode.page-open .conv-sidebar { border-right: 1px solid var(--border); }
+    #mainApp.live-mode.page-open .step-view.page-active {
+      display: block !important; flex: 1; min-width: 0;
+      height: 100vh; overflow-y: auto; padding: 32px 40px 56px;
+    }
+    .page-head {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      gap: 16px; margin-bottom: 24px;
+    }
+    .page-card {
+      background: var(--bg-glass-card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 18px 20px; margin-bottom: 16px;
+      max-width: 760px;
+    }
+    .page-card.current { border-color: var(--border-focus); }
+    .page-card h3 { margin: 0 0 6px; font-size: 15px; color: var(--text); }
+    .page-card p { color: var(--text); font-size: 13.5px; line-height: 1.55; margin: 0; }
+    .page-card .page-hint, .page-hint { font-size: 12.5px; color: var(--text-dim); line-height: 1.55; margin: 4px 0 12px; }
+    .page-card code {
+      background: var(--bg-glass-hover); border: 1px solid var(--border);
+      border-radius: 5px; padding: 1px 6px; font-size: 12px;
+    }
+    .page-card label { display: block; font-size: 12.5px; font-weight: 600; color: var(--text); margin: 12px 0 6px; }
+    .page-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .page-row input, .page-card select {
+      flex: 1; min-width: 200px; padding: 9px 12px; border-radius: 9px;
+      border: 1px solid var(--border); background: var(--bg); color: var(--text);
+      font: inherit; font-size: 13px;
+    }
+    .page-card a.btn { text-decoration: none; display: inline-flex; align-items: center; }
+    .page-msg { font-size: 12.5px; margin-top: 8px; line-height: 1.5; }
+    .page-msg:empty { display: none; }
+    .page-msg.ok { color: var(--success); }
+    .page-msg.error { color: var(--error); }
+    .local-steps { margin: 4px 0 12px 18px; padding: 0; font-size: 12.5px; color: var(--text-dim); line-height: 1.8; }
+    .page-status { max-width: 760px; border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 16px; }
+
+    /* Chat start screen (empty conversation) */
+    .chat-welcome {
+      display: none; flex: 1; flex-direction: column; align-items: center;
+      justify-content: center; gap: 6px; padding: 32px 24px; text-align: center;
+    }
+    #mainApp.live-mode .guide-col.chat-empty .chat-welcome { display: flex; }
+    #mainApp.live-mode .guide-col.chat-empty .guide-messages { display: none; }
+    .chat-welcome-hi { font-size: 14px; color: var(--text-dim); }
+    .chat-welcome-title { font-size: 26px; font-weight: 700; color: var(--text); margin-bottom: 20px; }
+    .chat-chips { display: grid; grid-template-columns: repeat(2, minmax(0, 240px)); gap: 10px; }
+    .chat-chip {
+      padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px;
+      background: var(--bg-glass-card); color: var(--text); font: inherit; font-size: 13px;
+      text-align: left; cursor: pointer; transition: border-color 0.15s, background 0.15s;
+    }
+    .chat-chip:hover { border-color: var(--brand); background: var(--bg-glass-hover); }
+
+    /* "AI: … · Change" under the message box */
+    .chat-model-line { display: none; }
+    #mainApp.live-mode .chat-model-line {
+      display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+      font-size: 11.5px; color: var(--text-dim); padding: 8px 2px 0;
+    }
+    .chat-model-line:empty { display: none !important; }
+
+    /* Narrow windows: menu across the top, chat or page below */
+    @media (max-width: 900px) {
+      #mainApp.live-mode .app-layout { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+      #mainApp.live-mode .main-col { height: auto; border-right: none; border-bottom: 1px solid var(--border); }
+      #mainApp.live-mode .conv-sidebar { flex: none; width: auto; height: auto; }
+      #mainApp.live-mode .conv-sidebar > :not(.conv-sidebar-top):not(.side-nav) { display: none; }
+      #mainApp.live-mode .side-nav { flex-direction: row; overflow-x: auto; scrollbar-width: none; }
+      #mainApp.live-mode .side-nav-item { width: auto; flex-shrink: 0; }
+      #mainApp.live-mode .guide-col { display: flex; height: auto; min-height: 0; position: static; }
+      #mainApp.live-mode.page-open .app-layout { grid-template-rows: 1fr; }
+      #mainApp.live-mode.page-open .main-col { flex-direction: column; height: 100vh; }
+      #mainApp.live-mode.page-open .conv-sidebar { border-right: none; border-bottom: 1px solid var(--border); }
+      #mainApp.live-mode.page-open .step-view.page-active { height: auto; flex: 1; min-height: 0; padding: 20px 16px 40px; }
+    }
+    @media (max-width: 600px) {
+      .chat-chips { grid-template-columns: 1fr; width: 100%; }
+      .chat-welcome-title { font-size: 21px; }
+    }
+    /* Wizard tip chips don't apply once live — the start screen has its own */
+    #mainApp.live-mode .guide-tips { display: none; }
+    /* Chat markdown (classes instead of inline style attributes) */
+    .md-link { color: var(--brand-light); text-decoration: underline; }
+    html[data-theme="light"] .md-link { color: var(--brand); }
+    .md-code {
+      background: rgba(255,255,255,0.1); padding: 2px 5px; border-radius: 4px;
+      font-family: monospace; font-size: 12px;
+    }
+    html[data-theme="light"] .md-code { background: rgba(15,23,42,0.07); }
+
+    /* Password box for locked backups */
+    .pw-dialog-backdrop {
+      position: fixed; inset: 0; z-index: 10000; display: flex;
+      align-items: center; justify-content: center; padding: 16px;
+      background: rgba(0,0,0,0.6); backdrop-filter: blur(3px);
+    }
+    .pw-dialog {
+      width: min(460px, 100%); background: var(--bg); color: var(--text);
+      border: 1px solid var(--border-focus); border-radius: var(--radius);
+      padding: 22px; box-shadow: 0 16px 50px rgba(0,0,0,0.5);
+    }
+    .pw-dialog-title { font-size: 19px; font-weight: 700; margin-bottom: 8px; }
+    .pw-dialog-summary {
+      background: var(--bg-glass-hover); border-radius: 8px; padding: 10px 12px;
+      font-size: 13px; line-height: 1.6; margin-bottom: 12px;
+    }
+    .pw-dialog label { display: block; font-size: 12.5px; font-weight: 600; margin: 10px 0 6px; }
+    .pw-dialog input {
+      width: 100%; padding: 9px 12px; border-radius: 9px; border: 1px solid var(--border);
+      background: var(--bg-glass-card); color: var(--text); font: inherit; font-size: 14px;
+    }
+    .pw-dialog-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }

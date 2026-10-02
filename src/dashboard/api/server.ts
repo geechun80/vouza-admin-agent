@@ -60,6 +60,14 @@ import {
 } from "../../email/agentMailListener.js";
 import { isLocalHostHeader, isNewerVersion } from "../../util/localHost.js";
 import { readSealedJson, writeSealedJson, migrateJsonFile, getMasterKey } from "../../security/secretStore.js";
+import {
+  lockBackup,
+  unlockBackup,
+  isLockedBackup,
+  backupPasswordProblem,
+  BackupPasswordError,
+  PLAIN_BACKUP_FORMAT,
+} from "../../security/backupCrypto.js";
 import { listOpenRouterModels, listProviderModels, isValidModelId } from "../../config/liveModels.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -221,6 +229,20 @@ function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
+/** Content-Security-Policy for every dashboard response. */
+export const DASHBOARD_CSP = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "media-src 'self' data: blob:",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+].join("; ");
+
 function requireDashboardAuth(
   req: express.Request,
   res: express.Response,
@@ -337,6 +359,19 @@ export async function startDashboard(port = 3456): Promise<void> {
   installFetchLogger();
 
   const app = express();
+  // Browser hardening. The dashboard loads nothing from other sites, so the
+  // page may only talk to this server: even if some text slipped past the
+  // escaping, it couldn't send data elsewhere with fetch/images/forms, and no
+  // other site can frame the dashboard to trick clicks. (Inline onclick
+  // handlers are used throughout, hence 'unsafe-inline' for scripts.)
+  app.use((_req, res, next) => {
+    res.setHeader("Content-Security-Policy", DASHBOARD_CSP);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("Permissions-Policy", "camera=(), geolocation=(), microphone=(self)");
+    next();
+  });
   app.use(express.json({ limit: "30mb" })); // 30 MB to accommodate base64 audio uploads
   // Label why any connection made while handling a request happened.
   app.use((req, _res, next) => withTrigger(requestTrigger(req.path), next));
@@ -1106,10 +1141,21 @@ export async function startDashboard(port = 3456): Promise<void> {
   // arbitrary uploads (someone pasting their grocery list as JSON).
   app.post("/api/import-config", requireLocalOrigin, async (req, res) => {
     try {
-      const bundle = req.body;
+      let bundle = req.body;
+
+      // 0. A locked backup (2.3.0+) is opened with the password typed in the
+      //    dashboard; older unlocked backups restore as before.
+      if (isLockedBackup(bundle)) {
+        try {
+          bundle = await unlockBackup(bundle, String(req.body?.password ?? ""));
+        } catch (err) {
+          if (err instanceof BackupPasswordError) return res.status(400).json({ ok: false, wrongPassword: true, error: err.message });
+          throw err;
+        }
+      }
 
       // 1. Validate envelope — must look like one of our backups
-      if (!bundle || bundle.format !== "vouza-admin-agent-backup") {
+      if (!bundle || bundle.format !== PLAIN_BACKUP_FORMAT) {
         return res.status(400).json({
           ok: false,
           error: "This doesn't look like a Vouza backup file. Expected format: vouza-admin-agent-backup."
@@ -1177,10 +1223,17 @@ export async function startDashboard(port = 3456): Promise<void> {
   //   - Insurance against hard drive failure
   //   - Sharing a fully-configured agent with a colleague
   //
-  // CREDENTIALS ARE INCLUDED unmasked in this export — the file is intended
-  // for the user's own personal backup, never shared publicly. The frontend
-  // warns the user about this before triggering the download.
-  app.get("/api/export-config", requireLocalOrigin, async (_req, res) => {
+  // Credentials are inside (they must move to the new machine), so the file is
+  // always locked with a password the person chooses (security/backupCrypto).
+  app.get("/api/export-config", requireLocalOrigin, (_req, res) => {
+    // Pre-2.3.0 dashboards downloaded an unlocked file from here.
+    res.status(410).json({ error: "Backups now need a password. Reload the dashboard (Shift+F5) and try again." });
+  });
+
+  app.post("/api/export-config", requireLocalOrigin, async (req, res) => {
+    const password = req.body?.password;
+    const problem = backupPasswordProblem(password);
+    if (problem) return res.status(400).json({ error: problem });
     try {
       const config = await loadSetupConfig();
 
@@ -1211,11 +1264,11 @@ export async function startDashboard(port = 3456): Promise<void> {
       } catch { /* dir missing — skip */ }
 
       const bundle = {
-        format:        "vouza-admin-agent-backup",
+        format:        PLAIN_BACKUP_FORMAT,
         version:       1,
         exportedAt:    new Date().toISOString(),
         agentName:     config.agent?.name || "Admin Agent",
-        config,                  // includes credentials — see warning above
+        config,                  // includes credentials — hence the lock below
         memories,
         conversations,
       };
@@ -1223,7 +1276,7 @@ export async function startDashboard(port = 3456): Promise<void> {
       const filename = `vouza-backup-${new Date().toISOString().slice(0, 10)}.json`;
       res.setHeader("Content-Type", "application/json");
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-      res.send(JSON.stringify(bundle, null, 2));
+      res.send(JSON.stringify(await lockBackup(bundle, password), null, 2));
     } catch (err) {
       res.status(500).json({ error: String(err) });
     }
@@ -1652,26 +1705,26 @@ export async function startDashboard(port = 3456): Promise<void> {
       return res.status(400).json({ error: "Invalid webhook payload" });
     }
 
-    // WAHA auth: validate the X-Api-Key header against the configured WAHA API key.
-    // WAHA sends this header on all outbound webhook POSTs when an apiKey is configured.
+    // Only a running WAHA setup receives webhooks, and only with its API key
+    // (WAHA sends it as X-Api-Key). Without a key any program on this
+    // computer — or the network, in remote mode — could post fake customer
+    // messages for the agent to act on, so a missing key is refused too.
     const wa = agentInstance?.context.config.tools?.whatsapp;
-    if (wa?.provider === "waha") {
-      const expectedKey = (wa.config as any)?.apiKey as string | undefined;
-      if (expectedKey) {
-        const providedKey = req.headers["x-api-key"] as string | undefined;
-        if (providedKey !== expectedKey) {
-          return res.status(403).json({ error: "Unauthorized" });
-        }
-      }
+    if (!agentInstance || wa?.provider !== "waha") {
+      return res.status(404).json({ error: "WhatsApp webhooks are not in use" });
+    }
+    const expectedKey = String((wa.config as any)?.apiKey ?? "").trim();
+    if (!expectedKey) {
+      console.warn("[WAHA] Webhook refused: set an API key in WAHA and in the Admin Agent (WhatsApp → WAHA API Key).");
+      return res.status(403).json({ error: "WAHA API key required — set the same key in WAHA and in the Admin Agent" });
+    }
+    const providedKey = String(req.headers["x-api-key"] ?? "");
+    if (!timingSafeEqual(providedKey, expectedKey)) {
+      return res.status(403).json({ error: "Unauthorized" });
     }
 
-    // ACK immediately — WAHA expects a fast response
+    // ACK immediately — WAHA expects a fast response, then process
     res.json({ success: true });
-
-    // Process asynchronously after the ACK
-    if (!agentInstance) return; // agent must be running to handle messages
-    if (!wa || wa.provider !== "waha") return; // only WAHA supports webhooks
-
     handleWAHAEvent(req.body, agentInstance.context, agentInstance.registry);
   });
 

@@ -157,7 +157,7 @@ const CRED_CONFIGS = {
     web:    { title:'WhatsApp Web (Free — QR Scan)', icon:'whatsapp', testType:'whatsapp-web', fields:[], info:'No setup needed here. After saving, click the green <strong>Connect WhatsApp</strong> button below to generate a QR code and scan it from your phone (WhatsApp → Settings → Linked Devices → Link a Device).' },
     twilio: { title:'WhatsApp via Twilio', icon:'whatsapp', testType:'whatsapp', fields:[{id:'twilioSid',label:'Account SID',type:'text',placeholder:'ACxxx'},{id:'twilioToken',label:'Auth Token',type:'password',placeholder:'token'},{id:'twilioNum',label:'WhatsApp Number',type:'text',placeholder:'+1415...'}] },
     meta:   { title:'WhatsApp Cloud API', icon:'whatsapp', testType:'whatsapp-meta', fields:[{id:'metaToken',label:'Access Token',type:'password',placeholder:'EAAxx'},{id:'metaPhoneId',label:'Phone Number ID',type:'text',placeholder:'123456'}] },
-    waha:   { title:'WAHA (Self-hosted)', icon:'whatsapp', testType:'waha', fields:[{id:'wahaUrl',label:'WAHA Server URL',type:'text',placeholder:'http://localhost:3000',hint:'URL where WAHA is running (default port 3000)'},{id:'wahaSession',label:'Session Name',type:'text',placeholder:'default',hint:'Session name from your WAHA dashboard (usually "default")'},{id:'wahaKey',label:'API Key',type:'password',placeholder:'optional',hint:'Only if your WAHA requires authentication'}] },
+    waha:   { title:'WAHA (Self-hosted)', icon:'whatsapp', testType:'waha', fields:[{id:'wahaUrl',label:'WAHA Server URL',type:'text',placeholder:'http://localhost:3000',hint:'URL where WAHA is running (default port 3000)'},{id:'wahaSession',label:'Session Name',type:'text',placeholder:'default',hint:'Session name from your WAHA dashboard (usually "default")'},{id:'wahaKey',label:'API Key (required)',type:'password',placeholder:'the WAHA_API_KEY you started WAHA with',hint:'Required — only WAHA with this key can send messages to your assistant'}] },
   },
   telegram: { default:{ title:'Telegram Bot', icon:'telegram', testType:'telegram', fields:[
     {id:'telegramToken',label:'Bot Token',type:'password',placeholder:'123456789:ABCdef...',hint:'Get from <a href="https://t.me/BotFather" target="_blank">@BotFather on Telegram →</a>'},
@@ -501,7 +501,7 @@ function goNext() {
   // ── Step 2 gate: AI API key is mandatory unless an operator default key is set ──
   // Operator key (VOUZA_API_KEY env var) powers the bot immediately without user setup.
   // If neither is configured, block and prompt the user.
-  if (state.step === 2) {
+  if (state.step === 2 && state.selectedProvider !== 'ollama') {
     const keyEl  = document.getElementById('aiProviderKey');
     const key    = keyEl?.value?.trim();
     const hasSaved     = (keyEl?.placeholder || '').includes('Already saved');
@@ -601,7 +601,27 @@ function renderModelSelector() {
         <span class="ptab-dot" style="background:${PROVIDER_COLORS[g.provider.id]||'#888'}"></span>
         ${escHtml(name)}
       </button>`;
-    }).join('');
+    }).join('') +
+    `<button type="button" class="ptab ${state.selectedProvider === 'ollama' ? 'active' : ''}" aria-pressed="${state.selectedProvider === 'ollama'}" onclick="selectProvider('ollama')">
+      💻 Local AI (this computer, no key)
+    </button>`;
+
+  // ── Local AI (Ollama): runs on this computer — no company, no key ──
+  if (state.selectedProvider === 'ollama') {
+    list.innerHTML = `<div class="page-card" style="max-width:none;margin:0">
+      <p class="page-hint" style="margin-top:0">Free and private: nothing is sent to an AI company. Slower than an online AI, and needs a computer with 8 GB+ memory.</p>
+      <div id="wizLocalAi"></div>
+    </div>`;
+    renderLocalAiCard(document.getElementById('wizLocalAi'), {
+      current: _savedConfig?.agent?.provider === 'ollama' ? _savedConfig.agent.model : null,
+      onDone: (model) => {
+        state.selectedModel = model;
+        if (_savedConfig?.agent) Object.assign(_savedConfig.agent, { provider: 'ollama', model });
+        renderModelSelector();
+      },
+    });
+    return;
+  }
 
   const group = state.modelCatalog.find(g => g.provider.id === state.selectedProvider);
   if (!group) return;
@@ -684,6 +704,12 @@ function renderModelSelector() {
 }
 
 function selectProvider(id) {
+  if (id === 'ollama') {
+    state.selectedProvider = 'ollama';
+    renderModelSelector();
+    renderAIKeySection();
+    return;
+  }
   // Switching tabs: a model from another provider can't carry over — start
   // from this provider's recommended model (a typed / live pick stays).
   if (id !== state.selectedProvider) {
@@ -1136,6 +1162,14 @@ function applyPreset(presetId) {
 // ============================================================
 function renderAIKeySection() {
   const box = document.getElementById('aiKeySection');
+  if (state.selectedProvider === 'ollama') {
+    if (box) box.innerHTML = `<div class="glass-card"><div class="glass-card-header" style="margin-bottom:0">
+      <div class="glass-card-icon" style="font-size:22px">💻</div>
+      <div style="flex:1"><div class="glass-card-title">Local AI — no key needed</div>
+      <div style="font-size:12px;color:var(--text-dim);margin-top:2px">Runs on this computer with Ollama. Pick it under “Create Your AI”.</div></div>
+    </div></div>`;
+    return;
+  }
   const group = state.modelCatalog.find(g => g.provider.id === state.selectedProvider);
   const p = group?.provider;
   const isOR = state.selectedProvider === 'openrouter';
@@ -1647,7 +1681,8 @@ function renderReview() {
   const phone = document.getElementById('userPhone')?.value || '—';
   const mg = state.modelCatalog.find(g => g.provider.id === state.selectedProvider);
   const mi = mg?.models.find(m => m.id === state.selectedModel);
-  const modelDisplay = mi ? `${mi.displayName} (${mg.provider.name})` : state.selectedModel;
+  const modelDisplay = mi ? `${mi.displayName} (${mg.provider.name})`
+    : state.selectedProvider === 'ollama' ? `${state.selectedModel} (local AI on this computer)` : state.selectedModel;
 
   const chans  = [...state.selectedChannels];
   const tools  = [...state.selectedTools];
@@ -2100,15 +2135,18 @@ function getDynamicTips(step) {
 let _hasAutoProbed = false; // prevent repeat probes on step-revisits
 
 function guideForStep(n) {
+  // Wizard-only: the live dashboard has its own start screen, and must not
+  // contact the AI before the user asks (init() runs just before live mode).
+  if (isLiveMode()) return;
   const msgs = getGuideScripts(n);
   if (!msgs.length) return;
   const delay = n === 1 ? 900 : 400;
   let t = delay;
   for (const m of msgs) {
-    setTimeout(() => guideBotScripted(m), t);
+    setTimeout(() => { if (!isLiveMode()) guideBotScripted(m); }, t);
     t += m.length * 14 + 700;
   }
-  setTimeout(updateTips, t);
+  setTimeout(() => { if (!isLiveMode()) updateTips(); }, t);
 
   // ── Proactive setup probe: only on first visit to step 1 ─────────────────
   // After scripted intro settles, the live AI quietly calls get_setup_status
@@ -2116,6 +2154,7 @@ function guideForStep(n) {
   if (n === 1 && !_hasAutoProbed && !_isResume) {
     _hasAutoProbed = true;
     setTimeout(() => {
+      if (isLiveMode()) return;
       const box      = document.getElementById('guideMessages');
       const userMsgs = box?.querySelectorAll('.guide-msg.user');
       if (!userMsgs?.length && !chat.busy) {
@@ -2190,6 +2229,7 @@ let _inSettingsMode = false;
 // Switch dashboard out of "live" mode to allow reconfiguring
 function openSettings() {
   _inSettingsMode = true;
+  closePages();
   document.getElementById('mainApp').classList.remove('live-mode');
   // Ensure wizard forms are pre-filled from saved config
   _isResume = true;
@@ -2248,6 +2288,10 @@ function activateLiveMode() {
   checkAgentHealth();
   // Start the live-status dot polling (small dot next to agent name)
   startLiveStatusPolling();
+  // Land on the chat page; show which AI answers under the message box
+  openPage('chat');
+  refreshChatModelLine();
+  updateChatEmptyState();
 }
 
 /**
@@ -2400,16 +2444,15 @@ function onSetupItemClick(itemId, connected, askPrompt) {
     openSettings();
     return;
   }
+  // The AI has its own page (online key or local AI on this computer)
+  if (itemId === 'ai' && isLiveMode()) { openPage('ai'); return; }
   if (askPrompt) {
-    // Inject the prompt into the chat input and send it. The Guide Bot's
-    // system prompt has step-by-step instructions for every integration.
+    // Send the request to the chat — the assistant walks the user through it.
     const input = document.getElementById('guideInput');
     if (input) {
+      if (isLiveMode()) openPage('chat');
       input.value = askPrompt;
-      // Trigger the send button so the message goes through the normal pipeline
-      const sendBtn = document.querySelector('[onclick*="sendGuideMessage"], #sendGuideBtn');
-      if (sendBtn) sendBtn.click();
-      else if (typeof sendGuideMessage === 'function') sendGuideMessage();
+      sendGuideMsg();
     }
   }
 }
@@ -3412,45 +3455,45 @@ function updateTips() {
 // ── Utilities ───────────────────────────────────────────────────────────────
 
 function renderMd(t) {
-  // HTML-escape a raw string (used per-line so links aren't escaped)
-  const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  // HTML-escape a raw string. Quotes too: replies can be steered by text the
+  // agent read (an email, a web page), and an unescaped " inside a link would
+  // let that text add its own attributes (onfocus=…) to the dashboard page.
+  const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  t = String(t ?? '').replace(/\u0000/g, '');
 
-  // Apply all inline formatting to an already-escaped string
+  // Apply all inline formatting to an already-escaped string. Every piece of
+  // generated HTML is parked in a placeholder so later steps never rewrite it.
   const inline = s => {
-    // STEP 1 — Markdown links [text](url) → anchor. Run first so an explicit
-    // [text](url) takes precedence over auto-linking, and so emphasis inside
-    // link text works without being eaten by the bold/italic regexes.
-    // We temporarily replace processed links with a sentinel so the auto-linker
-    // doesn't double-process them.
-    const linkPlaceholders = [];
-    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_m, text, url) => {
-      const html = `<a href="${url}" target="_blank" rel="noopener noreferrer" `
-                 + `style="color:var(--brand-light);text-decoration:underline">${text} ↗</a>`;
-      linkPlaceholders.push(html);
-      return `LINK${linkPlaceholders.length - 1}`;
-    });
+    const parked = [];
+    const park = (html) => { parked.push(html); return `\u0000${parked.length - 1}\u0000`; };
+    const link = (url, label) =>
+      `<a href="${url}" target="_blank" rel="noopener noreferrer" class="md-link">${label} ↗</a>`;
+    // A URL ends at whitespace, angle brackets, an escaped quote or a parked
+    // piece of HTML (never let a placeholder end up inside an href).
+    const URL_CHARS = String.raw`(?:(?!&quot;|&#39;|&lt;|&gt;)[^\s<>"'\u0000])`;
 
-    // STEP 2 — Auto-link bare URLs.
-    // A beta tester reported (2026-05-27): the bot tells users "Go to your Google
-    // Account settings at https://myaccount.google.com/" but the URL isn't
-    // clickable, so the user has to copy-paste it manually. Auto-linking
-    // here means EVERY URL the bot mentions becomes a one-tap link.
-    // Trailing punctuation (.,;:!?) is excluded from the URL so sentences
-    // ending with a URL still parse cleanly.
-    s = s.replace(/(https?:\/\/[^\s<>"]+?)([.,;:!?)\]]*)(?=\s|$|[<])/g,
-      (_m, url, trailing) =>
-        `<a href="${url}" target="_blank" rel="noopener noreferrer" `
-      + `style="color:var(--brand-light);text-decoration:underline">${url} ↗</a>${trailing}`
-    );
+    // STEP 0 — `code` stays literal (no links or emphasis inside it)
+    s = s.replace(/`([^`]+)`/g, (_m, code) => park(`<code class="md-code">${code}</code>`));
 
-    // STEP 3 — bold, italic, code (links are already isolated as placeholders)
+    // STEP 1 — Markdown links [text](url), before auto-linking so an explicit
+    // link wins.
+    s = s.replace(new RegExp(String.raw`\[([^\]]+)\]\((https?:\/\/${URL_CHARS}+?)\)`, 'g'),
+      (_m, text, url) => park(link(url, text)));
+
+    // STEP 2 — Auto-link bare URLs (beta tester, 2026-05-27: URLs the bot
+    // mentions must be one tap). Trailing punctuation stays outside the link.
+    s = s.replace(new RegExp(String.raw`(https?:\/\/${URL_CHARS}+?)([.,;:!?)\]]*)(?=\s|$|&quot;|&#39;|&lt;|&gt;)`, 'g'),
+      (_m, url, trailing) => park(link(url, url)) + trailing);
+
+    // STEP 3 — bold, italic
     s = s.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-         .replace(/\*(.*?)\*/g,     '<em>$1</em>')
-         .replace(/`([^`]+)`/g,
-            '<code style="background:rgba(255,255,255,0.1);padding:2px 5px;border-radius:4px;font-family:monospace;font-size:12px">$1</code>');
+         .replace(/\*(.*?)\*/g,     '<em>$1</em>');
 
-    // STEP 4 — restore Markdown-link placeholders
-    s = s.replace(/LINK(\d+)/g, (_m, i) => linkPlaceholders[Number(i)]);
+    // STEP 4 — put the parked HTML back (nested placeholders included)
+    for (let i = 0; i < 3 && s.includes('\u0000'); i++) {
+      s = s.replace(/\u0000(\d+)\u0000/g, (_m, i2) => parked[Number(i2)] ?? '');
+    }
     return s;
   };
 
@@ -3522,6 +3565,7 @@ let memoryPanelOpen = false;
 let memorySavedStep = 1;
 
 async function toggleMemoryPanel() {
+  if (isLiveMode()) return openPage(_currentPage === 'memory' ? 'chat' : 'memory');
   memoryPanelOpen = !memoryPanelOpen;
   if (memoryPanelOpen) {
     memorySavedStep = state.currentStep;
@@ -3580,6 +3624,7 @@ let _setupActiveIntegrationId = null;
 let _setupModalForm = {};
 
 async function toggleSetupPanel() {
+  if (isLiveMode()) return openPage(_currentPage === 'connections' ? 'chat' : 'connections');
   if (!_setupPanelOpen) {
     const liveMode = document.getElementById('mainApp')?.classList.contains('live-mode');
     _setupOpenedFromLiveMode = !!liveMode;
@@ -3941,6 +3986,7 @@ async function reconnectIntegration(integrationId) {
 }
 
 async function toggleHealthPanel() {
+  if (isLiveMode()) return openPage(_currentPage === 'health' ? 'chat' : 'health');
   // Opening flow ----------------------------------------------------------
   if (!_healthPanelOpen) {
     const liveMode = document.getElementById('mainApp')?.classList.contains('live-mode');
@@ -4126,12 +4172,11 @@ function renderHealthPanel({ budget, health, agent }) {
         Save a full snapshot of your agent — config, credentials, memories, and recent conversation list — as a single JSON file. Useful for migrating to a new machine or as a personal backup.
       </div>
       <div style="font-size:12px;color:#f59e0b;line-height:1.5;padding:8px 12px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:8px;margin-bottom:10px">
-        ⚠️ The backup includes your API keys unencrypted. Treat the downloaded file like a password — don't share it.
+        🔒 The backup includes your keys and passwords, so it is locked with a password you choose. Without that password it can't be restored — keep it somewhere safe.
       </div>
       <div class="health-action-row">
         <button class="health-action-btn primary" onclick="downloadBackup()" aria-label="Download full configuration backup">📥 Download backup</button>
         <button class="health-action-btn" onclick="triggerRestorePicker()" aria-label="Restore from a previously-downloaded backup file">♻️ Restore from backup…</button>
-        <input type="file" id="restoreFilePicker" accept="application/json" style="display:none" onchange="handleRestoreFile(event)">
       </div>
       <div style="font-size:11px;color:var(--text-dim);margin-top:8px;opacity:0.7">
         Restore is non-destructive — your current config is auto-saved as <code>data/config.json.before-restore-*.bak</code> in case you need to roll back manually.
@@ -4565,41 +4610,108 @@ async function handleRestoreFile(event) {
   }
 
   // Client-side envelope check matches the server's
-  if (!bundle || bundle.format !== 'vouza-admin-agent-backup') {
+  const locked = bundle?.format === 'vouza-admin-agent-backup-locked';
+  if (!bundle || (!locked && bundle.format !== 'vouza-admin-agent-backup')) {
     toast('This file isn\'t a Vouza backup (wrong format envelope).', 'error');
     return;
   }
 
   // Build a confirmation summary so the user knows what they're about to restore
-  const summary = [
-    `From: <strong>${escHtml(bundle.agentName || 'Unknown agent')}</strong>`,
-    `Date: <strong>${escHtml((bundle.exportedAt || '').slice(0, 10) || 'unknown')}</strong>`,
-    `Memories: <strong>${(bundle.memories || []).length}</strong>`,
-    `Conversations summary: <strong>${(bundle.conversations || []).length}</strong>`,
-  ].join('<br>');
+  const summary = locked
+    ? `🔒 Locked backup from <strong>${escHtml((bundle.exportedAt || '').slice(0, 10) || 'unknown date')}</strong>`
+    : [
+      `From: <strong>${escHtml(bundle.agentName || 'Unknown agent')}</strong>`,
+      `Date: <strong>${escHtml((bundle.exportedAt || '').slice(0, 10) || 'unknown')}</strong>`,
+      `Memories: <strong>${(bundle.memories || []).length}</strong>`,
+      `Conversations summary: <strong>${(bundle.conversations || []).length}</strong>`,
+    ].join('<br>');
 
-  const confirmed = await showRestoreConfirm(summary);
-  if (!confirmed) return;
-
-  // Send to server
-  toast('Restoring backup…', 'info');
-  try {
-    const r = await fetch('/api/import-config', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(bundle),
-    });
-    const data = await r.json();
-    if (!r.ok || !data.ok) {
-      toast('Restore failed: ' + (data.error || r.statusText), 'error');
-      return;
+  let password = '';
+  let error = '';
+  for (;;) {
+    if (locked) {
+      password = await backupPasswordDialog({
+        title:   '♻️ Restore from backup',
+        intro:   'This <strong>replaces your current settings</strong> with the backup. Your current settings are saved to a <code>.bak</code> file first, so you can roll back.',
+        summaryHtml: summary,
+        okLabel: 'Restore',
+        error,
+      });
+      if (password === null) return;
+    } else {
+      if (!(await showRestoreConfirm(summary))) return;
     }
-    toast(data.message || '✅ Restored! Restart the agent to apply.', 'success');
-    // Refresh the Health panel so the user sees the new state
-    setTimeout(() => loadHealthPanel(), 800);
-  } catch (e) {
-    toast('Restore failed: ' + String(e), 'error');
+
+    toast('Restoring backup…', 'info');
+    try {
+      const r = await fetch('/api/import-config', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(locked ? { ...bundle, password } : bundle),
+      });
+      const data = await r.json();
+      if (data.wrongPassword) { error = data.error; continue; }   // ask again
+      if (!r.ok || !data.ok) {
+        toast('Restore failed: ' + escHtml(data.error || r.statusText), 'error');
+        return;
+      }
+      toast(escHtml(data.message || '✅ Restored! Restart the agent to apply.'), 'success');
+      // Refresh the Health panel so the user sees the new state
+      setTimeout(() => loadHealthPanel(), 800);
+    } catch (e) {
+      toast('Restore failed: ' + escHtml(String(e)), 'error');
+    }
+    return;
   }
+}
+
+/**
+ * Password box for locked backups. Resolves the password, or null on Cancel.
+ * confirm: ask twice (choosing a new password). error: shown above the box.
+ */
+function backupPasswordDialog({ title, intro, summaryHtml = '', confirm = false, okLabel = 'OK', error = '' }) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'pw-dialog-backdrop';
+    overlay.innerHTML = `
+      <form class="pw-dialog" role="dialog" aria-modal="true" aria-labelledby="pwDialogTitle" novalidate>
+        <div class="pw-dialog-title" id="pwDialogTitle">${title}</div>
+        <p class="page-hint" style="margin:0 0 12px">${intro}</p>
+        ${summaryHtml ? `<div class="pw-dialog-summary">${summaryHtml}</div>` : ''}
+        <label for="pwDialogPw">${confirm ? 'Choose a backup password (8+ characters)' : 'Backup password'}</label>
+        <input type="password" id="pwDialogPw" autocomplete="${confirm ? 'new-password' : 'current-password'}" required>
+        ${confirm ? `<label for="pwDialogPw2">Type it again</label>
+        <input type="password" id="pwDialogPw2" autocomplete="new-password" required>` : ''}
+        <div class="page-msg error" data-pw-msg role="alert">${escHtml(error)}</div>
+        <div class="pw-dialog-actions">
+          <button type="button" class="btn" data-act="cancel">Cancel</button>
+          <button type="submit" class="btn btn-primary">${okLabel}</button>
+        </div>
+      </form>`;
+    const form = overlay.querySelector('form');
+    const msg = overlay.querySelector('[data-pw-msg]');
+    const done = (v) => {
+      overlay.remove();
+      window.removeEventListener('keydown', onKey);
+      resolve(v);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') done(null); };
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay || e.target?.dataset?.act === 'cancel') done(null);
+    });
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const pw = form.querySelector('#pwDialogPw').value;
+      if (confirm) {
+        if (pw.length < 8) { msg.textContent = 'Use at least 8 characters.'; return; }
+        if (pw !== form.querySelector('#pwDialogPw2').value) { msg.textContent = 'The two passwords don\'t match.'; return; }
+      } else if (!pw) { msg.textContent = 'Type the backup password.'; return; }
+      done(pw);
+    });
+    document.body.appendChild(overlay);
+    window.addEventListener('keydown', onKey);
+    form.querySelector('#pwDialogPw').focus();
+  });
 }
 
 /**
@@ -4694,12 +4806,28 @@ function toggleTheme() {
   } catch {}
 })();
 
-// Trigger the backup download. The server endpoint sends a JSON file with
-// Content-Disposition: attachment, so the browser downloads it directly.
+// Download a backup. It holds every key and password, so the server locks it
+// with a password the person chooses here (scrypt + AES-256-GCM).
 async function downloadBackup() {
+  const password = await backupPasswordDialog({
+    title:   '💾 Download a backup',
+    intro:   'Your backup holds your keys and passwords, so it is locked with a password. ' +
+             'You will need this password to restore it — write it down somewhere safe. It cannot be recovered.',
+    confirm: true,
+    okLabel: 'Download',
+  });
+  if (password === null) return;
   try {
-    const r = await fetch('/api/export-config');
-    if (!r.ok) { toast('Backup failed — server returned ' + r.status, 'error'); return; }
+    const r = await fetch('/api/export-config', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ password }),
+    });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      toast('Backup failed: ' + escHtml(d.error || `server returned ${r.status}`), 'error');
+      return;
+    }
     const blob = await r.blob();
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
@@ -4709,7 +4837,7 @@ async function downloadBackup() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    toast('✅ Backup downloaded. Keep it safe — it includes your API keys.', 'success');
+    toast('✅ Backup downloaded and locked with your password.', 'success');
   } catch (e) {
     toast('Backup failed: ' + String(e), 'error');
   }
@@ -4944,7 +5072,7 @@ async function updateMemoryCount() {
 // Skip button + Next button. Tooltips position themselves automatically
 // relative to the highlighted element.
 
-const TOUR_FLAG_KEY = 'vouza_tour_seen_v1';
+const TOUR_FLAG_KEY = 'vouza_tour_seen_v2'; // v2: new left menu
 
 const TOUR_STEPS = [
   {
@@ -4954,21 +5082,15 @@ const TOUR_STEPS = [
     placement: 'top',
   },
   {
-    target:  '#setupStatusPanel',
-    title:   '✅ Add more apps anytime',
-    body:    'See what\'s connected here. Click "+ Add" next to anything missing — your AI will walk you through setup right in the chat. No need to re-open the wizard.',
+    target:  '.side-nav',
+    title:   '🧭 Your menu',
+    body:    '<strong>Connections</strong> — email, phone and apps. <strong>AI model</strong> — online AI or a free local AI on this computer. <strong>Memory</strong> — what your AI has learned. <strong>Privacy &amp; health</strong> — what went online and when. <strong>Settings</strong> — updates, backup and full setup.',
     placement: 'right',
   },
   {
     target:  '.conv-list, #convList',
     title:   '📚 Conversation history',
     body:    'Every chat is saved automatically. Click any past conversation to pick up where you left off. Use the search box above to find specific topics.',
-    placement: 'right',
-  },
-  {
-    target:  '.conv-sidebar-footer',
-    title:   '⚙️ Settings &amp; Memories',
-    body:    '<strong>Settings</strong> opens the configuration wizard. <strong>Memories</strong> shows what your AI has learned about you over time. <strong>Docs &amp; Support</strong> opens the GitHub docs in a new tab.',
     placement: 'right',
   },
   {
@@ -5245,9 +5367,11 @@ setTimeout(checkForDraftToRestore, 800);
 
 const COMMANDS = [
   { id:'new-conv',    label:'Start a new conversation',     icon:'✏️', hint:'',          run: () => { if (typeof newConversation === 'function') newConversation(); } },
-  { id:'open-health', label:'Open system health dashboard', icon:'📊', hint:'',          run: () => toggleHealthPanel() },
+  { id:'open-health', label:'Open privacy & health',        icon:'🛡️', hint:'',          run: () => toggleHealthPanel() },
   { id:'open-mem',    label:'Open agent memories',          icon:'🧠', hint:'',          run: () => toggleMemoryPanel() },
-  { id:'open-set',    label:'Open settings (wizard)',       icon:'⚙️', hint:'',          run: () => openSettings() },
+  { id:'open-ai',     label:'Change the AI model (online or local)', icon:'🤖', hint:'', run: () => isLiveMode() ? openPage('ai') : openSettings() },
+  { id:'open-conn',   label:'Open connections',             icon:'🔌', hint:'',          run: () => toggleSetupPanel() },
+  { id:'open-set',    label:'Open full setup (wizard)',     icon:'⚙️', hint:'',          run: () => openSettings() },
   { id:'backup',      label:'Download a full backup',       icon:'💾', hint:'',          run: () => downloadBackup() },
   { id:'diagnostic',  label:'Report an issue (download diagnostic)', icon:'🆘', hint:'', run: () => downloadDiagnostic() },
   { id:'theme',       label:'Toggle light / dark theme',    icon:'🎨', hint:'',          run: () => toggleTheme() },
@@ -6086,4 +6210,271 @@ async function qsFinish(btn) {
   qsEl('mainApp').style.display = 'block';
   init();
   activateLiveMode();
+}
+
+// ============================================================
+// Left menu + pages (live mode) — 2.3.0
+// A menu item opens its page where the chat was (#mainApp.page-open);
+// "Chat" brings the conversation back. The wizard keeps its own flow.
+// ============================================================
+var PAGE_PANELS = { // var: init() may run before this line
+  connections: 'setup-panel',
+  ai:          'ai-panel',
+  memory:      'memory-panel',
+  health:      'health-panel',
+  settings:    'settings-panel',
+};
+var _currentPage = 'chat';
+
+function isLiveMode() {
+  return !!document.getElementById('mainApp')?.classList.contains('live-mode');
+}
+
+function closePages() {
+  document.getElementById('mainApp')?.classList.remove('page-open');
+  for (const id of Object.values(PAGE_PANELS)) document.getElementById(id)?.classList.remove('page-active');
+  if (_healthRefreshTimer) { clearInterval(_healthRefreshTimer); _healthRefreshTimer = null; }
+  _currentPage = 'chat';
+}
+
+async function openPage(name) {
+  if (!PAGE_PANELS[name]) name = 'chat';
+  closePages();
+  _currentPage = name;
+  document.querySelectorAll('.side-nav-item').forEach((b) => {
+    const on = b.dataset.page === name;
+    b.classList.toggle('active', on);
+    if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+    // Narrow windows show the menu as a sideways strip — keep the current item in view
+    if (on && b.parentElement.scrollWidth > b.parentElement.clientWidth) b.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  });
+  if (name === 'chat') {
+    updateChatEmptyState();
+    return;
+  }
+  document.getElementById('mainApp')?.classList.add('page-open');
+  const panel = document.getElementById(PAGE_PANELS[name]);
+  panel.classList.add('page-active');
+  panel.scrollTop = 0;
+  try {
+    if (name === 'connections') { renderSetupStatusPanel(); await renderSetupPanel(); }
+    else if (name === 'ai')     await renderAiPage();
+    else if (name === 'memory') await loadMemoryPanel();
+    else if (name === 'health') {
+      await loadHealthPanel();
+      if (_currentPage === 'health') _healthRefreshTimer = setInterval(loadHealthPanel, 15000);
+    }
+  } catch (err) {
+    console.warn(`Page ${name} failed to load:`, err);
+  }
+}
+
+// ── Chat start screen ────────────────────────────────────────
+function updateChatEmptyState() {
+  const box = document.getElementById('guideMessages');
+  const col = document.getElementById('guideCol');
+  if (!box || !col) return;
+  const hasMessages = [...box.children].some((el) => el.id !== 'guideTyping');
+  col.classList.toggle('chat-empty', !hasMessages);
+  if (!hasMessages) {
+    const hi = document.getElementById('chatWelcomeHi');
+    const name = (_savedConfig?.agent?.userName || document.getElementById('userName')?.value || '').trim();
+    const h = new Date().getHours();
+    const part = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+    if (hi) hi.textContent = name ? `${part}, ${name}` : part;
+  }
+}
+
+(function watchChatMessages() {
+  const box = document.getElementById('guideMessages');
+  if (!box || typeof MutationObserver === 'undefined') return;
+  new MutationObserver(updateChatEmptyState).observe(box, { childList: true });
+  updateChatEmptyState();
+})();
+
+/** A start-screen suggestion: send it now, or put it in the box to finish. */
+function useChatSuggestion(text, send) {
+  const input = document.getElementById('guideInput');
+  if (!input) return;
+  input.value = text;
+  if (send) { sendGuideMsg(); return; }
+  input.focus();
+  input.setSelectionRange(text.length, text.length);
+  if (typeof autoGrowGuideInput === 'function') autoGrowGuideInput();
+}
+
+// ── "AI: … · Change" under the message box ───────────────────
+function shortModelName(id) {
+  const s = String(id || '');
+  const label = typeof modelLabel === 'function' ? modelLabel(s) : s;
+  return label !== s ? label : (s.split('/').pop() || s);
+}
+
+function describeAi(ai) {
+  if (!ai || !ai.configured) return { icon: '⚠️', text: 'No AI set up yet' };
+  if (ai.local)      return { icon: '💻', text: `${ai.model} · runs on this computer` };
+  if (ai.viaBuiltIn) return { icon: '☁️', text: 'Built-in AI · online' };
+  return { icon: '☁️', text: `${shortModelName(ai.activeModel)} · online` };
+}
+
+async function refreshChatModelLine() {
+  const el = document.getElementById('chatModelLine');
+  if (!el) return;
+  let s = null;
+  try { s = await qsApi('/api/quick-setup/state'); } catch { /* leave it empty */ }
+  if (!s) { el.innerHTML = ''; return; }
+  const d = describeAi(s.ai);
+  el.innerHTML = `<span>${d.icon} AI: ${escHtml(d.text)}</span> · <button type="button" class="link-btn" onclick="openPage('ai')">Change</button>`;
+}
+
+// ── 🤖 AI model page ─────────────────────────────────────────
+async function renderAiPage() {
+  const el = document.getElementById('aiPageContent');
+  if (!el) return;
+  let s = null;
+  try { s = await qsApi('/api/quick-setup/state'); } catch { /* shown below */ }
+  const ai = s?.ai || {};
+  const d = describeAi(ai);
+  const now = !s
+    ? "Couldn't read the current setting — make sure the assistant window is still open."
+    : ai.local
+      ? `💻 <strong>Local AI on this computer</strong> (${escHtml(ai.model)}). Your chats stay on this computer.`
+      : `${d.icon} <strong>${escHtml(d.text)}</strong>${ai.ownKey ? ' — using your own key.' : ai.viaBuiltIn ? ' — no key needed.' : ''}`;
+  el.innerHTML = `
+    <div class="page-card current">
+      <h3>Right now</h3>
+      <p>${now}</p>
+    </div>
+    <div class="page-card">
+      <h3>☁️ Online AI</h3>
+      <p class="page-hint" style="margin-bottom:0">Fast and smart. Your messages go to the AI company of the key you use.</p>
+      ${ai.local ? `
+        <div class="page-row" style="margin-top:12px">
+          <button type="button" class="btn btn-primary" onclick="aiUseOnline(this)">Switch back to online AI</button>
+        </div>` : ''}
+      <label for="aiNewKey">${ai.local ? 'Or paste a new AI key' : ai.ownKey ? 'Use a different AI key' : 'Paste your AI key'}</label>
+      <div class="page-row">
+        <input type="password" id="aiNewKey" placeholder="Starts with sk-or-, sk-ant-, sk-, AIza or xai-" autocomplete="off" spellcheck="false"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();aiSaveKey(document.getElementById('aiSaveKeyBtn'))}">
+        <button type="button" class="btn" id="aiSaveKeyBtn" onclick="aiSaveKey(this)">Check &amp; save</button>
+      </div>
+      <p class="page-hint" style="margin-top:8px">No key? <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">Get one from OpenRouter ↗</a> — one key works with every model. To pick exact models, use <button type="button" class="link-btn" onclick="openSettings()">full setup</button>.</p>
+      <div class="page-msg" id="aiOnlineMsg" role="status"></div>
+    </div>
+    <div class="page-card">
+      <h3>💻 Local AI on this computer (Ollama)</h3>
+      <p class="page-hint">Free and private: nothing is sent to an AI company. Slower than an online AI, and needs a computer with 8 GB+ memory.</p>
+      <div id="aiLocalBody"></div>
+    </div>`;
+  renderLocalAiCard(document.getElementById('aiLocalBody'), {
+    current: ai.local ? ai.model : null,
+    onDone: () => { renderAiPage(); refreshChatModelLine(); },
+  });
+}
+
+async function aiSaveKey(btn) {
+  const input = document.getElementById('aiNewKey');
+  const msg = document.getElementById('aiOnlineMsg');
+  const key = input?.value.trim();
+  if (!key) { input?.focus(); return; }
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Checking…';
+  try {
+    const r = await qsApi('/api/quick-setup/ai', { key });
+    if (!r.ok) { msg.className = 'page-msg error'; msg.textContent = r.error; return; }
+    input.value = '';
+    toast(`✓ Connected to ${r.label} — your assistant now uses it`, 'success');
+    if (_savedConfig?.agent) _savedConfig.agent.provider = r.provider;
+    await renderAiPage();
+    refreshChatModelLine();
+  } catch {
+    msg.className = 'page-msg error';
+    msg.textContent = "I couldn't save that. Make sure the assistant window is still open, then try again.";
+  } finally {
+    btn.disabled = false; btn.textContent = label;
+  }
+}
+
+async function aiUseOnline(btn) {
+  const msg = document.getElementById('aiOnlineMsg');
+  btn.disabled = true;
+  try {
+    const r = await qsApi('/api/quick-setup/online-ai', {});
+    if (!r.ok) {
+      msg.className = 'page-msg error';
+      msg.textContent = r.error;
+      if (r.needKey) document.getElementById('aiNewKey')?.focus();
+      return;
+    }
+    if (_savedConfig?.agent) Object.assign(_savedConfig.agent, { provider: r.provider, model: r.model });
+    toast('✓ Switched to the online AI', 'success');
+    await renderAiPage();
+    refreshChatModelLine();
+  } catch {
+    msg.className = 'page-msg error';
+    msg.textContent = "I couldn't switch. Make sure the assistant window is still open, then try again.";
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ── Local AI (Ollama) card — AI model page + setup wizard ────
+// opts.current: model in use now (or null); opts.onDone(model) after saving.
+async function renderLocalAiCard(el, opts = {}) {
+  if (!el) return;
+  el.innerHTML = '<p class="page-hint">Looking for a local AI on this computer…</p>';
+  let r = null;
+  try { r = await qsApi('/api/quick-setup/local-ai'); } catch { /* treated as not running */ }
+  const again = '<button type="button" class="btn" data-local-again>Check again</button>';
+  if (!r || !r.running) {
+    el.innerHTML = `
+      <p class="page-hint" style="margin-top:0">No local AI is running on this computer yet. To add one:</p>
+      <ol class="local-steps">
+        <li>Download <strong>Ollama</strong> (free) from <a href="https://ollama.com/download" target="_blank" rel="noopener">ollama.com ↗</a>, install it and open it.</li>
+        <li>Open a terminal (Windows: search “cmd”) and run <code>ollama pull ${escHtml(r?.suggested || 'qwen2.5:7b')}</code> — a few GB, one time.</li>
+        <li>Come back here and tap <strong>Check again</strong>.</li>
+      </ol>
+      ${opts.current ? `<p class="page-msg error">⚠️ Your assistant is set to the local AI (${escHtml(opts.current)}), but Ollama isn't running — open Ollama, or switch back to online AI.</p>` : ''}
+      ${again}`;
+  } else if (!r.models.length) {
+    el.innerHTML = `
+      <p class="page-hint" style="margin-top:0">✓ Ollama is running, but it has no AI model yet.</p>
+      <p class="page-hint">Open a terminal and run <code>ollama pull ${escHtml(r.suggested)}</code>, then tap <strong>Check again</strong>.</p>
+      ${again}`;
+  } else {
+    const pick = r.models.includes(opts.current) ? opts.current
+      : r.models.includes(r.suggested) ? r.suggested : r.models[0];
+    el.innerHTML = `
+      ${opts.current ? `<p class="page-msg ok" style="margin:0 0 6px">✓ In use: ${escHtml(opts.current)}</p>` : '<p class="page-hint" style="margin-top:0">✓ Found a local AI.</p>'}
+      <label for="localAiModel">Which model?</label>
+      <div class="page-row">
+        <select id="localAiModel">
+          ${r.models.map((m) => `<option value="${escHtml(m)}" ${m === pick ? 'selected' : ''}>${escHtml(m)}</option>`).join('')}
+        </select>
+        <button type="button" class="btn btn-primary" data-local-use>${opts.current ? 'Use this model' : 'Use this local AI'}</button>
+      </div>
+      <p class="page-hint" style="margin-top:8px">Pick one that supports tools (for example qwen2.5 or llama3.1) so it can read your email and files.</p>
+      <div class="page-msg" data-local-msg role="status"></div>`;
+  }
+  el.querySelector('[data-local-again]')?.addEventListener('click', () => renderLocalAiCard(el, opts));
+  el.querySelector('[data-local-use]')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const label = btn.textContent;
+    const msg = el.querySelector('[data-local-msg]');
+    const model = el.querySelector('#localAiModel')?.value;
+    if (!model) return;
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+      const res = await qsApi('/api/quick-setup/local-ai', { model });
+      if (!res.ok) { msg.className = 'page-msg error'; msg.textContent = res.error; return; }
+      toast(`✓ Using the local AI (${res.model}) — your chats stay on this computer`, 'success');
+      refreshChatModelLine();
+      opts.onDone?.(res.model);
+    } catch {
+      msg.className = 'page-msg error';
+      msg.textContent = "I couldn't save that. Make sure the assistant window is still open, then try again.";
+    } finally {
+      btn.disabled = false; btn.textContent = label;
+    }
+  });
 }
