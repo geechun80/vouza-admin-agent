@@ -8,6 +8,15 @@ the full history.
 
 ---
 
+## 2.2.2 — 2026-10-02
+
+**One-click uninstall**
+
+- 🗑️ New **`uninstall.bat`** (Windows) and **`uninstall.sh`** (Mac / Linux): offers to save your settings to the Desktop, asks you to type YES, stops the agent, removes auto-start, shortcuts and PM2, then deletes the folder — Node.js and Ollama are left alone
+- 🔤 `uninstall-autostart.bat` no longer shows garbled symbols
+
+---
+
 ## 2.2.1 — 2026-10-02
 
 **You'll know when to update**

@@ -6,13 +6,13 @@
 
 Reads and answers email · finds your documents · checks your calendar · works from WhatsApp or Telegram
 
-**Latest version: 2.2.1** · [What's new](CHANGELOG.md)
+**Latest version: 2.2.2** · [What's new](CHANGELOG.md)
 
-[![Tests](https://img.shields.io/badge/tests-673%2F673-brightgreen)](#)
+[![Tests](https://img.shields.io/badge/tests-678%2F678-brightgreen)](#)
 [![Node](https://img.shields.io/badge/node-20.19%2B-blue)](https://nodejs.org)
 [![Audit](https://img.shields.io/badge/npm%20audit-0%20vulnerabilities-brightgreen)](#)
 
-[Install](#%EF%B8%8F-install) · [Update](#-update) · [First-time setup](#-first-time-setup) · [Phone](#-using-it-from-your-phone) · [Safety](#%EF%B8%8F-safety-defaults) · [Troubleshooting](#-troubleshooting)
+[Install](#%EF%B8%8F-install) · [Update](#-update) · [Uninstall](#%EF%B8%8F-uninstall) · [First-time setup](#-first-time-setup) · [Phone](#-using-it-from-your-phone) · [Safety](#%EF%B8%8F-safety-defaults) · [Troubleshooting](#-troubleshooting)
 
 </div>
 
@@ -81,6 +81,21 @@ Your settings, chats and WhatsApp login live in the **`data`** folder — updati
 > ⚠️ **Installed before 2 October 2026 with git?** The project history was cleaned up that day, so `git pull` fails on older copies. `update.bat` / `update.sh` detect this and offer to replace the code with the latest version (your settings are kept). By hand: `git fetch origin` then `git reset --hard origin/master`.
 
 > 💡 **Moving to a new computer?** Saved keys and passwords are encrypted for your Windows/Mac account, so copying `data` to another PC won't carry them. Use **System Health → Download backup** on the old PC and **Restore from backup** on the new one.
+
+---
+
+## 🗑️ Uninstall
+
+**Windows:** double-click **`uninstall.bat`** in the agent's folder. It:
+
+1. offers to save a copy of your settings to your Desktop first,
+2. asks you to type **YES** — nothing is removed before that,
+3. stops the agent, removes auto-start, the Desktop shortcut and PM2 (only for this copy),
+4. deletes the whole folder.
+
+**Mac / Linux:** `./uninstall.sh` (same steps). **Docker:** `docker compose down` in the folder, then delete it.
+
+Node.js and Ollama are not removed — uninstall them separately if you no longer need them. (`uninstall-autostart.bat` only stops the agent starting at login; it removes nothing else.)
 
 ---
 

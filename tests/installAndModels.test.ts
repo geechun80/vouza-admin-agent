@@ -256,3 +256,54 @@ describe("the dashboard tells people to update", () => {
   });
 });
 
+describe("uninstaller", () => {
+  it("uninstall.bat and the PowerShell script are plain ASCII (no garbled console text)", async () => {
+    for (const f of ["uninstall.bat", "uninstall-autostart.bat", "scripts/uninstall.ps1"]) {
+      const buf = await readFile(path.resolve(f));
+      assert.ok(buf.every((c) => c < 128), `${f} has non-ASCII bytes`);
+    }
+    assert.ok((await readFile(path.resolve("uninstall.bat"))).includes(Buffer.from("\r\n")), "uninstall.bat uses CRLF");
+  });
+
+  it("only deletes a real Admin Agent folder, never a system or personal folder", async () => {
+    const ps = await read("scripts/uninstall.ps1");
+    assert.match(ps, /\$pkg\.name -ne 'admin-agent'/);
+    assert.match(ps, /Test-Path \(Join-Path \$AppDir 'start\.bat'\)/);
+    for (const f of ["USERPROFILE", "'Desktop'", "'MyDocuments'", "WINDIR", "ProgramFiles", "GetPathRoot"]) {
+      assert.ok(ps.includes(f), `forbidden-folder list includes ${f}`);
+    }
+    const sh = await read("uninstall.sh");
+    assert.match(sh, /grep -q '"name": "admin-agent"'/);
+    assert.match(sh, /"\/"\|"\$HOME"/);
+  });
+
+  it("changes nothing until YES is typed (exactly, capital letters)", async () => {
+    const ps = await read("scripts/uninstall.ps1");
+    const confirm = ps.indexOf("$answer -cne 'YES'");
+    assert.ok(confirm > 0);
+    for (const step of ["Stop-Process", "schtasks.exe /delete", "Remove-Item $lnk", "Start-Process -FilePath 'cmd.exe'"]) {
+      assert.ok(ps.indexOf(step) > confirm, `${step} happens only after the YES`);
+    }
+    assert.match(await read("uninstall.sh"), /if \[ "\$OK" != "YES" \]/);
+  });
+
+  it("removes auto-start and shortcuts only when they point at this copy; never Node.js or Ollama", async () => {
+    const ps = await read("scripts/uninstall.ps1");
+    assert.match(ps, /if \(PointsHere \$taskXml\)/);
+    assert.match(ps, /PointsHere \$sc\.TargetPath/);
+    // No command that removes or stops anything mentions Ollama or Node.js.
+    const actions = ps.split("\n").filter((l) => /Remove-Item|rd \/s|Stop-Process|schtasks\.exe \/delete|pm2 delete/.test(l));
+    assert.ok(actions.length >= 4);
+    for (const line of actions) assert.doesNotMatch(line, /ollama|nodejs/i, line);
+    assert.match(ps, /'node\.exe', 'cmd\.exe', 'wscript\.exe', 'cscript\.exe'/);
+    assert.match(ps, /\(PointsHere \$_\.CommandLine\)/, "only processes started from this folder are stopped");
+  });
+
+  it("the delete helper is built from one template and waits with ping (timeout.exe needs a console)", async () => {
+    const ps = await read("scripts/uninstall.ps1");
+    assert.match(ps, /\$helperText = @"/);
+    assert.doesNotMatch(ps, /^\s*'(timeout|for \/l)[^\n]*' \+ \$AppDir/m, "no comma-list string concatenation");
+    assert.doesNotMatch(ps.slice(ps.indexOf("$helperText")), /timeout \/t/);
+  });
+});
+

@@ -1,9 +1,10 @@
 @echo off
-title Vouza Admin Agent — Remove Auto-Start
+title Vouza Admin Agent - Remove Auto-Start
 color 0E
 
 echo.
 echo  Removing Vouza Admin Agent from Windows auto-start...
+echo  (To remove the whole agent instead, run uninstall.bat)
 echo.
 
 :: Remove Task Scheduler entry
@@ -15,6 +16,6 @@ if exist "%STARTUP_DIR%\Vouza Admin Agent.lnk" (
     del "%STARTUP_DIR%\Vouza Admin Agent.lnk" >nul 2>&1
 )
 
-echo  ✓ Auto-start removed. The agent will no longer start automatically.
+echo  OK - auto-start removed. The agent will no longer start automatically.
 echo.
 pause
