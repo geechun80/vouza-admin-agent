@@ -5772,55 +5772,18 @@ async function qsToggleLocalAi() {
   if (!box.hidden) await qsCheckLocalAi();
 }
 
+// Same box as the AI model page; a saved local AI lets "Next" continue.
 async function qsCheckLocalAi() {
-  const body = qsEl('qsLocalAiBody');
-  body.textContent = 'Looking for a local AI…';
-  let r = null;
-  try { r = await qsApi('/api/quick-setup/local-ai'); } catch { /* shown below */ }
-  if (!r || !r.running) {
-    body.innerHTML = `
-      <p class="qs-hint" style="margin-top:0">No local AI is running on this computer yet.</p>
-      <ol class="qs-steps-list">
-        <li>Download <strong>Ollama</strong> (free) from <a href="https://ollama.com/download" target="_blank" rel="noopener">ollama.com ↗</a> and open it.</li>
-        <li>Open a terminal and run <code>ollama pull ${escHtml(r?.suggested || 'qwen2.5:7b')}</code> (a few GB, one time).</li>
-        <li>Come back and tap <strong>Check again</strong>.</li>
-      </ol>
-      <p class="qs-hint">A local AI is slower than a cloud one and needs a reasonably recent computer (8 GB+ memory).</p>
-      <button class="qs-btn" type="button" onclick="qsCheckLocalAi()">Check again</button>`;
-    return;
-  }
-  if (!r.models.length) {
-    body.innerHTML = `
-      <p class="qs-hint" style="margin-top:0">✓ Ollama is running, but it has no AI model yet.</p>
-      <p class="qs-hint">Open a terminal and run <code>ollama pull ${escHtml(r.suggested)}</code>, then tap <strong>Check again</strong>.</p>
-      <button class="qs-btn" type="button" onclick="qsCheckLocalAi()">Check again</button>`;
-    return;
-  }
-  const pick = r.models.includes(r.suggested) ? r.suggested : r.models[0];
-  body.innerHTML = `
-    <label class="qs-label" for="qsLocalModel">✓ Found a local AI. Which model?</label>
-    <select class="qs-input" id="qsLocalModel">
-      ${r.models.map((m) => `<option value="${escHtml(m)}" ${m === pick ? 'selected' : ''}>${escHtml(m)}</option>`).join('')}
-    </select>
-    <p class="qs-hint">Pick one that supports tools (for example qwen2.5 or llama3.1) so it can read your email and files.</p>
-    <button class="qs-btn" type="button" onclick="qsUseLocalAi(this)">Use this local AI</button>`;
-}
-
-async function qsUseLocalAi(btn) {
-  const model = qsEl('qsLocalModel')?.value;
-  if (!model) return;
-  const done = qsBusy(btn, 'Saving…');
-  try {
-    const r = await qsApi('/api/quick-setup/local-ai', { model });
-    if (!r.ok) { qsMsg(1, r.error, 'error'); return; }
-    if (qs.state) qs.state.ai = { configured: true, ownKey: false, viaBuiltIn: false, local: true, model: r.model, provider: 'ollama' };
-    qsMsg(1, `✓ Using the local AI (${r.model}) — your chats stay on this computer`, 'ok');
-    qsRenderAi();
-  } catch {
-    qsMsg(1, "I couldn't save that. Make sure the assistant window is still open, then try again.", 'error');
-  } finally {
-    done();
-  }
+  await renderLocalAiCard(qsEl('qsLocalAiBody'), {
+    current: qs.state?.ai?.local ? qs.state.ai.model : null,
+    onDone: (model, running) => {
+      if (qs.state) qs.state.ai = { configured: true, ownKey: false, viaBuiltIn: false, local: true, model, provider: 'ollama' };
+      qsMsg(1, running
+        ? `✓ Using the local AI (${model}) — your chats stay on this computer`
+        : `✓ Saved ${model}. Open Ollama before you chat with your assistant.`, 'ok');
+      qsRenderAi();
+    },
+  });
 }
 
 async function qsSubmitYou(btn) {
@@ -6418,63 +6381,170 @@ async function aiUseOnline(btn) {
   }
 }
 
-// ── Local AI (Ollama) card — AI model page + setup wizard ────
-// opts.current: model in use now (or null); opts.onDone(model) after saving.
+// ── "Ollama won't start?" help — inside every Local AI box ──
+// Same steps as README → "Local AI (Ollama) won't start". Commands get a
+// Copy button; Mac users see the Mac version.
+function localAiHelpHtml() {
+  const cmd = (c) => `<code>${escHtml(c)}</code> <button type="button" class="copy-btn" data-copy="${escHtml(c)}">Copy</button>`;
+  const isMac = /Mac/i.test(navigator.platform || navigator.userAgent || '');
+  const check = '<a href="http://127.0.0.1:11434" target="_blank" rel="noopener">127.0.0.1:11434 ↗</a>';
+  const steps = isMac ? `
+      <li><strong>Is it running?</strong> Open ${check}. If it says <em>“Ollama is running”</em>, tap <strong>Check again</strong>.</li>
+      <li><strong>Start it:</strong> open <strong>Ollama</strong> from Applications — a llama icon appears in the menu bar at the top. Wait 10 seconds, then step 1 again.</li>
+      <li><strong>Restart it:</strong> click the llama icon → <strong>Quit Ollama</strong>, then open it again.</li>
+      <li><strong>See why it fails:</strong> open Terminal and run ${cmd('ollama serve')} — keep the window open.</li>
+      <li><strong>Are your models there?</strong> ${cmd('ollama list')} — test one: ${cmd('ollama run qwen2.5:3b "Say hello"')}</li>
+      <li><strong>Start with your Mac:</strong> System Settings → General → Login Items → add Ollama.</li>` : `
+      <li><strong>Is it running?</strong> Open ${check}. If it says <em>“Ollama is running”</em>, tap <strong>Check again</strong>.</li>
+      <li><strong>Start it:</strong> press the Windows key, type <strong>Ollama</strong>, open it. A llama icon appears near the clock (maybe under the <strong>^</strong> arrow). Wait 10 seconds, then step 1 again.</li>
+      <li><strong>Restart it:</strong> right-click the llama icon → <strong>Quit Ollama</strong>, then open it again — or restart the computer.</li>
+      <li><strong>See why it fails:</strong> open Command Prompt (Windows key → type <strong>cmd</strong>) and run ${cmd('ollama serve')} — keep that window open.
+        <ul>
+          <li><em>“Only one usage of each socket address”</em> → it's already running (step 1), or another program is using its address.</li>
+          <li><em>“'ollama' is not recognized”</em> → reinstall from <a href="https://ollama.com/download" target="_blank" rel="noopener">ollama.com ↗</a> and restart the PC.</li>
+        </ul></li>
+      <li><strong>Are your models there?</strong> In a new Command Prompt: ${cmd('ollama list')} — test one: ${cmd('ollama run qwen2.5:3b "Say hello"')}. If it answers, tap <strong>Check again</strong>.</li>
+      <li><strong>Different address?</strong> ${cmd('echo %OLLAMA_HOST%')} — if it prints an address, type it in the <strong>Ollama address</strong> box below.</li>
+      <li><strong>Start with Windows:</strong> Task Manager → Startup apps → Ollama → <strong>Enabled</strong> — otherwise open Ollama yourself after every restart.</li>`;
+  return `
+    <details class="local-help">
+      <summary>🛟 Ollama installed but won't start? Step-by-step help</summary>
+      <p class="page-hint" style="margin:8px 0 0">Downloaded models aren't enough — the <strong>Ollama program</strong> must be running too.</p>
+      <ol class="local-steps">${steps}
+        <li><strong>Slow, or “took too long”?</strong> <code>qwen2.5:7b</code> needs about 8 GB of free memory — on a slower computer pick <code>qwen2.5:3b</code>. The first answer after starting is slow while the model loads.</li>
+      </ol>
+      <p class="page-hint">More help: <a href="https://github.com/geechun80/vouza-admin-agent#local-ai-ollama" target="_blank" rel="noopener">Local AI guide ↗</a></p>
+    </details>`;
+}
+
+// ── Local AI (Ollama) box — Quick Setup, AI model page, full setup ──
+// opts.current: model in use now (or null).
+// opts.onDone(model, running) after saving.
+// When Ollama can't be found, the box says why and lets the person type the
+// model name (and, if Ollama runs elsewhere, its address) themselves.
 async function renderLocalAiCard(el, opts = {}) {
   if (!el) return;
+  const uid = 'lai' + Math.random().toString(36).slice(2, 8);
   el.innerHTML = '<p class="page-hint">Looking for a local AI on this computer…</p>';
   let r = null;
   try { r = await qsApi('/api/quick-setup/local-ai'); } catch { /* treated as not running */ }
+  const suggested = r?.suggested || 'qwen2.5:7b';
   const again = '<button type="button" class="btn" data-local-again>Check again</button>';
+  let top;
   if (!r || !r.running) {
-    el.innerHTML = `
-      <p class="page-hint" style="margin-top:0">No local AI is running on this computer yet. To add one:</p>
-      <ol class="local-steps">
-        <li>Download <strong>Ollama</strong> (free) from <a href="https://ollama.com/download" target="_blank" rel="noopener">ollama.com ↗</a>, install it and open it.</li>
-        <li>Open a terminal (Windows: search “cmd”) and run <code>ollama pull ${escHtml(r?.suggested || 'qwen2.5:7b')}</code> — a few GB, one time.</li>
-        <li>Come back here and tap <strong>Check again</strong>.</li>
-      </ol>
-      ${opts.current ? `<p class="page-msg error">⚠️ Your assistant is set to the local AI (${escHtml(opts.current)}), but Ollama isn't running — open Ollama, or switch back to online AI.</p>` : ''}
-      ${again}`;
+    top = `
+      <p class="page-msg error" style="margin-top:0">⚠️ ${escHtml(r?.problem || "Couldn't check for a local AI — make sure the assistant window is still open.")}</p>
+      ${opts.current ? `<p class="page-hint">Your assistant is set to the local AI (${escHtml(opts.current)}); it can't answer until Ollama is running.</p>` : ''}
+      <details class="local-install">
+        <summary>Not installed yet? 3 steps</summary>
+        <ol class="local-steps">
+          <li>Download <strong>Ollama</strong> (free) from <a href="https://ollama.com/download" target="_blank" rel="noopener">ollama.com ↗</a>, install it and open it.</li>
+          <li>Open a terminal (Windows: search “cmd”) and run <code>ollama pull ${escHtml(suggested)}</code> — a few GB, one time.</li>
+          <li>Come back here and tap <strong>Check again</strong>.</li>
+        </ol>
+      </details>
+      <div class="page-row">${again}</div>`;
   } else if (!r.models.length) {
-    el.innerHTML = `
+    top = `
       <p class="page-hint" style="margin-top:0">✓ Ollama is running, but it has no AI model yet.</p>
-      <p class="page-hint">Open a terminal and run <code>ollama pull ${escHtml(r.suggested)}</code>, then tap <strong>Check again</strong>.</p>
-      ${again}`;
+      <p class="page-hint">Open a terminal and run <code>ollama pull ${escHtml(suggested)}</code>, then tap <strong>Check again</strong>.</p>
+      <div class="page-row">${again}</div>`;
   } else {
     const pick = r.models.includes(opts.current) ? opts.current
-      : r.models.includes(r.suggested) ? r.suggested : r.models[0];
-    el.innerHTML = `
-      ${opts.current ? `<p class="page-msg ok" style="margin:0 0 6px">✓ In use: ${escHtml(opts.current)}</p>` : '<p class="page-hint" style="margin-top:0">✓ Found a local AI.</p>'}
-      <label for="localAiModel">Which model?</label>
+      : r.models.includes(suggested) ? suggested : r.models[0];
+    top = `
+      ${opts.current ? `<p class="page-msg ok" style="margin:0 0 6px">✓ In use: ${escHtml(opts.current)}</p>` : `<p class="page-hint" style="margin-top:0">✓ Found a local AI with ${r.models.length} model${r.models.length === 1 ? '' : 's'}.</p>`}
+      <label for="${uid}-pick">Which model?</label>
       <div class="page-row">
-        <select id="localAiModel">
+        <select id="${uid}-pick" data-local-pick>
           ${r.models.map((m) => `<option value="${escHtml(m)}" ${m === pick ? 'selected' : ''}>${escHtml(m)}</option>`).join('')}
         </select>
         <button type="button" class="btn btn-primary" data-local-use>${opts.current ? 'Use this model' : 'Use this local AI'}</button>
       </div>
-      <p class="page-hint" style="margin-top:8px">Pick one that supports tools (for example qwen2.5 or llama3.1) so it can read your email and files.</p>
-      <div class="page-msg" data-local-msg role="status"></div>`;
+      <p class="page-hint" style="margin-top:8px">Pick one that supports tools (for example qwen2.5 or llama3.1) so it can read your email and files. Bigger (7b) is smarter; smaller (3b) is faster.</p>`;
   }
-  el.querySelector('[data-local-again]')?.addEventListener('click', () => renderLocalAiCard(el, opts));
-  el.querySelector('[data-local-use]')?.addEventListener('click', async (e) => {
-    const btn = e.currentTarget;
+  const typedDefault = opts.current || r?.models?.[0] || suggested;
+  el.innerHTML = `<div class="local-ai">
+    ${top}
+    <details class="local-manual" ${!r?.running ? 'open' : ''}>
+      <summary>${r?.running ? 'Type a model name or address yourself' : 'Already installed? Type the model name yourself'}</summary>
+      <label for="${uid}-model">Model name <span class="page-hint">(as Ollama shows it, e.g. qwen2.5:7b)</span></label>
+      <input id="${uid}-model" data-local-model value="${escHtml(typedDefault)}" placeholder="qwen2.5:7b" spellcheck="false" autocomplete="off">
+      <label for="${uid}-addr">Ollama address <span class="page-hint">(leave empty when Ollama is on this computer)</span></label>
+      <input id="${uid}-addr" data-local-addr placeholder="http://127.0.0.1:11434" spellcheck="false" autocomplete="off">
+      <div class="page-row" style="margin-top:10px">
+        <button type="button" class="btn btn-primary" data-local-typed>Use this model</button>
+      </div>
+    </details>
+    ${localAiHelpHtml()}
+    <div class="page-msg" data-local-msg role="status"></div>
+  </div>`;
+
+  // Copy buttons in the help steps
+  el.querySelector('.local-help')?.addEventListener('click', async (e) => {
+    const btn = e.target.closest?.('[data-copy]');
+    if (!btn) return;
+    const text = btn.dataset.copy;
+    let ok = false;
+    try { await navigator.clipboard.writeText(text); ok = true; } catch { /* older way below */ }
+    if (!ok) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.cssText = 'position:fixed;opacity:0;pointer-events:none';
+      document.body.appendChild(ta);
+      ta.select();
+      try { ok = document.execCommand('copy'); } catch { ok = false; }
+      ta.remove();
+    }
+    btn.textContent = ok ? 'Copied ✓' : 'Select & copy';
+    setTimeout(() => { btn.textContent = 'Copy'; }, 1800);
+  });
+
+  const msg = el.querySelector('[data-local-msg]');
+  const show = (text, kind) => { msg.className = `page-msg ${kind}`; msg.textContent = text; };
+  const save = async (btn, body) => {
     const label = btn.textContent;
-    const msg = el.querySelector('[data-local-msg]');
-    const model = el.querySelector('#localAiModel')?.value;
-    if (!model) return;
     btn.disabled = true; btn.textContent = 'Saving…';
     try {
-      const res = await qsApi('/api/quick-setup/local-ai', { model });
-      if (!res.ok) { msg.className = 'page-msg error'; msg.textContent = res.error; return; }
-      toast(`✓ Using the local AI (${res.model}) — your chats stay on this computer`, 'success');
-      refreshChatModelLine();
-      opts.onDone?.(res.model);
+      const res = await qsApi('/api/quick-setup/local-ai', body);
+      if (res.ok) {
+        toast(escHtml(res.running
+          ? `✓ Using the local AI (${res.model}) — your chats stay on this computer`
+          : `✓ Saved ${res.model}. Open Ollama before you chat — the assistant can't answer until it's running.`), 'success');
+        refreshChatModelLine();
+        opts.onDone?.(res.model, res.running);
+        return;
+      }
+      show(res.error, 'error');
+      if (res.field === 'model') el.querySelector('[data-local-model]')?.focus();
+      if (res.field === 'address') el.querySelector('[data-local-addr]')?.focus();
+      if (res.notRunning) {
+        const force = document.createElement('button');
+        force.type = 'button';
+        force.className = 'btn';
+        force.style.marginTop = '8px';
+        force.textContent = 'Save anyway — I’ll open Ollama later';
+        force.addEventListener('click', () => save(force, { ...body, force: true }));
+        msg.appendChild(document.createElement('br'));
+        msg.appendChild(force);
+      }
     } catch {
-      msg.className = 'page-msg error';
-      msg.textContent = "I couldn't save that. Make sure the assistant window is still open, then try again.";
+      show("I couldn't save that. Make sure the assistant window is still open, then try again.", 'error');
     } finally {
       btn.disabled = false; btn.textContent = label;
     }
+  };
+
+  el.querySelector('[data-local-again]')?.addEventListener('click', () => renderLocalAiCard(el, opts));
+  el.querySelector('[data-local-use]')?.addEventListener('click', (e) => {
+    const model = el.querySelector('[data-local-pick]')?.value;
+    if (model) save(e.currentTarget, { model });
+  });
+  el.querySelector('[data-local-typed]')?.addEventListener('click', (e) => {
+    const model = el.querySelector('[data-local-model]').value.trim();
+    const address = el.querySelector('[data-local-addr]').value.trim();
+    if (!model) { show('Type the model name first, for example qwen2.5:7b.', 'error'); return; }
+    save(e.currentTarget, { model, ...(address ? { address } : {}) });
   });
 }

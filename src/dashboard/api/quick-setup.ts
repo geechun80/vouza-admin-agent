@@ -20,6 +20,9 @@ import {
   aiConfigPatch,
   detectLocalAi,
   localAiConfigPatch,
+  localAiProblem,
+  matchLocalModel,
+  normalizeOllamaAddress,
   onlineAiConfigPatch,
   SUGGESTED_LOCAL_MODEL,
   detectEmailPreset,
@@ -39,6 +42,7 @@ import {
 } from "../../whatsapp/baileysManager.js";
 import { createTelegramClaim, getTelegramOwnerStatus } from "../../telegram/listener.js";
 import type { AgentInstance } from "../../bridge/launcher.js";
+import { isValidModelId } from "../../config/liveModels.js";
 
 export interface QuickSetupDeps {
   requireLocalOrigin: RequestHandler;
@@ -160,23 +164,57 @@ export function registerQuickSetupRoutes(app: Express, deps: QuickSetupDeps): vo
   });
 
   // ── Step 1b (alternative): a local AI on this computer, no key ─────────
+  const inDocker = existsSync("/.dockerenv");
+  const savedOllamaAddress = async (): Promise<string | null> => {
+    try { return (await deps.loadConfig()).agent?.ollamaBaseUrl || null; } catch { return null; }
+  };
+
   app.get("/api/quick-setup/local-ai", guard, async (_req, res) => {
-    res.json({ ...(await detectLocalAi()), suggested: SUGGESTED_LOCAL_MODEL });
+    const local = await detectLocalAi(fetch, { baseUrl: await savedOllamaAddress(), inDocker });
+    res.json({
+      ...local,
+      problem: local.running ? undefined : localAiProblem(local),
+      suggested: SUGGESTED_LOCAL_MODEL,
+    });
   });
 
+  // Save the local AI. The model can be picked from the list or typed in
+  // ("Qwen 2.5:7b" finds "qwen2.5:7b"); an address can be typed when Ollama
+  // runs elsewhere. force = "save anyway, I'll start Ollama later".
   app.post("/api/quick-setup/local-ai", guard, async (req, res) => {
-    const model = String(req.body?.model ?? "").trim();
-    const local = await detectLocalAi();
-    if (!local.running) {
-      return res.json({ ok: false, error: "The local AI (Ollama) isn't running on this computer. Open Ollama, then tap “Check again”." });
+    // "Qwen 2.5:7b" → "qwen2.5:7b" (Ollama names have no spaces and are lowercase)
+    const typed   = String(req.body?.model ?? "").replace(/\s+/g, "").toLowerCase();
+    const address = String(req.body?.address ?? "").trim();
+    const force   = req.body?.force === true;
+    if (!isValidModelId(typed)) {
+      return res.json({ ok: false, field: "model", error: "Type the model name the way Ollama shows it, for example qwen2.5:7b." });
     }
-    if (!model || !local.models.includes(model)) {
-      return res.json({ ok: false, error: "That model isn't installed in Ollama yet. Pick one from the list." });
+    let baseUrl: string | null = null;
+    if (address) {
+      baseUrl = normalizeOllamaAddress(address);
+      if (!baseUrl) return res.json({ ok: false, field: "address", error: "That address doesn't look right — for example http://127.0.0.1:11434" });
+    }
+    const local = await detectLocalAi(fetch, { baseUrl: baseUrl ?? await savedOllamaAddress(), inDocker });
+    let model = typed;
+    if (local.running) {
+      const found = matchLocalModel(typed, local.models);
+      if (!found) {
+        return res.json({
+          ok: false, field: "model",
+          error: local.models.length
+            ? `Ollama doesn't have “${typed}”. Installed: ${local.models.join(", ")}.`
+            : `Ollama has no models yet — run “ollama pull ${typed}” in a terminal first.`,
+          models: local.models,
+        });
+      }
+      model = found;
+    } else if (!force) {
+      return res.json({ ok: false, notRunning: true, error: localAiProblem(local) });
     }
     try {
-      await patchConfig(localAiConfigPatch(model));
+      await patchConfig(localAiConfigPatch(model, local.running ? local.baseUrl : (baseUrl ?? local.baseUrl)));
       if (deps.getAgent()) await deps.restartAgent();
-      res.json({ ok: true, model });
+      res.json({ ok: true, model, running: local.running });
     } catch (err) {
       res.json({ ok: false, error: `Saving failed: ${String(err)}` });
     }

@@ -145,28 +145,100 @@ export const SUGGESTED_LOCAL_MODEL = "qwen2.5:7b";
 export interface LocalAiStatus {
   running: boolean;
   models:  string[];
-  /** Ollama's address — always this computer unless OLLAMA_BASE_URL says otherwise */
+  /** Where Ollama answered (or the first address tried), always ending in /v1 */
   baseUrl: string;
+  /** Why nothing answered: "not-running" (connection refused), "timeout", "error" */
+  reason?: "not-running" | "timeout" | "error";
+  /** Addresses tried, for the "here's what I checked" hint */
+  tried?: string[];
 }
 
-/** Is Ollama running here, and which models are installed? Never throws. */
-export async function detectLocalAi(fetchFn: FetchFn = fetch): Promise<LocalAiStatus> {
-  const baseUrl = ollamaBaseUrl();
+/**
+ * Where to look for Ollama: the address the person saved/typed or
+ * OLLAMA_BASE_URL; otherwise this computer under both of its names, plus the
+ * host machine when the agent itself runs inside Docker.
+ */
+export function localAiCandidates(configured?: string | null, inDocker = false): string[] {
+  if (configured || process.env.OLLAMA_BASE_URL) return [ollamaBaseUrl(configured)];
+  return [
+    ollamaBaseUrl("http://127.0.0.1:11434"),
+    ollamaBaseUrl("http://localhost:11434"),
+    ...(inDocker ? [ollamaBaseUrl("http://host.docker.internal:11434")] : []),
+  ];
+}
+
+/** Is Ollama running, and which models are installed? Never throws. */
+export async function detectLocalAi(
+  fetchFn: FetchFn = fetch,
+  opts: { baseUrl?: string | null; inDocker?: boolean } = {},
+): Promise<LocalAiStatus> {
+  const tried = localAiCandidates(opts.baseUrl, opts.inDocker);
+  let reason: LocalAiStatus["reason"] = "not-running";
+  for (const baseUrl of tried) {
+    try {
+      const { url } = keyCheckRequest("ollama", "", { ollamaBaseUrl: baseUrl });
+      // Generous: a busy laptop (a model loading on the CPU) can answer slowly.
+      const res = await fetchFn(url, { signal: AbortSignal.timeout(6_000) });
+      if (!res.ok) { reason = "error"; continue; }
+      const data = (await res.json().catch(() => ({}))) as { models?: Array<{ name?: string; model?: string }> };
+      const models = (data.models ?? []).map((m) => String(m?.name ?? m?.model ?? "")).filter(Boolean);
+      return { running: true, models, baseUrl, tried };
+    } catch (err) {
+      const e = err as { name?: string; cause?: { code?: string } };
+      if (e?.name === "TimeoutError" || e?.name === "AbortError") reason = "timeout";
+      else if (e?.cause?.code !== "ECONNREFUSED" && reason !== "timeout") reason = "error";
+    }
+  }
+  return { running: false, models: [], baseUrl: tried[0], reason, tried };
+}
+
+/** Plain words for why Ollama didn't answer (shown under the Local AI box). */
+export function localAiProblem(s: LocalAiStatus): string {
+  const where = (s.tried ?? [s.baseUrl]).map((u) => u.replace(/\/v1$/, "")).join(" or ");
+  switch (s.reason) {
+    case "timeout":
+      return `Ollama at ${where} took too long to answer. If it is busy loading a model, wait a moment and tap “Check again”.`;
+    case "error":
+      return `Something answered at ${where}, but it doesn't look like Ollama. Check the address.`;
+    default:
+      return `Ollama isn't running (nothing answered at ${where}). Open Ollama from the Start menu — a llama icon appears near the clock — then tap “Check again”.`;
+  }
+}
+
+/**
+ * The installed model a typed name means: exact first, then ignoring case and
+ * spaces ("Qwen 2.5:7b"), then the ":latest" tag Ollama adds to bare names.
+ */
+export function matchLocalModel(typed: string, installed: string[]): string | null {
+  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, "");
+  const want = norm(typed);
+  if (!want) return null;
+  return installed.find((m) => m === typed.trim())
+    ?? installed.find((m) => norm(m) === want)
+    ?? installed.find((m) => norm(m) === `${want}:latest`)
+    ?? null;
+}
+
+/** A typed Ollama address → "http(s)://host:port/v1", or null when it isn't one. */
+export function normalizeOllamaAddress(raw: string): string | null {
+  let s = String(raw ?? "").trim();
+  if (!s) return null;
+  if (!/^https?:\/\//i.test(s)) s = `http://${s}`;
   try {
-    const { url } = keyCheckRequest("ollama", "", { ollamaBaseUrl: baseUrl });
-    const res = await fetchFn(url, { signal: AbortSignal.timeout(3_000) });
-    if (!res.ok) return { running: false, models: [], baseUrl };
-    const data = (await res.json().catch(() => ({}))) as { models?: Array<{ name?: string; model?: string }> };
-    const models = (data.models ?? []).map((m) => String(m?.name ?? m?.model ?? "")).filter(Boolean);
-    return { running: true, models, baseUrl };
+    const u = new URL(s);
+    if (u.username || u.password || !u.hostname) return null;
+    return ollamaBaseUrl(u.origin);
   } catch {
-    return { running: false, models: [], baseUrl };
+    return null;
   }
 }
 
 /** setup-config patch for a local model (cloud keys, if any, are left alone). */
-export function localAiConfigPatch(model: string): Record<string, any> {
-  return { agent: { provider: "ollama", model: model.trim() } };
+export function localAiConfigPatch(model: string, baseUrl?: string | null): Record<string, any> {
+  // Only an address other than this computer's default is worth remembering
+  // ("" clears one saved earlier).
+  const custom = baseUrl && baseUrl !== ollamaBaseUrl("http://127.0.0.1:11434") ? baseUrl : "";
+  return { agent: { provider: "ollama", model: model.trim(), ollamaBaseUrl: custom } };
 }
 
 /** Saved-key slots per online provider, in the order we prefer them. */

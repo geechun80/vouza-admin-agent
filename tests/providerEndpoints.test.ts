@@ -18,7 +18,15 @@ import {
 } from "../src/config/providerEndpoints.js";
 import { DEFAULT_MODEL_BY_PROVIDER, AI_PROVIDERS, type AIProvider } from "../src/config/models.js";
 import { pickHealthyProvider, recordFailure, __testResetHealth } from "../src/agent/providerFailover.js";
-import { detectLocalAi, localAiConfigPatch, onlineAiConfigPatch } from "../src/setup/quickSetup.js";
+import {
+  detectLocalAi,
+  localAiCandidates,
+  localAiConfigPatch,
+  localAiProblem,
+  matchLocalModel,
+  normalizeOllamaAddress,
+  onlineAiConfigPatch,
+} from "../src/setup/quickSetup.js";
 
 describe("provider endpoints", () => {
   it("every cloud provider has a real https base URL (no api.<name>.com guesses)", () => {
@@ -96,8 +104,89 @@ describe("Quick Setup — local AI detection", () => {
     assert.deepEqual((await detectLocalAi(fake)).running, false);
   });
 
-  it("saves provider + model only — no key", () => {
-    assert.deepEqual(localAiConfigPatch(" qwen2.5:7b "), { agent: { provider: "ollama", model: "qwen2.5:7b" } });
+  it("saves provider + model only — no key; remembers only a non-default address", () => {
+    assert.deepEqual(localAiConfigPatch(" qwen2.5:7b "), { agent: { provider: "ollama", model: "qwen2.5:7b", ollamaBaseUrl: "" } });
+    assert.equal(localAiConfigPatch("qwen2.5:7b", "http://127.0.0.1:11434/v1").agent.ollamaBaseUrl, "");
+    assert.equal(localAiConfigPatch("qwen2.5:7b", "http://192.168.1.20:11434/v1").agent.ollamaBaseUrl, "http://192.168.1.20:11434/v1");
+  });
+});
+
+describe("Quick Setup — local AI when Ollama isn't found at first", () => {
+  const refused = () => Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } });
+
+  it("tries 127.0.0.1, then localhost (and the host machine inside Docker)", async () => {
+    const asked: string[] = [];
+    const fake = (async (url: string) => {
+      asked.push(url);
+      if (url.startsWith("http://localhost:11434")) {
+        return new Response(JSON.stringify({ models: [{ name: "qwen2.5:3b" }] }), { status: 200 });
+      }
+      throw refused();
+    }) as unknown as typeof fetch;
+    const r = await detectLocalAi(fake);
+    assert.equal(r.running, true);
+    assert.equal(r.baseUrl, "http://localhost:11434/v1");
+    assert.deepEqual(asked, ["http://127.0.0.1:11434/api/tags", "http://localhost:11434/api/tags"]);
+    assert.deepEqual(localAiCandidates(null, true).at(-1), "http://host.docker.internal:11434/v1");
+    assert.deepEqual(localAiCandidates("http://10.0.0.5:11434"), ["http://10.0.0.5:11434/v1"]);
+  });
+
+  it("says why: not running vs too slow — and where it looked", async () => {
+    const off = (async () => { throw refused(); }) as unknown as typeof fetch;
+    const s1 = await detectLocalAi(off);
+    assert.equal(s1.reason, "not-running");
+    assert.match(localAiProblem(s1), /isn't running .*127\.0\.0\.1:11434 or http:\/\/localhost:11434.*Start menu/);
+    const slow = (async () => { throw Object.assign(new Error("timed out"), { name: "TimeoutError" }); }) as unknown as typeof fetch;
+    const s2 = await detectLocalAi(slow);
+    assert.equal(s2.reason, "timeout");
+    assert.match(localAiProblem(s2), /took too long/);
+  });
+
+  it("matches a typed model name the way a person writes it", () => {
+    const installed = ["qwen2.5:7b", "qwen2.5:3b", "llama3.1:latest"];
+    assert.equal(matchLocalModel("qwen2.5:3b", installed), "qwen2.5:3b");
+    assert.equal(matchLocalModel("Qwen 2.5:7b", installed), "qwen2.5:7b");
+    assert.equal(matchLocalModel("llama3.1", installed), "llama3.1:latest");
+    assert.equal(matchLocalModel("mistral", installed), null);
+    assert.equal(matchLocalModel("  ", installed), null);
+  });
+
+  it("accepts a typed Ollama address and rejects junk", () => {
+    assert.equal(normalizeOllamaAddress("192.168.1.20:11434"), "http://192.168.1.20:11434/v1");
+    assert.equal(normalizeOllamaAddress("http://localhost:11434/"), "http://localhost:11434/v1");
+    assert.equal(normalizeOllamaAddress("http://user:pw@host:11434"), null);
+    assert.equal(normalizeOllamaAddress("not a url at all"), null);
+    assert.equal(normalizeOllamaAddress(""), null);
+  });
+
+  it("the dashboard lets people type the model, and save anyway when Ollama is closed", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const routes = await readFile("src/dashboard/api/quick-setup.ts", "utf8");
+    assert.match(routes, /const force\s+= req\.body\?\.force === true;/);
+    // "Qwen 2.5:7b" is tidied before it is checked, not rejected for its space
+    assert.match(routes, /const typed\s+= String\(req\.body\?\.model \?\? ""\)\.replace\(\/\\s\+\/g, ""\)\.toLowerCase\(\);/);
+    assert.match(routes, /matchLocalModel\(typed, local\.models\)/);
+    const app = await readFile("src/dashboard/public/app.js", "utf8");
+    assert.match(app, /Already installed\? Type the model name yourself/);
+    assert.match(app, /Save anyway — I’ll open Ollama later/);
+    // Quick Setup uses the same box as the AI model page
+    assert.match(app, /async function qsCheckLocalAi\(\) \{\s*await renderLocalAiCard\(qsEl\('qsLocalAiBody'\)/);
+  });
+
+  it("every Local AI box carries the 'Ollama won't start?' help, matching the README guide", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const app = await readFile("src/dashboard/public/app.js", "utf8");
+    assert.match(app, /Ollama installed but won't start\? Step-by-step help/);
+    assert.match(app, /\$\{localAiHelpHtml\(\)\}/);
+    for (const c of ["ollama serve", "ollama list", "echo %OLLAMA_HOST%", "Startup apps"]) assert.ok(app.includes(c), c);
+    assert.match(app, /github\.com\/geechun80\/vouza-admin-agent#local-ai-ollama/);
+    const readme = await readFile("README.md", "utf8");
+    assert.match(readme, /<a id="local-ai-ollama"><\/a>\s*### 💻 Local AI \(Ollama\) won't start/);
+    for (const c of ["ollama serve", "ollama list", "%OLLAMA_HOST%", "Startup apps", "qwen2.5:3b"]) assert.ok(readme.includes(c), c);
+    // Docker reaches Ollama on the host without opening it to the network
+    const compose = await readFile("docker-compose.yml", "utf8");
+    assert.match(compose, /"host\.docker\.internal:host-gateway"/);
+    assert.doesNotMatch(readme, /set `OLLAMA_HOST=0\.0\.0\.0`/);
   });
 });
 

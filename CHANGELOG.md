@@ -8,6 +8,19 @@ the full history.
 
 ---
 
+## 2.3.1 — 2026-10-03
+
+**Local AI that's already installed is never a dead end**
+
+- 💻 When Ollama can't be found, the Local AI box now says **why** (not running, too slow to answer, wrong address) instead of just "not running"
+- ⌨️ **Type the model name yourself** ("Qwen 2.5:3b" finds `qwen2.5:3b`), plus Ollama's address if it runs on another computer
+- 💾 **Save anyway** when Ollama is closed — setup carries on, and the assistant answers once Ollama is open
+- 🔎 Looks for Ollama under both of this computer's names, and on the host computer when the agent runs in Docker
+- 🛟 **"Ollama installed but won't start?"** step-by-step help (with Copy buttons) in every Local AI box, and the same guide in the README
+- One Local AI box everywhere: Quick Setup, 🤖 AI model, and full setup
+
+---
+
 ## 2.3.0 — 2026-10-02
 
 **A simpler dashboard, Local AI from the menu, and a security pass**

@@ -6,7 +6,7 @@
 
 Reads and answers email · finds your documents · checks your calendar · works from WhatsApp or Telegram
 
-**Latest version: 2.3.0** · [What's new](CHANGELOG.md)
+**Latest version: 2.3.1** · [What's new](CHANGELOG.md)
 
 [![Tests](https://img.shields.io/badge/tests-678%2F678-brightgreen)](#)
 [![Node](https://img.shields.io/badge/node-20.19%2B-blue)](https://nodejs.org)
@@ -139,7 +139,7 @@ You only need **one**. Paste it into Quick Setup (or the Advanced wizard) — no
 - **Or type any model ID** — for a model released this morning.
 The lists are fetched only when you press the button.
 
-**No key at all — local AI.** Install [Ollama](https://ollama.com/download) (free), run `ollama pull qwen2.5:7b` once, then in Quick Setup tap **💻 Or use a local AI on this computer**. Your conversations are answered on your own computer and never go to an AI company. It's slower than a cloud AI and needs a reasonably recent computer (8 GB+ memory); pick a model that supports tools (qwen2.5, llama3.1) so it can read your email and files. A local-AI setup never falls back to a cloud provider, even if Ollama stops — it tells you instead. Ollama on another address: set `OLLAMA_BASE_URL`.
+**No key at all — local AI.** Install [Ollama](https://ollama.com/download) (free), run `ollama pull qwen2.5:7b` once, then in Quick Setup tap **💻 Or use a local AI on this computer**. Your conversations are answered on your own computer and never go to an AI company. It's slower than a cloud AI and needs a reasonably recent computer (8 GB+ memory); pick a model that supports tools (qwen2.5, llama3.1) so it can read your email and files. A local-AI setup never falls back to a cloud provider, even if Ollama stops — it tells you instead. Models already installed but not found? Type the model name yourself in the Local AI box (and Ollama's address, if it runs on another computer), and see **[Local AI (Ollama) won't start](#local-ai-ollama)**. You can switch any time under **🤖 AI model** in the dashboard menu.
 
 ---
 
@@ -346,6 +346,30 @@ Script installs PM2, builds, starts, persists.
 | Something looks old, or a feature in this page is missing | You're on an old version — see [Update](#-update) |
 | `git pull` fails ("divergent" / "unrelated histories") | Your copy is from before 2 Oct 2026 — run `update.bat`, or see [Update](#-update) |
 | Black window shows `Node.js ... is too old` | Install the **LTS** version from [nodejs.org](https://nodejs.org), then start again |
+| Local AI: "Ollama isn't running" although it's installed | See [Local AI (Ollama) won't start](#local-ai-ollama) below |
+
+<a id="local-ai-ollama"></a>
+### 💻 Local AI (Ollama) won't start
+
+The models are downloaded, but the **Ollama program** must also be running. The dashboard has the same steps under **"Ollama won't start? Step-by-step help"** in the Local AI box.
+
+**Windows**
+
+1. **Is it running?** Open <http://127.0.0.1:11434> in your browser. *"Ollama is running"* → it's fine: tap **Check again** in the Admin Agent.
+2. **Start it:** press the Windows key, type **Ollama**, open it. A llama icon appears near the clock (maybe under the **^** arrow). Wait 10 seconds, then step 1 again.
+3. **Restart it:** right-click the llama icon → **Quit Ollama**, then open it again — or restart the computer.
+4. **See why it fails:** open **Command Prompt** (Windows key → `cmd`) and run `ollama serve`, keeping the window open.
+   - *"Only one usage of each socket address"* → it's already running, or another program uses its address (step 6).
+   - *"'ollama' is not recognized"* → reinstall from [ollama.com/download](https://ollama.com/download) and restart the PC.
+5. **Are the models there?** In a new Command Prompt: `ollama list`, then test one with `ollama run qwen2.5:3b "Say hello"`. If it answers, the Admin Agent will find it.
+6. **Something else on its address?** `netstat -ano | findstr :11434` — the last number is the program's ID; look it up in **Task Manager → Details**.
+7. **Different address?** `echo %OLLAMA_HOST%` — if it prints an address (not `%OLLAMA_HOST%`), either remove that setting (Windows key → *Edit the system environment variables* → Environment Variables) or type the address in the Admin Agent's **Ollama address** box.
+8. **Start with Windows:** **Task Manager → Startup apps → Ollama → Enabled** — otherwise open Ollama yourself after every restart.
+9. **Slow, or "took too long to answer"?** `qwen2.5:7b` needs about 8 GB of free memory — on a slower laptop use **`qwen2.5:3b`**. The first answer after starting is slow while the model loads.
+
+**Mac:** open **Ollama** from Applications (llama icon in the menu bar). The same checks work in Terminal (`ollama serve`, `ollama list`, <http://127.0.0.1:11434>). Start it automatically: **System Settings → General → Login Items → add Ollama**.
+
+**Docker:** the Admin Agent also looks for Ollama on the host computer (`host.docker.internal:11434`). With Docker Desktop (Windows / Mac) that works as installed. On Linux, let Ollama listen on Docker's bridge address — set `OLLAMA_HOST=172.17.0.1` for Ollama and restart it (not `0.0.0.0`, which would open Ollama to your whole network).
 
 <details>
 <summary><b>More PM2 troubleshooting</b></summary>

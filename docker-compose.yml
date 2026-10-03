@@ -36,6 +36,10 @@ services:
       # Persists config, conversations, memories, WhatsApp auth, logs.
       # Bind mount (./data) so you can also inspect/back up from host.
       - ./data:/app/data
+    extra_hosts:
+      # Local AI: lets the agent reach Ollama on this computer as
+      # host.docker.internal (built into Docker Desktop; needed on Linux).
+      - "host.docker.internal:host-gateway"
     environment:
       # Required: operator-supplied AI key (Anthropic/OpenAI/OpenRouter/etc.)
       # When set, customers can chat with the Guide Bot before adding their own key.

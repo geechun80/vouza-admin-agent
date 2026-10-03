@@ -2382,3 +2382,31 @@
       background: var(--bg-glass-card); color: var(--text); font: inherit; font-size: 14px;
     }
     .pw-dialog-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+
+    /* Local AI box (Quick Setup, AI model page, full setup) */
+    .local-ai label { display: block; font-size: 12.5px; font-weight: 600; color: var(--text); margin: 12px 0 6px; }
+    .local-ai label .page-hint { font-weight: 400; margin: 0; display: inline; }
+    .local-ai input, .local-ai select {
+      width: 100%; flex: 1; min-width: 180px; padding: 9px 12px; border-radius: 9px;
+      border: 1px solid var(--border); background: var(--bg-glass-card); color: var(--text);
+      font: inherit; font-size: 13.5px;
+    }
+    .local-ai details { margin-top: 12px; }
+    .local-ai summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--brand-light); }
+    html[data-theme="light"] .local-ai summary { color: var(--brand); }
+    .local-ai .page-msg .btn { font-size: 12.5px; }
+
+    /* "Ollama won't start?" help inside the Local AI box */
+    .local-help .local-steps { margin-top: 8px; }
+    .local-help .local-steps li { margin-bottom: 6px; }
+    .local-help .local-steps ul { margin: 4px 0 0 16px; padding: 0; list-style: disc; }
+    .local-help code {
+      background: var(--bg-glass-hover); border: 1px solid var(--border);
+      border-radius: 5px; padding: 1px 6px; font-size: 12px; color: var(--text);
+    }
+    .copy-btn {
+      border: 1px solid var(--border); background: var(--bg-glass-card); color: var(--text-dim);
+      border-radius: 6px; padding: 1px 8px; font: inherit; font-size: 11px; cursor: pointer;
+      vertical-align: middle;
+    }
+    .copy-btn:hover { border-color: var(--brand); color: var(--text); }
