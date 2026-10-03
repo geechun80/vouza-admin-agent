@@ -2227,8 +2227,12 @@ function generateConvId() {
 let _inSettingsMode = false;
 
 // Switch dashboard out of "live" mode to allow reconfiguring
-function openSettings() {
+async function openSettings() {
   _inSettingsMode = true;
+  // Pre-fill from the CURRENT settings — the copy loaded with the page can be
+  // from before Quick Setup (it asked for an Anthropic key while the local
+  // AI was in use, and saving would have switched the AI away).
+  try { _savedConfig = await fetch('/api/config').then((r) => r.json()); } catch { /* keep */ }
   closePages();
   document.getElementById('mainApp').classList.remove('live-mode');
   // Ensure wizard forms are pre-filled from saved config
@@ -2338,10 +2342,13 @@ async function renderSetupStatusPanel() {
     !!creds.xaiApiKey || !!creds.deepseekApiKey || !!creds.moonshotApiKey ||
     !!creds.alibabaApiKey || !!creds.dashscopeApiKey;
   const hasOperatorKey = !!op.hasDefaultKey && op.defaultKeyStatus !== 'invalid';
+  const hasLocalAi     = cfg.agent?.provider === 'ollama' && !!cfg.agent?.model;
+  const grants = await fetch('/api/folder-grants').then((r) => r.ok ? r.json() : { grants: [] }).catch(() => ({ grants: [] }));
 
   const ITEMS = [
-    { id:'ai',          name:'AI Model',            icon:'🤖', test: () => hasAnyUserAiKey || hasOperatorKey, ask: 'I want to add or change my AI API key. Please walk me through it.' },
+    { id:'ai',          name: hasLocalAi ? `AI Model (on this computer)` : 'AI Model', icon:'🤖', test: () => hasLocalAi || hasAnyUserAiKey || hasOperatorKey, ask: '' },
     { id:'email',       name:'Email',               icon:'📧', test: () => cfg.channels?.email?.enabled,    ask: 'I want to connect my email. Walk me through it step by step.' },
+    { id:'folders',     name:'Folders',             icon:'📂', test: () => (grants.grants || []).length > 0, ask: '' },
     { id:'telegram',    name:'Telegram',            icon:'💬', test: () => cfg.channels?.telegram?.enabled, ask: 'Help me set up Telegram so I can chat with the AI from my phone.' },
     { id:'whatsapp',    name:'WhatsApp',            icon:'📱', test: () => cfg.channels?.whatsapp?.enabled, ask: 'Help me connect WhatsApp. I want to scan the QR code.' },
     { id:'calendar',    name:'Calendar',            icon:'📅', test: () => cfg.tools?.calendar?.enabled,    ask: 'Help me connect Google Calendar so the AI can schedule meetings.' },
@@ -2406,16 +2413,19 @@ async function renderSetupStatusPanel() {
     </div>
     <div class="setup-status-items">
       ${results.map((r) => `
-        <div class="setup-status-item ${r.configured?'connected':'missing'}" data-channel-id="${r.id}"
-             onclick="${r.configured?`onSetupItemClick('${r.id}', true)`:`onSetupItemClick('${r.id}', false, ${JSON.stringify(r.ask).replace(/"/g, '&quot;')})`}">
+        <div class="setup-status-item ${r.configured?'connected':'missing'}" data-channel-id="${r.id}">
           ${r.dotClass ? `<span class="live-dot ${r.dotClass}" title="${escHtml(r.tooltip)}" aria-label="${escHtml(r.tooltip)}"></span>` : ''}
           <span class="icon">${r.icon}</span>
-          <span class="name">${r.name}</span>
-          <span class="action">${r.action}</span>
+          <span class="name">${escHtml(r.name)}</span>
+          <span class="setup-status-actions">${r.configured
+            ? `<button type="button" class="mini-btn" data-id="${r.id}" onclick="onSetupItemClick(this.dataset.id, true)">${r.action === '⚠ Fix' ? 'Fix' : 'Change'}</button>`
+              + (r.id === 'ai' ? '' : `<button type="button" class="mini-btn danger" data-id="${r.id}" data-name="${escHtml(r.name)}" onclick="disconnectConnection(this.dataset.id, this.dataset.name)">Disconnect</button>`)
+            : `<button type="button" class="mini-btn add" data-id="${r.id}" data-ask="${escHtml(r.ask || '')}" onclick="onSetupItemClick(this.dataset.id, false, this.dataset.ask)">+ Add</button>`
+          }</span>
         </div>
       `).join('')}
     </div>
-    <button class="setup-status-add-btn" onclick="openSettings()">⚙️ Manage all integrations</button>
+    <button class="link-btn setup-status-advanced" onclick="openSettings()">Advanced setup (for technical users) →</button>
   `;
 }
 
@@ -2439,13 +2449,25 @@ function startSetupStatusAutoRefresh() {
  *   bot walks the user through setup conversationally
  */
 function onSetupItemClick(itemId, connected, askPrompt) {
+  // The simple screens for these — never the old 4-step wizard.
+  if (itemId === 'ai')       { if (isLiveMode()) openPage('ai'); else openSettings(); return; }
+  if (itemId === 'email')    { openQuickSetupStep(2); return; }
+  if (itemId === 'folders')  { openQuickSetupStep(3); return; }
+  if (itemId === 'whatsapp' || itemId === 'telegram') {
+    if (isLiveMode() && _currentPage === 'connections') {
+      document.getElementById('phoneCard')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else if (!connected) {
+      openQuickSetupStep(4, itemId === 'telegram' ? { waMode: 'telegram' } : {});
+    } else {
+      openPage('connections');
+    }
+    return;
+  }
   if (connected) {
-    // Already connected — open settings so user can modify if they want
+    // Calendar / spreadsheets / voice: the technical setup for now (2.4.0 brings simple screens)
     openSettings();
     return;
   }
-  // The AI has its own page (online key or local AI on this computer)
-  if (itemId === 'ai' && isLiveMode()) { openPage('ai'); return; }
   if (askPrompt) {
     // Send the request to the chat — the assistant walks the user through it.
     const input = document.getElementById('guideInput');
@@ -2795,6 +2817,13 @@ async function callLiveAgent(text, image, textFile) {
     const keepTypingLast = () => { if (typingEl && box) box.appendChild(typingEl); };
     let   fullText  = '';
     let   toolCards = '';
+    // Never an empty grey bubble while the AI thinks (a local AI can take minutes).
+    if (bubble) bubble.innerHTML = '<span class="thinking-note">⏳ Thinking…</span>';
+    const slowNote = setTimeout(() => {
+      if (bubble && !fullText && !toolCards) {
+        bubble.innerHTML = `<span class="thinking-note">⏳ Still working…${window._aiIsLocal ? ' The AI on this computer can take a minute or two.' : ''}</span>`;
+      }
+    }, 15_000);
 
     // Read SSE stream
     const reader  = resp.body.getReader();
@@ -2843,11 +2872,13 @@ async function callLiveAgent(text, image, textFile) {
 
           case 'turn_complete':
           case 'done':
-            // If the bot bubble ended up with no content (no text, no tool cards),
-            // remove it entirely so we don't leave a phantom empty bubble that
-            // creates the huge vertical gap a beta tester saw.
+            clearTimeout(slowNote);
+            // No content at all (small local models sometimes answer nothing):
+            // say so, instead of leaving a blank bubble or nothing.
             if (!fullText && !toolCards) {
-              if (botEl && botEl.parentNode) botEl.parentNode.removeChild(botEl);
+              bubble.innerHTML = renderMd(window._aiIsLocal
+                ? "🤔 I couldn't come up with an answer to that. Try asking in other words — or pick a bigger AI model under **🤖 AI model**."
+                : "🤔 I couldn't come up with an answer to that. Try asking in other words.");
             } else {
               // Remove blinking cursor
               bubble.innerHTML = toolCards + (fullText ? renderMd(fullText) : '(Done)');
@@ -2859,6 +2890,7 @@ async function callLiveAgent(text, image, textFile) {
             break;
 
           case 'error':
+            clearTimeout(slowNote);
             bubble.innerHTML = toolCards + `<span style="color:var(--error)">⚠️ ${escHtml(event.error)}</span>`;
             keepTypingLast();
             break;
@@ -2879,6 +2911,7 @@ async function callLiveAgent(text, image, textFile) {
         }
       }
     }
+    clearTimeout(slowNote);
 
   } catch (err) {
     typingEl.classList.remove('visible');
@@ -3646,18 +3679,22 @@ async function toggleSetupPanel() {
 async function renderSetupPanel() {
   const el = document.getElementById('setupPanelContent');
   if (!el) return;
-  // Pull integration snapshot + detailed health in parallel
-  const [snapR, healthR] = await Promise.allSettled([
+  // Pull integration snapshot + detailed health + setup state in parallel
+  const [snapR, healthR, stateR] = await Promise.allSettled([
     fetch('/api/integrations/snapshot').then((r) => r.ok ? r.json() : null).catch(() => null),
     fetch('/api/health/detailed').then((r) => r.ok ? r.json() : null).catch(() => null),
+    qsApi('/api/quick-setup/state').catch(() => null),
   ]);
   const snap = snapR.status === 'fulfilled' ? snapR.value : null;
   const detailed = healthR.status === 'fulfilled' ? healthR.value : null;
+  const setupState = stateR.status === 'fulfilled' ? stateR.value : null;
   const snapshot = snap?.snapshot || {};
   const detailedById = {};
   for (const row of (detailed?.integrations || [])) detailedById[row.id] = row;
 
-  const cards = SETUP_INTEGRATIONS.map((cfg) => {
+  // WhatsApp + Telegram have their own simple card (phoneCardHTML) — the
+  // generic technical cards below are for the Google integrations.
+  const cards = SETUP_INTEGRATIONS.filter((c) => c.id !== 'whatsapp' && c.id !== 'telegram').map((cfg) => {
     const live = snapshot[cfg.id]?.status?.status;
     const det  = detailedById[cfg.id];
     let badge = 'not_configured';
@@ -3687,8 +3724,10 @@ async function renderSetupPanel() {
       </div>
     `;
   }).join('');
-  el.innerHTML = `<div class="setup-card-grid">${cards}</div>` + folderAccessCardHTML();
-  refreshFolderGrants();
+  el.innerHTML = phoneCardHTML(setupState)
+    + `<h3 class="page-section-title">Google (for technical users)</h3>`
+    + `<div class="setup-card-grid">${cards}</div>` + folderAccessCardHTML();
+  await refreshFolderGrants();
   loadFolderSuggestions();
 }
 
@@ -3762,7 +3801,9 @@ async function loadFolderSuggestions() {
     const r = await fetch('/api/folder-grants/suggestions');
     if (!r.ok) return;
     const data = await r.json();
-    window._folderSuggestions = data.suggestions || [];
+    // Only folders that aren't shared yet.
+    const shared = (_folderGrants || []).map((g) => String(g.path).toLowerCase());
+    window._folderSuggestions = (data.suggestions || []).filter((s) => !shared.includes(String(s.path).toLowerCase()));
     box.innerHTML = window._folderSuggestions.map((s, i) =>
       `<button class="btn" style="min-width:0;padding:5px 12px;font-size:12px" onclick="quickFillFolder(${i})">+ ${escHtml(s.label)}</button>`
     ).join('');
@@ -5571,7 +5612,9 @@ async function checkChangelog() {
       return;
     }
 
-    showWhatsNewModal(version, changelog || '');
+    // Nothing to tell (no changelog file) → no empty "What's new" box.
+    if (!String(changelog || '').trim()) { localStorage.setItem(SEEN_VERSION_KEY, version); return; }
+    showWhatsNewModal(version, changelog);
   } catch { /* network fail — silent */ }
 }
 
@@ -5585,6 +5628,8 @@ function showWhatsNewModal(version, changelog) {
   } else if (headings.length === 1) {
     body = changelog.slice(headings[0].index).trim();
   }
+  // "---" divider lines between entries are not content.
+  body = body.replace(/^\s*-{3,}\s*$/gm, '').trim();
 
   // Very lightweight markdown → HTML for the changelog body
   const html = body
@@ -5654,6 +5699,8 @@ const qs = {
   tgPoll: null,       // Telegram "linked yet?" poll timer
   phoneStarting: false,
   phoneLinked: false,
+  waMode: null,       // "assistant" (own number) | "personal" (my WhatsApp)
+  single: null,       // opened from the dashboard for just this step
 };
 const QS_STEPS = 5;
 
@@ -5707,13 +5754,53 @@ function qsFirstIncomplete() {
   return 5;
 }
 
+/**
+ * Open ONE Quick Setup screen from the dashboard (Connections → "+ Add"):
+ * the same simple screens as first-time setup, then straight back to the
+ * dashboard — never into the old 4-step wizard.
+ * opts.waMode: open the phone step on one WhatsApp way directly.
+ */
+async function openQuickSetupStep(n, opts = {}) {
+  qs.single = n;
+  qs.waMode = opts.waMode || null;
+  qs.phoneLinked = false;
+  qsEl('mainApp').style.display = 'none';
+  qsEl('welcomeScreen').style.display = 'none';
+  qsEl('quickSetup').style.display = 'flex';
+  qsEl('quickSetup').classList.add('qs-single');
+  try { qs.state = await qsApi('/api/quick-setup/state'); } catch { qs.state = null; }
+  const s = qs.state;
+  if (s?.profile?.userName) qsEl('qsName').value = s.profile.userName;
+  if (s?.email?.address)    qsEl('qsEmail').value = s.email.address;
+  qsRenderAi();
+  qsGo(n);
+}
+
+/** Leave a single Quick Setup screen and show the Connections page again. */
+async function qsReturnToDashboard() {
+  qsStopPhone();
+  qs.single = null;
+  qs.waMode = null;
+  qsEl('quickSetup').classList.remove('qs-single');
+  qsEl('quickSetup').style.display = 'none';
+  qsEl('mainApp').style.display = 'block';
+  try { _savedConfig = await fetch('/api/config').then((r) => r.json()); } catch { /* keep */ }
+  if (isLiveMode()) {
+    await openPage('connections');
+    refreshChatModelLine();
+  }
+}
+
 function qsGo(n) {
+  // Opened from the dashboard for one screen: moving on means "done".
+  if (qs.single && n !== qs.single) { qsReturnToDashboard(); return; }
   qs.step = n;
   document.querySelectorAll('#quickSetup .qs-step').forEach((el) => {
     el.hidden = Number(el.dataset.qsStep) !== n;
   });
   qsRenderDots();
-  qsEl('qsBack').hidden = n === 1;
+  qsEl('qsBack').hidden = n === 1 && !qs.single;
+  qsEl('qsBack').textContent = qs.single ? '← Back to the dashboard' : '← Back';
   if (n !== 4) qsStopPhone();
   if (n === 2 && qsEl('qsEmail').value) qsDetectEmail();
   if (n === 3) qsRenderFolders();
@@ -5960,12 +6047,16 @@ async function qsSubmitFolders(btn) {
 async function qsStartPhone() {
   const s = qs.state;
   if (qs.phoneLinked) return;
-  if (s?.phone?.whatsapp?.connected) { qsPhoneLinked('whatsapp', s.phone.whatsapp.owner); return; }
-  if (s?.phone?.telegram?.linked)    { qsPhoneLinked('telegram'); return; }
+  // Opened from the dashboard for one way (qs.waMode) → go straight there.
+  if (!qs.waMode) {
+    if (s?.phone?.whatsapp?.connected) { qsPhoneLinked('whatsapp', s.phone.whatsapp.owner); return; }
+    if (s?.phone?.telegram?.linked)    { qsPhoneLinked('telegram'); return; }
+  }
   if (qs.phoneStarting) return;
   qs.phoneStarting = true;
   qsEl('qsWa').hidden = true;
   qsEl('qsTg').hidden = true;
+  qsEl('qsPhoneChoice').hidden = true;
   qsEl('qsPhoneSub').textContent = 'Starting your assistant… this takes a few seconds.';
   qsMsg(4, '', '');
   let r;
@@ -5977,14 +6068,70 @@ async function qsStartPhone() {
     return;
   }
   if (qs.state) qs.state.agentRunning = true;
-  qsShowWhatsApp();
+  if (qs.waMode === 'telegram') qsShowTelegram();   // opened from the dashboard for one way
+  else if (qs.waMode) qsChooseWa(qs.waMode);
+  else qsShowPhoneChoice();
 }
 
-function qsShowWhatsApp() {
+// How will you talk to your assistant? Nothing is linked until you choose.
+function qsShowPhoneChoice() {
+  qsCloseQrStream();
   qsStopTelegramPoll();
+  qsEl('qsWa').hidden = true;
+  qsEl('qsTg').hidden = true;
+  qsEl('qsPhoneChoice').hidden = false;
+  qsEl('qsPhoneSub').textContent = 'How do you want to talk to your assistant from your phone?';
+  qsMsg(4, '', '');
+}
+
+// mode "assistant": the assistant gets its own WhatsApp number (like Telegram).
+// mode "personal":  the person's own WhatsApp, start-word messages only (opt-in).
+function qsChooseWa(mode) {
+  qs.waMode = mode;
+  qsStopTelegramPoll();
+  qsEl('qsPhoneChoice').hidden = true;
   qsEl('qsTg').hidden = true;
   qsEl('qsWa').hidden = false;
-  qsEl('qsPhoneSub').textContent = 'Scan this code with WhatsApp to link your phone.';
+  qsEl('qsWaFix').hidden = true;
+  qsEl('qsWaAssistant').hidden = mode !== 'assistant';
+  qsEl('qsWaPersonal').hidden = mode !== 'personal';
+  qsMsg(4, '', '');
+  const wa = qs.state?.phone?.whatsapp || {};
+  if (mode === 'assistant') {
+    qsEl('qsPhoneSub').textContent = 'Give your assistant its own WhatsApp number.';
+    if (!qsEl('qsOwnerNumber').value) qsEl('qsOwnerNumber').value = wa.ownerNumber || qs.state?.profile?.phone || '';
+    qsEl('qsOwnerNext').hidden = false;
+    qsEl('qsWaAssistantSteps').hidden = true;
+    qsEl('qsQr').hidden = true;
+    qsCloseQrStream();
+    qsEl('qsOwnerNumber').focus();
+  } else {
+    qsEl('qsPhoneSub').textContent = 'Link the assistant to your own WhatsApp.';
+    if (!qsEl('qsWakeWord').value) qsEl('qsWakeWord').value = wa.wakeWord || 'Vee';
+    qsEl('qsWakeExample').textContent = qsEl('qsWakeWord').value.trim() || 'Vee';
+    qsEl('qsQr').hidden = false;
+    qsOpenQrStream();
+  }
+}
+
+/** Assistant mode: check the person's own number, then show the code. */
+function qsOwnerNumberNext() {
+  const raw = qsEl('qsOwnerNumber').value.trim();
+  const digits = raw.replace(/[^\d]/g, '');
+  if (!raw.startsWith('+') && !raw.startsWith('00')) {
+    qsMsg(4, 'Type your number with the country code at the front — for example +65 9123 4567.', 'error');
+    qsEl('qsOwnerNumber').focus();
+    return;
+  }
+  if (digits.length < 8) {
+    qsMsg(4, "That doesn't look like a full phone number. Example: +65 9123 4567.", 'error');
+    qsEl('qsOwnerNumber').focus();
+    return;
+  }
+  qsMsg(4, '', '');
+  qsEl('qsOwnerNext').hidden = true;
+  qsEl('qsWaAssistantSteps').hidden = false;
+  qsEl('qsQr').hidden = false;
   qsOpenQrStream();
 }
 
@@ -6003,7 +6150,7 @@ function qsOpenQrStream() {
     try {
       const d = JSON.parse(ev.data);
       if (d.status === 'connected') qsOnWhatsAppConnected();
-      if (d.status === 'logged_out') qsMsg(4, 'WhatsApp signed out. Tap “Use WhatsApp instead” to get a new code.', 'error');
+      if (d.status === 'logged_out') qsMsg(4, 'WhatsApp signed out. Tap “← Other ways to connect” and choose WhatsApp again for a new code.', 'error');
     } catch { /* ignore malformed */ }
   });
   es.addEventListener('connected', () => qsOnWhatsAppConnected());
@@ -6025,24 +6172,81 @@ function qsCloseQrStream() {
 async function qsOnWhatsAppConnected() {
   qsCloseQrStream();
   if (qs.phoneLinked) return;
-  qs.phoneLinked = true;
-  let r = {};
-  try { r = await qsApi('/api/quick-setup/whatsapp/linked', {}); } catch { /* still linked */ }
-  qsPhoneLinked('whatsapp', r.owner);
+  await qsSaveWhatsAppLink(qs.waMode || 'assistant');
 }
 
-function qsPhoneLinked(kind, owner) {
+/** Tell the server how this WhatsApp is used (and say hello). Handles a mix-up of phones. */
+async function qsSaveWhatsAppLink(mode) {
+  qs.waMode = mode;
+  const body = mode === 'assistant'
+    ? { mode, ownerNumber: qsEl('qsOwnerNumber').value.trim() }
+    : { mode, wakeWord: qsEl('qsWakeWord').value.trim() };
+  let r = {};
+  try { r = await qsApi('/api/quick-setup/whatsapp/linked', body); } catch { r = { ok: false, error: "Couldn't save that — try again." }; }
+  if (!r.ok) {
+    qsMsg(4, r.error, 'error');
+    const fix = qsEl('qsWaFix');
+    if (r.sameNumber) {
+      // Scanned with the person's own WhatsApp while setting up the assistant's number.
+      fix.innerHTML = `
+        <button class="qs-btn qs-btn-small" type="button" onclick="qsRelinkWhatsApp('assistant')">Unlink it and scan with the assistant's number</button>
+        <button class="qs-link" type="button" onclick="qsUseOwnWhatsAppAfterAll()">Use my own WhatsApp after all</button>`;
+      fix.hidden = false;
+    } else if (r.field === 'ownerNumber') {
+      qsEl('qsOwnerNext').hidden = true;
+      fix.innerHTML = '<button class="qs-btn qs-btn-small" type="button" onclick="qsSaveWhatsAppLink(\'assistant\')">Save my number</button>';
+      fix.hidden = false;
+      qsEl('qsOwnerNumber').focus();
+    }
+    return;
+  }
+  if (qs.state?.phone?.whatsapp) Object.assign(qs.state.phone.whatsapp, { connected: true, mode: r.mode, ownerNumber: r.ownerNumber, wakeWord: r.wakeWord });
+  qsPhoneLinked('whatsapp', r.owner, r);
+}
+
+/** The person's own WhatsApp got linked by mistake — unlink it, then show a fresh code. */
+async function qsRelinkWhatsApp(mode) {
+  qsMsg(4, 'Unlinking…', 'info');
+  qsEl('qsWaFix').hidden = true;
+  try { await fetch('/api/whatsapp/reset', { method: 'POST' }); } catch { /* fresh code anyway */ }
+  if (qs.state?.phone?.whatsapp) qs.state.phone.whatsapp.connected = false;
+  qs.phoneLinked = false;
+  qsMsg(4, 'Unlinked. Now scan with the phone that has your assistant\'s number.', 'ok');
+  qsChooseWa(mode);
+  qsOwnerNumberNext();
+}
+
+function qsUseOwnWhatsAppAfterAll() {
+  qsEl('qsWaFix').hidden = true;
+  qsEl('qsWaAssistant').hidden = true;
+  qsEl('qsWaPersonal').hidden = false;
+  if (!qsEl('qsWakeWord').value) qsEl('qsWakeWord').value = qs.state?.phone?.whatsapp?.wakeWord || 'Vee';
+  qsEl('qsQr').hidden = true;
+  qsEl('qsWaFix').innerHTML = '<button class="qs-btn qs-btn-small" type="button" onclick="qsSaveWhatsAppLink(\'personal\')">Use my own WhatsApp with this start word</button>';
+  qsEl('qsWaFix').hidden = false;
+  qsMsg(4, '', '');
+}
+
+function qsPhoneLinked(kind, owner, wa) {
   qs.phoneLinked = true;
   qsCloseQrStream();
   qsStopTelegramPoll();
   qsEl('qsWa').hidden = true;
   qsEl('qsTg').hidden = true;
+  qsEl('qsPhoneChoice').hidden = true;
   qsEl('qsPhoneSub').textContent = '';
-  const who = owner ? `${owner.name ? `${owner.name} · ` : ''}${owner.phone}` : '';
+  const info = wa || qs.state?.phone?.whatsapp || {};
   const banner = qsEl('qsPhoneDone');
-  banner.innerHTML = kind === 'whatsapp'
-    ? `✓ WhatsApp linked${who ? ` to ${escHtml(who)}` : ''}<span>I sent you a message in “Message yourself”. Reply there anytime.</span>`
-    : `✓ Telegram linked<span>Message your bot anytime — it answers only you.</span>`;
+  if (kind !== 'whatsapp') {
+    banner.innerHTML = '✓ Telegram linked<span>Message your bot anytime — it answers only you.</span>';
+  } else if (info.mode === 'assistant') {
+    banner.innerHTML = `✓ Your assistant's WhatsApp is ready${owner?.phone ? ` (${escHtml(owner.phone)})` : ''}` +
+      `<span>I sent a hello to your WhatsApp${info.ownerNumber ? ` (${escHtml(info.ownerNumber)})` : ''}. Save the number as “My Assistant” and message it anytime — like Telegram.</span>`;
+  } else {
+    const word = info.wakeWord || 'Vee';
+    banner.innerHTML = `✓ Linked to your own WhatsApp${owner?.phone ? ` (${escHtml(owner.phone)})` : ''}` +
+      `<span>In “Message yourself”, start messages with “${escHtml(word)}” — e.g. “${escHtml(word)}, find my insurance policy”. Your other chats and notes stay private.</span>`;
+  }
   banner.hidden = false;
   qsEl('qsSkip4').hidden = true;
   qsEl('qsNext4').hidden = false;
@@ -6056,6 +6260,7 @@ function qsPhoneLinked(kind, owner) {
 function qsShowTelegram() {
   qsCloseQrStream();
   qsEl('qsWa').hidden = true;
+  qsEl('qsPhoneChoice').hidden = true;
   qsEl('qsTg').hidden = false;
   qsEl('qsPhoneSub').textContent = 'Connect a Telegram bot instead.';
   qsEl('qsTgToken').focus();
@@ -6104,11 +6309,14 @@ function qsRenderDone() {
   const n = s.folders.granted.length;
   const items = [
     [s.ai.configured, 'Your AI is connected', 'AI not connected — go back to step 1'],
-    [s.email.configured, `Email connected${s.email.address ? ` (${s.email.address})` : ''}`, 'Email not connected — you can add it later under Setup'],
+    [s.email.configured, `Email connected${s.email.address ? ` (${s.email.address})` : ''}`, 'Email not connected — you can add it later under 🔌 Connections'],
     [n > 0, `I can search ${n} folder${n === 1 ? '' : 's'}`, 'No folders shared — I can’t find your documents yet'],
     [s.phone.whatsapp.connected || s.phone.telegram.linked,
-      s.phone.whatsapp.connected ? 'WhatsApp linked' : 'Telegram linked',
-      'Phone not linked — you can link it later under Setup'],
+      s.phone.whatsapp.connected
+        ? (s.phone.whatsapp.mode === 'assistant' ? 'WhatsApp ready — your assistant has its own number'
+          : `WhatsApp linked — start messages with “${s.phone.whatsapp.wakeWord || 'Vee'}”`)
+        : 'Telegram linked',
+      'Phone not linked — you can link it later under 🔌 Connections'],
   ];
   qsEl('qsChecklist').innerHTML = items.map(([ok, yes, no]) =>
     `<li class="${ok ? '' : 'todo'}"><span class="ic">${ok ? '✅' : '⚪'}</span><span>${escHtml(ok ? yes : no)}</span></li>`
@@ -6119,6 +6327,9 @@ function qsRenderDone() {
 let qsPowerTimer = null;
 async function qsRenderPower(attempt = 0) {
   clearTimeout(qsPowerTimer);
+  if (attempt === 0) {
+    qsEl('qsPowerRows').innerHTML = '<div class="qs-power-row"><span>⏳</span><span>Checking this computer’s power settings…</span></div>';
+  }
   let p;
   try { p = await qsApi('/api/power'); } catch { qsEl('qsPowerRows').textContent = ''; return; }
   const rows = [];
@@ -6169,6 +6380,8 @@ async function qsFinish(btn) {
   }
   qsStopPhone();
   clearTimeout(qsPowerTimer);
+  // The settings loaded with the page are from before Quick Setup.
+  try { _savedConfig = await fetch('/api/config').then((r) => r.json()); } catch { /* keep */ }
   qsEl('quickSetup').style.display = 'none';
   qsEl('mainApp').style.display = 'block';
   init();
@@ -6286,6 +6499,7 @@ async function refreshChatModelLine() {
   let s = null;
   try { s = await qsApi('/api/quick-setup/state'); } catch { /* leave it empty */ }
   if (!s) { el.innerHTML = ''; return; }
+  window._aiIsLocal = !!s.ai?.local;
   const d = describeAi(s.ai);
   el.innerHTML = `<span>${d.icon} AI: ${escHtml(d.text)}</span> · <button type="button" class="link-btn" onclick="openPage('ai')">Change</button>`;
 }
@@ -6380,6 +6594,133 @@ async function aiUseOnline(btn) {
     btn.disabled = false;
   }
 }
+
+// ── 📱 Phone card on the Connections page (WhatsApp + Telegram) ──
+// WhatsApp works two ways (see src/whatsapp/selfChat.ts):
+//   assistant — the assistant has its own number; you message it like Telegram
+//   personal  — linked to your own WhatsApp; only "Message yourself" messages
+//               that start with the start word (opt-in)
+function phoneCardHTML(s) {
+  const wa = s?.phone?.whatsapp || {};
+  const tg = s?.phone?.telegram || {};
+  const offline = wa.enabled && !wa.connected
+    ? ' <span class="page-msg error" style="display:inline">— not connected right now</span>' : '';
+  let waBody;
+  if (!wa.enabled && !wa.connected) {
+    waBody = `
+      <p class="page-hint" style="margin-top:0">Not connected. Recommended: give your assistant its own WhatsApp number —
+        you message it from your own WhatsApp, like Telegram, and your WhatsApp is never linked.</p>
+      <div class="page-row">
+        <button type="button" class="btn btn-primary" onclick="openQuickSetupStep(4, { waMode: 'assistant' })">Give my assistant its own number</button>
+        <button type="button" class="btn" onclick="openQuickSetupStep(4, { waMode: 'personal' })">Use my own WhatsApp…</button>
+      </div>`;
+  } else if (wa.mode === 'assistant') {
+    waBody = `
+      <p style="margin:0">🤖 <strong>Your assistant has its own number</strong>${wa.owner?.phone ? ` (${escHtml(wa.owner.phone)})` : ''}${offline}</p>
+      <p class="page-hint">It answers only you, when you message it from your own WhatsApp. Your WhatsApp is not linked.</p>
+      <label for="waOwnerNumber">Your own WhatsApp number — the one you message it from</label>
+      <div class="page-row">
+        <input id="waOwnerNumber" type="tel" value="${escHtml(wa.ownerNumber || '')}" placeholder="+65 9123 4567" maxlength="24">
+        <button type="button" class="btn" onclick="saveWaSetting('ownerNumber', this)">Save</button>
+      </div>
+      <div class="page-msg" id="waSettingMsg" role="status"></div>
+      <div class="page-row" style="margin-top:12px">
+        <button type="button" class="btn" onclick="waSwitchMode('personal')">Use my own WhatsApp instead…</button>
+        <button type="button" class="btn" onclick="waUnlink()">Disconnect WhatsApp</button>
+      </div>`;
+  } else {
+    const word = wa.wakeWord || 'Vee';
+    waBody = `
+      <p style="margin:0">📱 <strong>Linked to your own WhatsApp</strong>${wa.owner?.phone ? ` (${escHtml(wa.owner.phone)})` : ''}${offline}</p>
+      <p class="page-hint">It only reads your “Message yourself” chat, and only messages that start with the word below.
+        Your other chats and your notes stay private, and it never answers other people.</p>
+      <label for="waWakeWord">Start word</label>
+      <div class="page-row">
+        <input id="waWakeWord" value="${escHtml(word)}" maxlength="30" placeholder="Vee">
+        <button type="button" class="btn" onclick="saveWaSetting('wakeWord', this)">Save</button>
+      </div>
+      <p class="page-hint" style="margin-top:6px">Example: “${escHtml(word)}, find my insurance policy”</p>
+      <div class="page-msg" id="waSettingMsg" role="status"></div>
+      <div class="page-row" style="margin-top:12px">
+        <button type="button" class="btn btn-primary" onclick="waSwitchMode('assistant')">Give my assistant its own number instead (recommended)</button>
+        <button type="button" class="btn" onclick="waUnlink()">Disconnect WhatsApp</button>
+      </div>`;
+  }
+  const tgBody = (tg.linked || tg.configured)
+    ? `<p style="margin:0">${tg.linked ? '✓ <strong>Connected</strong>' : '⏳ <strong>Waiting for you to tap START in Telegram</strong>'}${tg.botUsername ? ` — @${escHtml(tg.botUsername)}` : ''}.${tg.linked ? ' Message your bot anytime; it answers only you.' : ''}</p>
+       <div class="page-row" style="margin-top:12px">
+         ${tg.linked ? '' : `<button type="button" class="btn" onclick="openQuickSetupStep(4, { waMode: 'telegram' })">Finish connecting</button>`}
+         <button type="button" class="btn" onclick="disconnectConnection('telegram', 'Telegram')">Disconnect Telegram</button>
+       </div>`
+    : `<p class="page-hint" style="margin-top:0">Free, no second number: make your own private Telegram bot in a minute.</p>
+       <div class="page-row"><button type="button" class="btn" onclick="openQuickSetupStep(4, { waMode: 'telegram' })">Connect Telegram</button></div>`;
+  return `
+    <div class="page-card phone-card" id="phoneCard">
+      <h3>💬 WhatsApp</h3>
+      ${waBody}
+    </div>
+    <div class="page-card phone-card">
+      <h3>✈️ Telegram</h3>
+      ${tgBody}
+    </div>`;
+}
+
+async function saveWaSetting(field, btn) {
+  const input = document.getElementById(field === 'wakeWord' ? 'waWakeWord' : 'waOwnerNumber');
+  const msg = document.getElementById('waSettingMsg');
+  btn.disabled = true;
+  try {
+    const r = await qsApi('/api/quick-setup/whatsapp/settings', { [field]: input.value.trim() });
+    msg.className = `page-msg ${r.ok ? 'ok' : 'error'}`;
+    msg.textContent = r.ok
+      ? (field === 'wakeWord' ? `✓ Saved — start your messages with “${r.wakeWord}”.` : `✓ Saved — your assistant now answers ${r.ownerNumber}.`)
+      : r.error;
+    if (r.ok) input.value = field === 'wakeWord' ? r.wakeWord : r.ownerNumber;
+  } catch {
+    msg.className = 'page-msg error';
+    msg.textContent = "Couldn't save that — make sure the assistant window is still open.";
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/** Switch how WhatsApp is used: unlink the current account, then link again the new way. */
+async function waSwitchMode(mode) {
+  const text = mode === 'assistant'
+    ? 'This unlinks your own WhatsApp from the assistant (it disappears from Linked devices on your phone).\n\nThen you scan a code with the phone that has your assistant\'s own number. Continue?'
+    : 'This unlinks the assistant\'s own number.\n\nThen you scan a code with your own phone, and the assistant will only read “Message yourself” messages that start with its name. Continue?';
+  if (!window.confirm(text)) return;
+  try { await fetch('/api/whatsapp/reset', { method: 'POST' }); } catch { /* the code screen will retry */ }
+  openQuickSetupStep(4, { waMode: mode });
+}
+
+// What disconnecting each connection does, in plain words (shown before it happens).
+const DISCONNECT_TEXT = {
+  email:       'Your assistant stops reading and sending your email, and the saved email password is deleted from this computer.',
+  whatsapp:    'Your assistant stops answering on WhatsApp, and the link is removed from “Linked devices” on that phone.',
+  telegram:    'Your Telegram bot stops answering, and its saved token is deleted. To use it again you connect it again.',
+  folders:     'Your assistant can no longer find or send your documents. Your files themselves are not touched.',
+  calendar:    'Your assistant can no longer see or book your calendar, and its saved Google key is deleted.',
+  spreadsheet: 'Your assistant can no longer read or update your spreadsheets, and its saved Google key is deleted.',
+  voice:       'Voice notes are no longer turned into text, and the saved voice key is deleted.',
+};
+
+/** Disconnect one connection after a plain-words confirmation; then refresh the page. */
+async function disconnectConnection(id, name) {
+  const what = DISCONNECT_TEXT[id];
+  if (!what) return;
+  if (!window.confirm(`Disconnect ${name || id}?\n\n${what}`)) return;
+  try {
+    const r = await qsApi('/api/quick-setup/disconnect', { id });
+    toast(escHtml(r.ok ? `✓ ${name || id} disconnected` : (r.error || "Couldn't disconnect")), r.ok ? 'success' : 'error');
+  } catch {
+    toast("Couldn't disconnect — make sure the assistant window is still open.", 'error');
+  }
+  if (isLiveMode() && _currentPage === 'connections') openPage('connections');
+  else renderSetupStatusPanel().catch(() => {});
+}
+
+function waUnlink() { return disconnectConnection('whatsapp', 'WhatsApp'); }
 
 // ── "Ollama won't start?" help — inside every Local AI box ──
 // Same steps as README → "Local AI (Ollama) won't start". Commands get a

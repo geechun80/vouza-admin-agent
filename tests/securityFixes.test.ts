@@ -92,7 +92,8 @@ describe("1 · guests get no tools and none of the owner's memory", () => {
 
   it("every phone channel decides owner vs guest in code", async () => {
     const worker = await read("src/whatsapp/baileysWorker.ts");
-    assert.match(worker, /isOwner: decision\.isSelfChat === true/);
+    // owner = the linked account's self-chat, or (assistant mode) the owner's own number — decided in selfChat.ts
+    assert.match(worker, /isOwner: decision\.isOwner === true/);
     const baileys = await read("src/whatsapp/baileysManager.ts");
     assert.match(baileys, /isOwner = \(msg as \{ isOwner\?: unknown \}\)\.isOwner === true/);
     assert.match(baileys, /const registry = isOwner \? _registry : buildGuestRegistry\(\)/);

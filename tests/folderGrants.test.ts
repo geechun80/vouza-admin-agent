@@ -25,6 +25,7 @@ import {
   resolveAccess,
   checkBlockedRoot,
   workspaceDir,
+  isInsideAgentFolder,
 } from "../src/files/folderGrants.js";
 import { writeFileTool, deleteFileTool, readFileTool } from "../src/tools/fileManager.js";
 
@@ -103,13 +104,35 @@ test("blocked: AppData cannot be granted (including subfolders)", () => {
 });
 
 test("blocked: the agent's own project directory cannot be granted", () => {
-  assert.throws(() => addGrant(process.cwd(), "read"), /agent/i);
+  assert.throws(() => addGrant(process.cwd(), "read"), /part of the assistant itself/i);
   // ...nor anything inside it (would allow rewriting config/grants = self-escalation)
   assert.equal(checkBlockedRoot(join(process.cwd(), "data")).blocked, true);
 });
 
-test("blocked: any parent of the project directory cannot be granted", () => {
-  assert.throws(() => addGrant(dirname(process.cwd()), "read"), /agent/i);
+test("a folder that CONTAINS the agent (e.g. Downloads) can be shared — the agent's own folder stays off-limits", async () => {
+  clearGrants();
+  const parent = dirname(process.cwd());
+  assert.equal(checkBlockedRoot(parent).blocked, false);
+  addGrant(parent, "read");
+  try {
+    // Files next to the agent are readable…
+    assert.equal(resolveAccess(join(parent, "some-letter.pdf")).allowed, true);
+    // …its own settings, logins and code are not, even though the grant covers them
+    for (const p of ["data/config.json", "data/whatsapp-auth/creds.json", ".env", "src/index.ts"]) {
+      assert.equal(resolveAccess(join(process.cwd(), p)).allowed, false, p);
+    }
+    assert.equal(isInsideAgentFolder(join(process.cwd(), "data")), true);
+    // its workspace keeps full access
+    assert.equal(resolveAccess(join(workspaceDir(), "notes.txt")).allowed, true);
+    assert.equal(isInsideAgentFolder(join(workspaceDir(), "notes.txt")), false);
+    // and the file search never walks into it
+    const { searchFiles } = await import("../src/tools/documents.js");
+    const out = await searchFiles("package.json", [parent], false, { maxFilesScanned: 20_000, maxResults: 500, timeBudgetMs: 20_000 });
+    const leaked = out.results.filter((h) => isInsideAgentFolder(h.path));
+    assert.deepEqual(leaked.map((h) => h.path), [], "search walked into the agent's own folder");
+  } finally {
+    clearGrants();
+  }
 });
 
 test("blocked: the user profile root itself cannot be granted (subfolders are fine)", () => {

@@ -9,7 +9,8 @@
 // ────────────────────
 // Parent → Worker:
 //   { type: "start";         config: WorkerConfig }
-//   { type: "send_reply";    chatId: string; text: string }
+//   { type: "send_reply";    chatId: string; text: string; keepTyping?: boolean }
+//   { type: "configure";     settings: Partial<WorkerConfig> }   // mode / owner / start word / allowlist
 //   { type: "send_document"; reqId: string; chatId: string; filePath: string;
 //                            fileName: string; mimeType: string; caption?: string }
 //   { type: "stop" }
@@ -32,10 +33,23 @@ import makeWASocket, {
   type WASocket,
 } from "@whiskeysockets/baileys";
 import { Boom }     from "@hapi/boom";
-import { mkdir, readFile } from "fs/promises";
+import { mkdir, readFile, writeFile } from "fs/promises";
+import { existsSync } from "fs";
+import { dirname, join } from "path";
 import { transcribeAudioBuffer } from "../voice/transcriber.js";
 import type { WhisperConfig } from "../voice/transcriber.js";
-import { classifyIncoming, ownerIdsFromUser, SentIdSet } from "./selfChat.js";
+import {
+  classifyIncoming,
+  ownerIdsFromUser,
+  phoneToJid,
+  isLidJid,
+  isPhoneJid,
+  stripDevice,
+  SentIdSet,
+  type OwnerTarget,
+  type WhatsAppMode,
+} from "./selfChat.js";
+import { matchWakeWord } from "./wakeWord.js";
 import { useEncryptedFileAuthState } from "./encryptedAuthState.js";
 
 // ---------------------------------------------------------------------------
@@ -66,6 +80,14 @@ interface WorkerConfig {
    * massive privacy + reputation disaster.
    */
   allowedSenders?: string[];
+  /**
+   * "assistant": linked to the assistant's own number; the owner messages it
+   * from ownerNumber, like a Telegram bot. "personal": linked to the owner's
+   * own WhatsApp; only "Message yourself" messages starting with wakeWord.
+   */
+  mode?:        WhatsAppMode;
+  ownerNumber?: string;
+  wakeWord?:    string;
 }
 
 // ---------------------------------------------------------------------------
@@ -80,6 +102,88 @@ let _config:       WorkerConfig | null = null;
 // Ids of messages this worker sent. In the owner's self-chat our own replies
 // would otherwise look exactly like the owner typing (both are fromMe).
 const sentIds = new SentIdSet();
+
+// Who may talk to the agent — rebuilt by applySettings() at start and
+// whenever the dashboard changes the WhatsApp settings ("configure").
+let allowedJids = new Set<string>();
+let target: OwnerTarget = { mode: "personal" };
+
+function applySettings(cfg: WorkerConfig): void {
+  allowedJids = new Set(
+    (cfg.allowedSenders ?? []).map((s) => phoneToJid(s)).filter((j): j is string => !!j),
+  );
+  const mode: WhatsAppMode = cfg.mode === "assistant" ? "assistant" : "personal";
+  const ownerPn = mode === "assistant" ? phoneToJid(cfg.ownerNumber) : null;
+  target = { mode, ownerPn, ownerLid: null };
+  if (activeSock && _connected) void resolveOwnerLid(activeSock);
+}
+
+/**
+ * Assistant mode: ask WhatsApp's own mapping for the owner's LID, so a
+ * message that arrives addressed only by LID can still be recognised. Never
+ * derived from digits — no mapping means LID-only messages aren't matched.
+ */
+async function resolveOwnerLid(sock: WASocket): Promise<void> {
+  if (target.mode !== "assistant" || !target.ownerPn) return;
+  try {
+    const lid = await (sock as any).signalRepository?.lidMapping?.getLIDForPN?.(target.ownerPn);
+    if (typeof lid === "string" && isLidJid(lid)) target = { ...target, ownerLid: stripDevice(lid) };
+  } catch (err) {
+    log("info", `Owner LID lookup skipped: ${err}`);
+  }
+}
+
+/** A message addressed only by LID: fill in its real phone number from WhatsApp's mapping when known. */
+async function withPhoneNumber(sock: WASocket, key: any): Promise<any> {
+  const jid = key?.remoteJid;
+  if (!isLidJid(jid) || isPhoneJid(key?.remoteJidAlt)) return key;
+  try {
+    const pn = await (sock as any).signalRepository?.lidMapping?.getPNForLID?.(stripDevice(jid));
+    if (typeof pn === "string" && isPhoneJid(stripDevice(pn))) return { ...key, remoteJidAlt: stripDevice(pn) };
+  } catch { /* unresolved stays unresolved */ }
+  return key;
+}
+
+// ── "typing…" while the assistant works (Telegram shows the same) ──────────
+const typingTimers = new Map<string, { every: ReturnType<typeof setInterval>; stop: ReturnType<typeof setTimeout> }>();
+
+function startTyping(chatId: string): void {
+  stopTyping(chatId, false);
+  const ping = () => activeSock?.sendPresenceUpdate("composing", chatId).catch(() => {});
+  ping();
+  // WhatsApp clears "typing…" after ~25 s, so repeat; give up after 5 minutes.
+  const every = setInterval(ping, 10_000);
+  const stop = setTimeout(() => stopTyping(chatId), 5 * 60_000);
+  typingTimers.set(chatId, { every, stop });
+}
+
+function stopTyping(chatId: string, sendPaused = true): void {
+  const t = typingTimers.get(chatId);
+  if (t) { clearInterval(t.every); clearTimeout(t.stop); typingTimers.delete(chatId); }
+  if (sendPaused && t) activeSock?.sendPresenceUpdate("paused", chatId).catch(() => {});
+}
+
+// ── One-time tip about the start word (personal mode) ──────────────────────
+// Persisted next to the login folder so it is said once, not after every restart.
+function wakeTipFile(): string | null {
+  return _config?.authDir ? join(dirname(_config.authDir), "whatsapp-start-word-tip.json") : null;
+}
+
+async function maybeSendWakeTip(sock: WASocket, chatId: string, word: string): Promise<void> {
+  const file = wakeTipFile();
+  if (!file || existsSync(file)) return;
+  try {
+    await writeFile(file, JSON.stringify({ sentAt: new Date().toISOString() }), "utf-8");
+    await sendTracked(sock, chatId, {
+      text:
+        `💡 Your notes in this chat stay private: I only react to messages that start with “${word}”.\n` +
+        `For example: “${word}, find my insurance policy”.\n\n` +
+        "(I'll only say this once.)",
+    });
+  } catch (err) {
+    log("warn", `Start-word tip not sent: ${err}`);
+  }
+}
 
 /**
  * Every outgoing message goes through here. The id is generated and recorded
@@ -113,13 +217,25 @@ process.on("message", (msg: any) => {
   switch (msg.type) {
     case "start":
       _config = msg.config as WorkerConfig;
+      applySettings(_config);
       connect().catch((err) => {
         log("error", `connect() failed: ${err}`);
         process.exit(1);
       });
       break;
 
+    case "configure":
+      // Dashboard changed the WhatsApp settings — apply without reconnecting.
+      if (_config && msg.settings && typeof msg.settings === "object") {
+        _config = { ..._config, ...(msg.settings as Partial<WorkerConfig>) };
+        applySettings(_config);
+        log("info", `Settings updated (mode: ${target.mode})`);
+      }
+      break;
+
     case "send_reply":
+      // keepTyping: a "still working" note — the real answer is still coming.
+      if (!msg.keepTyping) stopTyping(msg.chatId as string);
       sendToChat(msg.chatId as string, msg.text as string).catch((err) => {
         log("warn", `send_reply failed for ${msg.chatId}: ${err}`);
       });
@@ -128,6 +244,7 @@ process.on("message", (msg: any) => {
     case "send_document":
       // The parent already checked the path against the workspace + folder
       // grants. The parent waits on send_result, so always answer.
+      stopTyping(msg.chatId as string);
       sendDocument(msg).then(
         () => ipc({ type: "send_result", reqId: msg.reqId, ok: true }),
         (err) => ipc({ type: "send_result", reqId: msg.reqId, ok: false, error: String(err?.message ?? err) }),
@@ -141,6 +258,19 @@ process.on("message", (msg: any) => {
       _connected = false;
       process.exit(0);
       break;
+
+    case "logout": {
+      // Unlink this device from the WhatsApp account, so it disappears from
+      // the phone's "Linked devices" — not just forget the login here.
+      _reconnecting = false;
+      const sock = activeSock;
+      const done = () => { activeSock = null; _connected = false; process.exit(0); };
+      if (!sock || !_connected) { sock?.end(undefined); done(); break; }
+      Promise.race([sock.logout(), new Promise((r) => setTimeout(r, 5_000))])
+        .catch((err) => log("warn", `logout failed: ${err}`))
+        .finally(done);
+      break;
+    }
   }
 });
 
@@ -194,6 +324,7 @@ async function connect(): Promise<void> {
       // scheduled messages at the owner ("message yourself" thread), and the
       // profile name so setup can greet the user without asking for it.
       ipc({ type: "status", status: "connected", ownerJid: getOwnerJid(), ownerName: sock.user?.name || undefined });
+      void resolveOwnerLid(sock);
     }
 
     if (connection === "close") {
@@ -303,21 +434,9 @@ async function connect(): Promise<void> {
     return raw.replace(/:\d+@/, "@");
   };
 
-  // ── Allowlist enforcement ────────────────────────────────────────────────
-  // SAFETY-CRITICAL: this is what stops the agent from auto-replying to
-  // every friend who texts the user. By default the allowlist is empty,
-  // and the ONLY sender automatically permitted is the owner themselves
-  // (the owner texting their own number, e.g. via "Message yourself" in WhatsApp).
-  //
-  // Normalize JIDs: accept "6591234567", "+6591234567", or full JIDs.
-  const normalizeJid = (s: string): string => {
-    const digitsOnly = s.replace(/[^\d]/g, "");
-    if (!digitsOnly) return s;
-    return `${digitsOnly}@s.whatsapp.net`;
-  };
-  const allowedJids = new Set<string>(
-    (_config?.allowedSenders ?? []).map(normalizeJid)
-  );
+  // ── Who may talk to the agent ────────────────────────────────────────────
+  // SAFETY-CRITICAL: the allowlist + owner target live in applySettings().
+  // By default nobody but the owner is served (see selfChat.ts).
 
   // ── Incoming messages ──────────────────────────────────────────────────────
   // 'notify' = delivered live. 'append' covers history sync and our own
@@ -328,30 +447,46 @@ async function connect(): Promise<void> {
 
     for (const msg of messages) {
       // ── SAFETY GATE (see selfChat.ts) ───────────────────────────────────
-      // Owner's self-chat → act. Owner's chats with friends → never.
-      // Others → only when their RESOLVED phone number is allowlisted; a raw
-      // LID is never matched as if it were a phone number. Dropped silently:
-      // a "permission denied" reply would confirm to spammers the number is
+      // Linked account's self-chat → owner. Its chats with friends → never.
+      // Assistant mode: the owner's own number → owner. Others → only when
+      // their RESOLVED phone number is allowlisted (guests); a raw LID is
+      // never matched as if it were a phone number. Dropped silently: a
+      // "permission denied" reply would confirm to spammers the number is
       // live and confuse friends who don't know an agent is running.
-      const decision = classifyIncoming(msg.key, owner, allowedJids, sentIds);
+      const key = await withPhoneNumber(sock, msg.key);
+      const decision = classifyIncoming(key, owner, allowedJids, sentIds, target);
       if (!decision.accept) {
         if (decision.reason === "not_allowed" || decision.reason === "lid_unresolved") {
-          const who = decision.reason === "lid_unresolved" ? "an unresolved WhatsApp ID" : (msg.key.remoteJid ?? "?");
-          log("info", `[allowlist] dropped message from ${msg.pushName || "unknown"} (${who}) — ${decision.reason}`);
+          // No names or numbers of the owner's contacts in the log.
+          log("info", `[allowlist] ignored a message from someone not on the allowed list (${decision.reason})`);
         }
         continue;
       }
 
       const chatId   = decision.chatId;
-      const fromName = decision.isSelfChat
-        ? (sock.user?.name || msg.pushName || "Owner")
+      const fromName = decision.isOwner
+        ? (decision.isSelfChat ? (sock.user?.name || msg.pushName || "Owner") : (msg.pushName || "Owner"))
         : (msg.pushName || (decision.senderPn ?? chatId).split("@")[0] || "User");
 
-      const textBody = msg.message?.conversation ??
-                       msg.message?.extendedTextMessage?.text ?? "";
+      let textBody = msg.message?.conversation ??
+                     msg.message?.extendedTextMessage?.text ?? "";
       const isVoice  = !!(msg.message?.audioMessage);
 
       if (!textBody && !isVoice) continue;
+
+      // Personal mode: "Message yourself" is also the owner's notes chat —
+      // only messages that start with the start word are instructions.
+      // Voice notes there are never sent for transcription.
+      if (target.mode === "personal" && decision.isSelfChat) {
+        const word = _config?.wakeWord ?? "";
+        if (isVoice) continue;
+        const m = matchWakeWord(textBody, word);
+        if (!m.matched) {
+          if (word) void maybeSendWakeTip(sock, chatId, word);
+          continue;
+        }
+        textBody = m.rest || "Hi";
+      }
 
       // /reset and /start — handled locally; tell parent to clear session state
       if (textBody === "/reset" || textBody === "/start") {
@@ -369,9 +504,10 @@ async function connect(): Promise<void> {
         if (!userText) continue;
       }
 
-      // isOwner: only the linked account's own "Message yourself" chat; allow-listed
-      // people are guests in the main process (guestMode.ts).
-      ipc({ type: "incoming_text", chatId, fromName, text: userText, isVoice, isOwner: decision.isSelfChat === true });
+      // isOwner: the linked account's self-chat, or (assistant mode) the
+      // owner's own number; allow-listed people are guests (guestMode.ts).
+      startTyping(chatId);
+      ipc({ type: "incoming_text", chatId, fromName, text: userText, isVoice, isOwner: decision.isOwner === true });
     }
   });
 }

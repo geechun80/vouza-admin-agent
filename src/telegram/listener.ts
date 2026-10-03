@@ -205,6 +205,16 @@ export function createTelegramClaim(botUsername?: string): { code: string; link:
   return { code, link: user ? claimDeepLink(user, code) : null, expiresAt: _claim.expiresAt };
 }
 
+/** Disconnect: forget who owns the bot, so reconnecting needs a fresh claim. */
+export async function forgetTelegramOwner(): Promise<void> {
+  await loadOwnerChatId();
+  _ownerChatId = null;
+  _ownerBotId = null;
+  _claim = null;
+  _botUsername = null;
+  await saveOwnerState();
+}
+
 export async function getTelegramOwnerStatus(): Promise<{ linked: boolean; claimOpen: boolean; botUsername: string | null }> {
   await loadOwnerChatId();
   return {

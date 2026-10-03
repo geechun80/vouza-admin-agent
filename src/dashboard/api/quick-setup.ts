@@ -23,6 +23,12 @@ import {
   localAiProblem,
   matchLocalModel,
   normalizeOllamaAddress,
+  normalizeOwnerNumber,
+  samePhoneNumber,
+  whatsappHello,
+  withoutConnection,
+  isConnectionId,
+  type ConnectionId,
   onlineAiConfigPatch,
   SUGGESTED_LOCAL_MODEL,
   detectEmailPreset,
@@ -32,15 +38,19 @@ import {
   autostartCommand,
   type EmailLogin,
 } from "../../setup/quickSetup.js";
-import { loadGrants, addGrant } from "../../files/folderGrants.js";
+import { loadGrants, addGrant, removeGrant } from "../../files/folderGrants.js";
 import { getPowerAdvice } from "../../util/keepAwake.js";
 import {
   isBaileysConnected,
   getBaileysOwnerInfo,
   getBaileysOwnerJid,
   sendBaileysMessage,
+  baileysSettingsFrom,
+  configureBaileys,
+  resetBaileysAuth,
 } from "../../whatsapp/baileysManager.js";
-import { createTelegramClaim, getTelegramOwnerStatus } from "../../telegram/listener.js";
+import { cleanWakeWord, defaultWakeWord } from "../../whatsapp/wakeWord.js";
+import { createTelegramClaim, getTelegramOwnerStatus, stopTelegramListener, forgetTelegramOwner } from "../../telegram/listener.js";
 import type { AgentInstance } from "../../bridge/launcher.js";
 import { isValidModelId } from "../../config/liveModels.js";
 
@@ -123,7 +133,16 @@ export function registerQuickSetupRoutes(app: Express, deps: QuickSetupDeps): vo
           })),
         },
         phone: {
-          whatsapp: { connected: isBaileysConnected(), owner: getBaileysOwnerInfo() },
+          whatsapp: {
+            connected: isBaileysConnected(),
+            // The linked account: the assistant's number in assistant mode.
+            owner:     getBaileysOwnerInfo(),
+            enabled:   !!cfg.channels?.whatsapp?.enabled,
+            ...(() => {
+              const s = baileysSettingsFrom(cfg.channels?.whatsapp?.config ?? {}, cfg.agent?.name);
+              return { mode: s.mode, ownerNumber: s.ownerNumber, wakeWord: s.wakeWord, allowed: s.allowedSenders.length };
+            })(),
+          },
           telegram: {
             configured: !!cfg.channels?.telegram?.enabled,
             linked:     tg.linked,
@@ -305,34 +324,124 @@ export function registerQuickSetupRoutes(app: Express, deps: QuickSetupDeps): vo
     res.json(r);
   });
 
-  // WhatsApp QR scanned → remember it, greet the user in their own chat.
-  app.post("/api/quick-setup/whatsapp/linked", guard, async (_req, res) => {
+  // WhatsApp QR scanned → remember how it's used, then say hello.
+  //   mode "assistant": the code was scanned with the ASSISTANT's own number;
+  //     ownerNumber is the person's own WhatsApp, which they message it from.
+  //   mode "personal": the person's own WhatsApp; only "Message yourself"
+  //     messages that start with wakeWord are instructions.
+  app.post("/api/quick-setup/whatsapp/linked", guard, async (req, res) => {
     if (!isBaileysConnected()) return res.json({ ok: false, error: "WhatsApp isn't connected yet — scan the QR code first." });
-    const owner = getBaileysOwnerInfo();
+    const linked = getBaileysOwnerInfo();
+    const mode   = req.body?.mode === "personal" ? "personal" : "assistant";
     try {
       const cfg = await deps.loadConfig();
-      const already = !!cfg.channels?.whatsapp?.enabled;
+      const prev = baileysSettingsFrom(cfg.channels?.whatsapp?.config ?? {}, cfg.agent?.name);
+      let ownerNumber = prev.ownerNumber;
+      if (mode === "assistant") {
+        const n = normalizeOwnerNumber(req.body?.ownerNumber ?? prev.ownerNumber);
+        if (!n.ok) return res.json({ ok: false, field: "ownerNumber", error: n.error });
+        ownerNumber = n.number;
+        if (linked && samePhoneNumber(linked.phone, ownerNumber)) {
+          return res.json({
+            ok: false, sameNumber: true, owner: linked,
+            error: "That code was scanned with your own WhatsApp — so the assistant would be linked to your personal account. " +
+                   "Scan it with the assistant's own number instead, or choose “Use my own WhatsApp”.",
+          });
+        }
+      }
+      const wakeWord = cleanWakeWord(req.body?.wakeWord) || prev.wakeWord || defaultWakeWord(cfg.agent?.name);
+      // First link, or the way it's used changed (setups before 2.3.2 have no
+      // saved mode — they get one hello explaining the start word).
+      const modeChanged = !cfg.channels?.whatsapp?.enabled || cfg.channels?.whatsapp?.config?.mode !== mode;
+
       await deps.saveConfig(deps.mergeConfig(cfg, {
-        channels: { whatsapp: { enabled: true, provider: "web", config: cfg.channels?.whatsapp?.config ?? {} } },
+        channels: {
+          whatsapp: {
+            enabled: true, provider: "web",
+            config: { ...(cfg.channels?.whatsapp?.config ?? {}), mode, ownerNumber, wakeWord },
+          },
+        },
         agent: {
-          ...(owner?.phone && !cfg.agent?.phone ? { phone: owner.phone } : {}),
-          ...(owner?.name && !cfg.agent?.userName ? { userName: owner.name } : {}),
+          // The person's own number — never the assistant's.
+          ...(mode === "assistant" ? { phone: ownerNumber } : (linked?.phone && !cfg.agent?.phone ? { phone: linked.phone } : {})),
+          ...(mode === "personal" && linked?.name && !cfg.agent?.userName ? { userName: linked.name } : {}),
         },
       }));
+      configureBaileys({ mode, ownerNumber, wakeWord });
 
-      // Greet once, in "Message yourself" — proves the loop works end to end.
-      const ownerJid = getBaileysOwnerJid();
-      if (!already && ownerJid) {
-        const name = cfg.agent?.userName || owner?.name || "";
-        await sendBaileysMessage(ownerJid,
-          `👋 Hi${name ? ` ${name}` : ""}! I'm your assistant, and I'm connected.\n\n` +
-          "Message me right here in this chat anytime. Try:\n" +
-          "• any important emails today?\n" +
-          "• find my insurance policy and send it to me\n\n" +
-          "Before I send an email for you, I'll always ask you to reply YES.",
-        ).catch(() => {});
+      // Say hello where the person will talk to it — proves the loop works.
+      const to = getBaileysOwnerJid();
+      if (modeChanged && to) {
+        const name = cfg.agent?.userName || (mode === "personal" ? linked?.name : "") || "";
+        await sendBaileysMessage(to, whatsappHello(mode, name, wakeWord)).catch(() => {});
       }
-      res.json({ ok: true, owner });
+      res.json({ ok: true, owner: linked, mode, ownerNumber, wakeWord });
+    } catch (err) {
+      res.json({ ok: false, error: String(err) });
+    }
+  });
+
+  // Disconnect one connection: switch it off, delete its stored password /
+  // token / key, stop it running. Reconnecting = the normal "+ Add" screen.
+  async function disconnect(id: ConnectionId): Promise<void> {
+    if (id === "whatsapp") await resetBaileysAuth();   // also removes it from the phone's "Linked devices"
+    if (id === "telegram") { stopTelegramListener(); await forgetTelegramOwner(); }
+    if (id === "folders")  { for (const g of loadGrants()) removeGrant(g.path); return; }
+    const cfg = await deps.loadConfig();
+    await deps.saveConfig(withoutConnection(cfg, id));
+    // A running agent still holds the old login — restart it without this one.
+    if (id !== "whatsapp" && deps.getAgent()) await deps.restartAgent();
+  }
+
+  app.post("/api/quick-setup/disconnect", guard, async (req, res) => {
+    const id = req.body?.id;
+    if (!isConnectionId(id)) return res.status(400).json({ ok: false, error: "Unknown connection." });
+    try {
+      await disconnect(id);
+      res.json({ ok: true, id });
+    } catch (err) {
+      res.json({ ok: false, error: `Couldn't disconnect: ${String(err)}` });
+    }
+  });
+
+  // Older name used by the WhatsApp card.
+  app.post("/api/quick-setup/whatsapp/unlink", guard, async (_req, res) => {
+    try {
+      await disconnect("whatsapp");
+      res.json({ ok: true });
+    } catch (err) {
+      res.json({ ok: false, error: String(err) });
+    }
+  });
+
+  // Change the start word (personal) or the owner's number (assistant)
+  // without scanning again.
+  app.post("/api/quick-setup/whatsapp/settings", guard, async (req, res) => {
+    try {
+      const cfg  = await deps.loadConfig();
+      if (!cfg.channels?.whatsapp?.enabled) return res.json({ ok: false, error: "WhatsApp isn't set up yet." });
+      const prev = baileysSettingsFrom(cfg.channels.whatsapp.config ?? {}, cfg.agent?.name);
+      const patch: Record<string, string> = {};
+      if (req.body?.wakeWord !== undefined) {
+        const w = cleanWakeWord(req.body.wakeWord);
+        if (!w) return res.json({ ok: false, field: "wakeWord", error: "Type a start word, for example your assistant's name." });
+        patch.wakeWord = w;
+      }
+      if (req.body?.ownerNumber !== undefined) {
+        const n = normalizeOwnerNumber(req.body.ownerNumber);
+        if (!n.ok) return res.json({ ok: false, field: "ownerNumber", error: n.error });
+        const linked = getBaileysOwnerInfo();
+        if (prev.mode === "assistant" && linked && samePhoneNumber(linked.phone, n.number)) {
+          return res.json({ ok: false, field: "ownerNumber", error: "That's the assistant's own number — type the number you message it from." });
+        }
+        patch.ownerNumber = n.number;
+      }
+      await deps.saveConfig(deps.mergeConfig(cfg, {
+        channels: { whatsapp: { config: { ...(cfg.channels.whatsapp.config ?? {}), ...patch } } },
+        ...(patch.ownerNumber && prev.mode === "assistant" ? { agent: { phone: patch.ownerNumber } } : {}),
+      }));
+      const s = configureBaileys(patch);
+      res.json({ ok: true, mode: s.mode, ownerNumber: s.ownerNumber, wakeWord: s.wakeWord });
     } catch (err) {
       res.json({ ok: false, error: String(err) });
     }

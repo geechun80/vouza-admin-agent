@@ -6,7 +6,7 @@
 
 Reads and answers email · finds your documents · checks your calendar · works from WhatsApp or Telegram
 
-**Latest version: 2.3.1** · [What's new](CHANGELOG.md)
+**Latest version: 2.3.2** · [What's new](CHANGELOG.md)
 
 [![Tests](https://img.shields.io/badge/tests-678%2F678-brightgreen)](#)
 [![Node](https://img.shields.io/badge/node-20.19%2B-blue)](https://nodejs.org)
@@ -112,7 +112,7 @@ Open the dashboard and press **Get Started**. Five screens, one question each:
 | **You** | Type your name; paste an AI key (skipped if a built-in key works) — or pick **a local AI on this computer** | Works out which AI the key belongs to and checks it live; for local AI, finds Ollama and lists your models |
 | **Email** | Type your address + App Password | Finds the mail servers (including Google Workspace / Microsoft 365 on your own domain), signs in to read **and** send, shows your unread count |
 | **Documents** | Tick Documents / Desktop / Downloads | Grants **read-only** access — it can never delete or change files |
-| **Phone** | Scan a QR with WhatsApp (or tap a Telegram link) | Starts itself, links your phone, says hello in "Message yourself" |
+| **Phone** | Choose: the assistant's own WhatsApp number (recommended), Telegram, or your own WhatsApp — then scan a QR (or tap a Telegram link) | Starts itself, links, says hello where you'll talk to it |
 | **All set** | Untick anything you don't want | Keeps the computer awake, checks the lid setting, optionally starts at login |
 
 Refreshing or closing the page mid-way is fine — it resumes at the first unfinished screen. Need every option? Use **Advanced setup (all options)** under the Get Started button.
@@ -170,12 +170,19 @@ After the wizard, use the **🔌 Setup** panel in the dashboard to connect chann
 <details>
 <summary><b>💚 WhatsApp</b> (free, no Docker, no Twilio)</summary>
 
-1. Dashboard → **🔌 Setup** → WhatsApp → **Connect** — QR code appears
-2. On your phone: WhatsApp → ⋮ Menu → **Linked Devices → Link a Device**
-3. Scan the QR
-4. Done — messages from your allowlist route through the agent
+Two ways — you choose in Quick Setup or under **🔌 Connections → WhatsApp**:
 
-> By default, only YOUR number can interact with the agent (deny-by-default allowlist). Add others in Settings → WhatsApp.
+**A. Your assistant gets its own number (recommended — works like Telegram)**
+1. Give the assistant a second WhatsApp number — for example **WhatsApp Business** on a 2nd SIM / eSIM, or an old phone with a prepaid SIM.
+2. Type **your own** WhatsApp number (the one you'll message it from), then press **Show the code**.
+3. On the phone with the **assistant's** number: WhatsApp → Settings → **Linked devices → Link a device** → scan.
+4. It says hello on your WhatsApp. Save it as "My Assistant" and message it like any contact. Your own WhatsApp is never linked.
+
+**B. Use my own WhatsApp (opt-in)**
+- Scan the code with your own phone. The assistant then **only** reads your **"Message yourself"** chat, and **only** messages that start with its start word (default **"Vee"**): *"Vee, find my insurance policy"*. Your other chats, your notes in "Message yourself", and voice notes there are ignored, and it never answers other people.
+
+> Either way, only YOU can instruct the agent (deny-by-default). Others you allow-list are guests: chat only, no access to your email, files or memories.
+> **Upgrading from 2.3.1 or earlier?** Your WhatsApp stays linked as option B, so start your messages with "Vee" (or the start word shown under 🔌 Connections). To switch to option A, press **Give my assistant its own number instead**.
 
 </details>
 
@@ -218,11 +225,11 @@ After the wizard, use the **🔌 Setup** panel in the dashboard to connect chann
 
 ## 📱 Using it from your phone
 
-Message it in WhatsApp's **"Message yourself"** chat (or your Telegram bot). Phone chats get a deliberately small toolset: read and send email, search the folders you shared, **send you the actual file**, read your calendar, look things up online when you ask, remember things. Deleting, running commands, browsing, changing settings — desktop only.
+Message your assistant's own WhatsApp number from your WhatsApp (or your Telegram bot — or, if it uses your own WhatsApp, your **"Message yourself"** chat, starting with its name). While it works you see **typing…**, and a "⏳ Working on it" note if it takes a while. Phone chats get a deliberately small toolset: read and send email, search the folders you shared, **send you the actual file**, read your calendar, look things up online when you ask, remember things. Deleting, running commands, browsing, changing settings — desktop only.
 
 - **Nothing is sent without your YES.** When the agent wants to send or reply to an email, it shows who, the subject and any attachments, then waits. Reply `yes` (or tap ✅ on Telegram) to send, `no` to cancel; anything else cancels. This is enforced in code — text inside an email or document can't trigger a send — and a voice note never counts as YES.
 - **Files come to you.** "Find my insurance policy and send it to me" delivers the PDF in the chat (up to 45 MB, shared folders only).
-- **Only you get your data.** WhatsApp answers your own "Message yourself" chat plus anyone you allow-list; a Telegram bot answers the person who linked it (strangers get "This is a private assistant") plus allow-listed chats. **Allow-listed people are guests:** they can chat and get help with general questions, but the agent has no tools for them — it can't read your email or files, send anything, or go online — and it never shows them your memories.
+- **Only you get your data.** WhatsApp answers only you — messages from your own number (assistant's own number), or start-word messages in "Message yourself" (your own WhatsApp) — plus anyone you allow-list; a Telegram bot answers the person who linked it (strangers get "This is a private assistant") plus allow-listed chats. **Allow-listed people are guests:** they can chat and get help with general questions, but the agent has no tools for them — it can't read your email or files, send anything, or go online — and it never shows them your memories.
 
 **Keeping it reachable while you're away.** While the agent runs, it asks the computer not to idle-sleep (Windows, macOS, Linux with systemd) and lets go when it stops — even after a crash. It can't override the lid: if closing the lid puts your laptop to sleep, the agent stops answering until you open it. Quick Setup checks this setting and offers a **Change lid setting** button (Windows: *When I close the lid → Do nothing* for *Plugged in*). Keep the laptop plugged in. If the computer does sleep: Telegram messages are answered when it wakes (Telegram holds them for 24 hours); WhatsApp messages sent during the sleep are not answered — send them again.
 
@@ -338,7 +345,8 @@ Script installs PM2, builds, starts, persists.
 | `Port 3456 already in use` | `npx kill-port 3456` or close the other instance |
 | `Cannot find module` | Close the window and start `start.bat` again — it reinstalls what's missing |
 | Telegram bot silent | Verify the bot token via **@BotFather** → `/mybots` |
-| WhatsApp "Invalid QR code" | Dashboard → Setup → WhatsApp → **Reset & start fresh** button |
+| WhatsApp "Invalid QR code" | Dashboard → 🔌 Connections → WhatsApp → **Disconnect WhatsApp**, then connect again |
+| My WhatsApp notes get no answer | That's intended on your own WhatsApp: only messages starting with the start word (e.g. "Vee, …") are instructions |
 | WhatsApp disconnects often | Phone needs internet; check the same phone isn't linked elsewhere |
 | `pm2: command not found` | Reopen terminal, or `npm config get prefix` and add to PATH |
 | PM2 won't auto-start on Windows | `pm2 startup` doesn't work on Windows — use `install-autostart.bat` |

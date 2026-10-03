@@ -52,6 +52,40 @@ import { buildGuestRegistry, makeGuest } from "../agent/guestMode.js";
 import { getMasterKey } from "../security/secretStore.js";
 import { withTrigger, recordNet, hostOf } from "../util/netActivity.js";
 import type { FileToSend }         from "../tools/sendFile.js";
+import { phoneToJid, type WhatsAppMode } from "./selfChat.js";
+import { defaultWakeWord, cleanWakeWord } from "./wakeWord.js";
+
+/** How the assistant is on WhatsApp — see selfChat.ts for the two modes. */
+export interface BaileysSettings {
+  mode:           WhatsAppMode;
+  /** Assistant mode: the owner's personal number ("+6591234567") */
+  ownerNumber:    string;
+  /** Personal mode: messages in "Message yourself" must start with this */
+  wakeWord:       string;
+  allowedSenders: string[];
+}
+
+/**
+ * Settings from the saved WhatsApp config. A setup saved before 2.3.2 has no
+ * mode — it was linked to the owner's own WhatsApp, so it is "personal", now
+ * with a start word (the assistant's name, or "Vee").
+ */
+export function baileysSettingsFrom(waCfg: any, agentName?: string | null): BaileysSettings {
+  const rawAllowed = waCfg?.allowedSenders ?? waCfg?.allowlist ?? [];
+  const allowedSenders: string[] = Array.isArray(rawAllowed)
+    ? rawAllowed.filter((s: unknown) => typeof s === "string" && s.trim().length > 0)
+    : typeof rawAllowed === "string"
+      ? rawAllowed.split(/[,\n]/).map((s: string) => s.trim()).filter(Boolean)
+      : [];
+  const mode: WhatsAppMode = waCfg?.mode === "assistant" ? "assistant" : "personal";
+  const saved = cleanWakeWord(waCfg?.wakeWord);
+  return {
+    mode,
+    ownerNumber: String(waCfg?.ownerNumber ?? "").trim(),
+    wakeWord:    saved || defaultWakeWord(agentName),
+    allowedSenders,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -87,6 +121,7 @@ let _connected     = false;
 let _authKeyHex:   string | null = null;  // master key for the encrypted login files
 let _ownerJid:     string | null = null;  // linked account JID, set on "connected" status
 let _ownerName:    string | null = null;  // WhatsApp profile name, set on "connected" status
+let _settings:     BaileysSettings = { mode: "personal", ownerNumber: "", wakeWord: "", allowedSenders: [] };
 
 // Document sends wait for the worker's send_result so the tool can report
 // real delivery instead of "queued".
@@ -150,17 +185,35 @@ export function isBaileysConnected(): boolean {
 }
 
 /**
- * The owner JID of the linked WhatsApp account (e.g. "6591234567@s.whatsapp.net"),
- * or null until the worker reports a successful connection. Proactive scheduled
- * messages are delivered here ("message yourself" thread).
+ * Where messages for the owner go (greetings, scheduled briefings), or null
+ * until connected. Assistant mode: the owner's own number. Personal mode:
+ * the linked account's "Message yourself" chat.
  */
 export function getBaileysOwnerJid(): string | null {
-  return _connected ? _ownerJid : null;
+  if (!_connected) return null;
+  if (_settings.mode === "assistant") return phoneToJid(_settings.ownerNumber);
+  return _ownerJid;
+}
+
+/** Current WhatsApp settings (mode, owner number, start word, allowlist). */
+export function getBaileysSettings(): BaileysSettings {
+  return { ..._settings, allowedSenders: [..._settings.allowedSenders] };
+}
+
+/** Apply new WhatsApp settings to the running connection — no relink needed. */
+export function configureBaileys(next: Partial<BaileysSettings>): BaileysSettings {
+  _settings = { ..._settings, ...next };
+  // A respawned worker reads the running config — keep it in step.
+  const tw = (_baseCtx?.config as any)?.tools?.whatsapp;
+  if (tw) tw.config = { ...(tw.config ?? {}), ..._settings };
+  _worker?.send({ type: "configure", settings: { ..._settings } });
+  return getBaileysSettings();
 }
 
 /**
- * Who this WhatsApp is linked to, for setup to show and pre-fill:
- * phone number (digits of the owner's phone JID — never a LID) and profile name.
+ * Which WhatsApp account this is linked to, for setup to show and check:
+ * phone number (digits of the linked phone JID — never a LID) and profile
+ * name. In assistant mode this is the assistant's number, not the owner's.
  */
 export function getBaileysOwnerInfo(): { jid: string; phone: string; name: string | null } | null {
   if (!_connected || !_ownerJid || !_ownerJid.endsWith("@s.whatsapp.net")) return null;
@@ -221,9 +274,19 @@ export function stopBaileysListener(): void {
  * Deleting data/whatsapp-auth/ after this gives a clean QR on next connect.
  */
 export async function logoutBaileys(): Promise<void> {
-  if (_worker) _worker.send({ type: "stop" }); // worker calls sock.logout() then exits 0
-  await new Promise<void>((r) => setTimeout(r, 1000)); // let it flush
+  await _unlinkFromPhone();
   stopBaileysListener();
+}
+
+/** Ask the worker to unlink this device from the WhatsApp account; waits up to ~6 s. */
+async function _unlinkFromPhone(): Promise<void> {
+  const worker = _worker;
+  if (!worker) return;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, 6_000);
+    worker.once("exit", () => { clearTimeout(timer); resolve(); });
+    try { worker.send({ type: "logout" }); } catch { clearTimeout(timer); resolve(); }
+  });
 }
 
 /**
@@ -235,12 +298,11 @@ export async function logoutBaileys(): Promise<void> {
  * Safe to call even if not currently connected.
  */
 export async function resetBaileysAuth(): Promise<void> {
-  // Try a graceful logout first (best effort — doesn't matter if worker is dead).
+  // Unlink from the phone first (best effort — doesn't matter if worker is dead),
+  // so the old link doesn't linger in the phone's "Linked devices".
   try {
-    if (_worker) {
-      _worker.send({ type: "stop" });
-      await new Promise<void>((r) => setTimeout(r, 1000));
-    }
+    _stopped = true; // the worker's clean exit must not trigger an auto-restart
+    await _unlinkFromPhone();
   } catch { /* ignore */ }
 
   // Forcibly stop the worker.
@@ -311,19 +373,11 @@ function _spawnWorker(): void {
   // Send config to worker immediately (it will start connecting on receipt)
   const whisperCfg = _baseCtx ? resolveWhisperConfig(_baseCtx.config) : null;
 
-  // ── Allowlist resolution (SAFETY-CRITICAL) ───────────────────────────────
-  // Baileys links to the user's PERSONAL WhatsApp account, so without an
-  // allowlist the agent would auto-reply to every friend who texts the user.
-  // Read the allowlist from the user's saved config — defaults to empty,
-  // which means only the owner (the WhatsApp account itself) can talk to
-  // the agent. The owner can add additional senders via the dashboard.
+  // ── Who may talk to the agent (SAFETY-CRITICAL) ──────────────────────────
+  // Allowlist defaults to empty → only the owner is served. Mode, owner
+  // number and start word decide who the owner is (see selfChat.ts).
   const waCfg = (_baseCtx?.config as any)?.tools?.whatsapp?.config ?? {};
-  const rawAllowed = waCfg.allowedSenders ?? waCfg.allowlist ?? [];
-  const allowedSenders: string[] = Array.isArray(rawAllowed)
-    ? rawAllowed.filter((s: unknown) => typeof s === "string" && s.trim().length > 0)
-    : typeof rawAllowed === "string"
-      ? rawAllowed.split(/[,\n]/).map((s: string) => s.trim()).filter(Boolean)
-      : [];
+  _settings = baileysSettingsFrom(waCfg, (_baseCtx?.config as any)?.name);
 
   child.send({
     type:   "start",
@@ -335,7 +389,7 @@ function _spawnWorker(): void {
       whisperBaseUrl:  whisperCfg?.baseUrl,
       whisperModel:    whisperCfg?.model,
       whisperProvider: whisperCfg?.provider,
-      allowedSenders,
+      ..._settings,
     },
   });
 
@@ -535,6 +589,19 @@ async function _processIncoming(
     : `[Message from ${fromName} via WhatsApp]: ${text}`;
 
   const turnStartedAt = Date.now();
+  const localAi = (_baseCtx.config as any)?.provider === "ollama";
+  // Like Telegram's "⏳ Thinking…": if the answer takes a while, say so —
+  // "typing…" keeps showing until the real answer is sent.
+  const stillWorking = setTimeout(() => {
+    _worker?.send({
+      type: "send_reply",
+      chatId,
+      keepTyping: true,
+      text: localAi
+        ? "⏳ Working on it — the AI on your computer can take a minute or two."
+        : "⏳ Working on it…",
+    });
+  }, 20_000);
   let response = "";
   try {
     for await (const ev of agentLoop(framedInput, session, registry)) {
@@ -546,6 +613,8 @@ async function _processIncoming(
   } catch (err) {
     console.error(chalk.red(`  [WhatsApp] agentLoop error for ${chatId}:`, err));
     response = "⚠️ Sorry, I ran into an error. Please try again in a moment.";
+  } finally {
+    clearTimeout(stillWorking);
   }
 
   let reply = response.trim();
@@ -555,7 +624,14 @@ async function _processIncoming(
     const ask = confirmPromptFor(parked);
     reply = reply ? `${reply}\n\n${ask}` : ask;
   }
-  if (reply && _worker) {
+  // Never leave a message unanswered — an empty answer looked like the
+  // assistant was dead (small local models sometimes return nothing).
+  if (!reply) {
+    reply = localAi
+      ? "🤔 I couldn't come up with an answer to that. Try asking in other words — or switch to a bigger AI model in the dashboard (🤖 AI model)."
+      : "🤔 I couldn't come up with an answer to that. Try asking in other words.";
+  }
+  if (_worker) {
     _worker.send({ type: "send_reply", chatId, text: reply });
   }
 }

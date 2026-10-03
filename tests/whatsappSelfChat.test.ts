@@ -30,7 +30,7 @@ const NONE      = new SentIdSet();
 describe("self-chat — the owner talking to their agent", () => {
   it("phone-typed message in 'Message yourself' (fromMe, PN addressing) is accepted", () => {
     const d = classifyIncoming({ remoteJid: OWNER_PN, fromMe: true, id: "A1" }, OWNER, ALLOWED, NONE);
-    assert.deepEqual(d, { accept: true, chatId: OWNER_PN, senderPn: OWNER_PN, isSelfChat: true });
+    assert.deepEqual(d, { accept: true, chatId: OWNER_PN, senderPn: OWNER_PN, isSelfChat: true, isOwner: true });
   });
 
   it("same message under LID addressing is accepted and replied to on the LID chat", () => {
@@ -70,7 +70,7 @@ describe("the owner's other chats are never acted on", () => {
 describe("other people — deny by default", () => {
   it("allowlisted family member (PN) is accepted", () => {
     const d = classifyIncoming({ remoteJid: KID_PN, fromMe: false, id: "C1" }, OWNER, ALLOWED, NONE);
-    assert.deepEqual(d, { accept: true, chatId: KID_PN, senderPn: KID_PN, isSelfChat: false });
+    assert.deepEqual(d, { accept: true, chatId: KID_PN, senderPn: KID_PN, isSelfChat: false, isOwner: false });
   });
 
   it("allowlisted family member addressed by LID is matched via remoteJidAlt", () => {

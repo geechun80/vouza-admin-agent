@@ -368,7 +368,8 @@ export async function loadConfigFromJson(): Promise<AgentConfig> {
       }
     }
     // Auto-detect from flat credentials if no explicit voice tool card
-    if (!baseConfig.whisperApiKey) {
+    // (not when the person disconnected voice transcription).
+    if (!baseConfig.whisperApiKey && saved.tools?.voice?.enabled !== false) {
       const groqKey   = saved.credentials?.groqApiKey   || "";
       const openaiKey = saved.credentials?.openaiApiKey || "";
       if (groqKey) {

@@ -8,6 +8,22 @@ the full history.
 
 ---
 
+## 2.3.2 — 2026-10-03
+
+**WhatsApp works like Telegram — and never takes over your WhatsApp unless you ask**
+
+- 🤖 **Your assistant can have its own WhatsApp number** (recommended): you message it from your own WhatsApp, like a contact — your WhatsApp is never linked. Setup asks how you want to connect before showing any code
+- 📱 **Using your own WhatsApp is now opt-in, and private:** the assistant only reads “Message yourself”, and only messages that start with its name (e.g. “Vee, find my insurance policy”). Your notes there, voice notes, and all your other chats are ignored
+- ⌨️ WhatsApp shows **typing…** while the assistant works, and a “⏳ Working on it” note when it's slow — and it never leaves a message unanswered
+- 🔌 **Connections opens simple screens** (the same as first-time setup) for email, folders, WhatsApp and Telegram — no more jumping into the technical wizard. The technical setup is still there as “Advanced setup”
+- 🔌 **Disconnect anything** from 🔌 Connections: every connected item has **Change** and **Disconnect**. Disconnecting deletes the saved password / token / key from this computer — not just switches it off
+- 🔗 Disconnecting or switching WhatsApp now really removes the link from your phone's “Linked devices”
+- 📂 **Downloads can be shared** even when the assistant is installed inside it — the assistant's own folder stays off-limits
+- 🛠️ Fixed: Connections showed “AI Model + Add” with a local AI; full setup asked for an Anthropic key after Quick Setup (and could have switched your AI away); the chat showed an empty bubble while a local AI was thinking; “---” in What's new
+- ⚠️ **Already linked to your own WhatsApp?** It keeps working — start your messages with “Vee” (or the start word under 🔌 Connections → WhatsApp). To give the assistant its own number, press **Give my assistant its own number instead** there
+
+---
+
 ## 2.3.1 — 2026-10-03
 
 **Local AI that's already installed is never a dead end**

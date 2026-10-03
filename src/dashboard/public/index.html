@@ -58,7 +58,7 @@
   <div class="qs-inner">
     <div class="qs-top">
       <img class="qs-logo" src="/images/vouza-logo.png" alt="Vouza">
-      <button class="qs-link qs-back" id="qsBack" onclick="qsGo(Math.max(1, qs.step - 1))" hidden>← Back</button>
+      <button class="qs-link qs-back" id="qsBack" onclick="qs.single ? qsReturnToDashboard() : qsGo(Math.max(1, qs.step - 1))" hidden>← Back</button>
       <div class="qs-dots" id="qsDots" role="progressbar" aria-valuemin="1" aria-valuemax="5" aria-label="Setup progress"></div>
     </div>
 
@@ -128,14 +128,53 @@
       <h1 class="qs-title">Connect your phone</h1>
       <p class="qs-sub" id="qsPhoneSub">Starting your assistant…</p>
 
+      <!-- How will you talk to your assistant? (chosen before any QR code) -->
+      <div id="qsPhoneChoice" hidden>
+        <button type="button" class="qs-choice" onclick="qsChooseWa('assistant')">
+          <span class="ic" aria-hidden="true">🤖</span>
+          <span><b>WhatsApp — your assistant gets its own number</b> <em class="qs-badge">Recommended</em>
+            <small>You message it from your own WhatsApp, like a contact (works like Telegram). Your WhatsApp is never linked.
+              Needs a second number — for example WhatsApp Business on a 2nd SIM / eSIM, or an old phone with a prepaid SIM.</small></span>
+        </button>
+        <button type="button" class="qs-choice" onclick="qsShowTelegram()">
+          <span class="ic" aria-hidden="true">✈️</span>
+          <span><b>Telegram — free, no second number</b>
+            <small>Make your own private Telegram bot in a minute. It answers only you.</small></span>
+        </button>
+        <p class="qs-hint"><button type="button" class="qs-link" onclick="qsChooseWa('personal')">Or let the assistant use my own WhatsApp…</button></p>
+      </div>
+
       <div id="qsWa" hidden>
-        <div class="qs-qr" id="qsQr"><div class="qs-spinner" aria-label="Loading code"></div></div>
-        <ol class="qs-steps-list">
-          <li>Open <b>WhatsApp</b> on your phone</li>
-          <li>Tap <b>Settings</b> → <b>Linked devices</b> → <b>Link a device</b></li>
-          <li>Point your phone at this code</li>
-        </ol>
-        <button class="qs-link" onclick="qsShowTelegram()">Use Telegram instead</button>
+        <!-- Assistant's own number -->
+        <div id="qsWaAssistant" hidden>
+          <label class="qs-label" for="qsOwnerNumber">Your own WhatsApp number — the one you'll message your assistant from</label>
+          <input class="qs-input" id="qsOwnerNumber" type="tel" autocomplete="tel" placeholder="+65 9123 4567" maxlength="24">
+          <p class="qs-hint">Your assistant only ever answers this number.</p>
+          <div class="qs-actions qs-actions-left" id="qsOwnerNext">
+            <button class="qs-btn qs-btn-small" type="button" onclick="qsOwnerNumberNext()">Show the code</button>
+          </div>
+          <ol class="qs-steps-list" id="qsWaAssistantSteps" hidden>
+            <li>Pick up the phone that has <b>your assistant's number</b> and open <b>WhatsApp</b> (or <b>WhatsApp Business</b>)</li>
+            <li>Tap <b>Settings</b> → <b>Linked devices</b> → <b>Link a device</b></li>
+            <li>Point that phone at this code — <b>not</b> your own phone</li>
+          </ol>
+        </div>
+        <!-- The person's own WhatsApp (opt-in) -->
+        <div id="qsWaPersonal" hidden>
+          <div class="qs-card qs-warn">⚠️ This links the assistant to <b>your own</b> WhatsApp. It only reads your <b>“Message yourself”</b> chat,
+            and only messages that start with the word below — your other chats and your own notes stay private, and it never answers other people.</div>
+          <label class="qs-label" for="qsWakeWord">Start your messages to the assistant with</label>
+          <input class="qs-input" id="qsWakeWord" maxlength="30" placeholder="Vee" oninput="qsEl('qsWakeExample').textContent = this.value.trim() || 'Vee'">
+          <p class="qs-hint">For example: “<span id="qsWakeExample">Vee</span>, find my insurance policy”</p>
+          <ol class="qs-steps-list">
+            <li>Open <b>WhatsApp</b> on your phone</li>
+            <li>Tap <b>Settings</b> → <b>Linked devices</b> → <b>Link a device</b></li>
+            <li>Point your phone at this code</li>
+          </ol>
+        </div>
+        <div class="qs-qr" id="qsQr" hidden><div class="qs-spinner" aria-label="Loading code"></div></div>
+        <div class="qs-actions qs-actions-left" id="qsWaFix" hidden></div>
+        <button class="qs-link" type="button" onclick="qsShowPhoneChoice()">← Other ways to connect</button>
       </div>
 
       <div id="qsTg" hidden>
@@ -152,7 +191,7 @@
           <div class="qs-qr"><img id="qsTgQr" alt="Code that opens your Telegram bot"></div>
           <p class="qs-sub qs-center">Point your phone camera at this code (or <a id="qsTgHref" target="_blank" rel="noopener">open the link</a>), then tap <b>START</b>.</p>
         </div>
-        <button class="qs-link" onclick="qsShowWhatsApp()">Use WhatsApp instead</button>
+        <button class="qs-link" type="button" onclick="qsShowPhoneChoice()">← Other ways to connect</button>
       </div>
 
       <div class="qs-done-banner" id="qsPhoneDone" hidden></div>
@@ -727,7 +766,7 @@
           <div>
             <div class="step-eyebrow">Connections</div>
             <h2 class="step-title" style="margin:0">🔌 Connections</h2>
-            <p class="step-subtitle" style="margin:4px 0 0">What your assistant is connected to. Tap anything marked “+ Add” and the assistant walks you through it in the chat.</p>
+            <p class="step-subtitle" style="margin:4px 0 0">What your assistant is connected to. Tap “+ Add” to connect something — it opens a short setup screen.</p>
           </div>
           <button class="btn" onclick="toggleSetupPanel()" style="min-width:80px">← Back</button>
         </div>

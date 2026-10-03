@@ -2410,3 +2410,42 @@
       vertical-align: middle;
     }
     .copy-btn:hover { border-color: var(--brand); color: var(--text); }
+
+    /* 2.3.2 — phone choice (Quick Setup) */
+    .qs-choice {
+      display: flex; gap: 14px; align-items: flex-start; width: 100%; text-align: left;
+      padding: 16px 18px; margin: 0 0 12px; border-radius: 14px; cursor: pointer;
+      border: 1px solid var(--border); background: var(--bg-glass-card); color: var(--text);
+      font: inherit; font-size: 15px; transition: border-color 0.15s, background 0.15s;
+    }
+    .qs-choice:hover, .qs-choice:focus-visible { border-color: var(--brand); background: var(--bg-glass-hover); }
+    .qs-choice .ic { font-size: 26px; line-height: 1; }
+    .qs-choice small { display: block; margin-top: 6px; font-size: 13px; color: var(--text-dim); line-height: 1.5; }
+    .qs-badge {
+      display: inline-block; font-style: normal; font-size: 11px; font-weight: 700;
+      padding: 2px 8px; border-radius: 10px; margin-left: 6px; vertical-align: middle;
+      background: rgba(16,185,129,0.15); color: var(--success);
+    }
+    .qs-warn { border-color: rgba(245,158,11,0.45) !important; background: rgba(245,158,11,0.08) !important; line-height: 1.55; font-size: 14px; }
+    #qsWaFix { gap: 10px; flex-wrap: wrap; align-items: center; }
+    /* Opened from the dashboard for one screen: no step dots */
+    #quickSetup.qs-single .qs-dots { visibility: hidden; }
+
+    /* Connections page */
+    .page-section-title { font-size: 13px; font-weight: 700; color: var(--text-dim); margin: 22px 0 10px; text-transform: uppercase; letter-spacing: 0.06em; }
+    .phone-card input { flex: 1; min-width: 200px; }
+    .setup-status-advanced { display: block; margin: 12px auto 0; font-size: 12px; }
+
+    /* Chat: the AI is thinking */
+    .thinking-note { color: var(--text-dim); font-style: italic; }
+
+    /* Connections status rows: Change / Disconnect / + Add */
+    .setup-status-item { cursor: default; }
+    .setup-status-actions { margin-left: auto; display: flex; gap: 6px; flex-shrink: 0; }
+    .mini-btn {
+      font: inherit; font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 8px; cursor: pointer;
+      border: 1px solid var(--border); background: var(--bg-glass); color: var(--text-dim);
+    }
+    .mini-btn:hover, .mini-btn:focus-visible { border-color: var(--brand); color: var(--text); }
+    .mini-btn.add { color: var(--warning); border-color: rgba(245,158,11,0.35); }
+    .mini-btn.danger:hover, .mini-btn.danger:focus-visible { border-color: var(--error); color: var(--error); }

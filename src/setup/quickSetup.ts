@@ -241,6 +241,103 @@ export function localAiConfigPatch(model: string, baseUrl?: string | null): Reco
   return { agent: { provider: "ollama", model: model.trim(), ollamaBaseUrl: custom } };
 }
 
+// ---------------------------------------------------------------------------
+// WhatsApp owner number (assistant mode: the number the owner messages from)
+// ---------------------------------------------------------------------------
+
+/**
+ * "+65 9123 4567" → "+6591234567". A country code is required — "9123 4567"
+ * alone could be any country, and a wrong guess would lock the owner out.
+ */
+export function normalizeOwnerNumber(raw: unknown): { ok: true; number: string } | { ok: false; error: string } {
+  const s = String(raw ?? "").trim();
+  const digits = s.replace(/[^\d]/g, "");
+  if (!digits) return { ok: false, error: "Type your own WhatsApp number, with the country code — for example +65 9123 4567." };
+  if (!s.startsWith("+") && !s.startsWith("00") && digits.length <= 10) {
+    return { ok: false, error: "Add your country code at the front — for example +65 9123 4567." };
+  }
+  const full = s.startsWith("00") ? digits.slice(2) : digits;
+  if (full.length < 8 || full.length > 15) return { ok: false, error: "That doesn't look like a full phone number. Example: +65 9123 4567." };
+  return { ok: true, number: `+${full}` };
+}
+
+// ---------------------------------------------------------------------------
+// Disconnect — remove a connection AND its stored secret (not just switch off)
+// ---------------------------------------------------------------------------
+
+export const DISCONNECTABLE = ["email", "telegram", "whatsapp", "calendar", "spreadsheet", "voice", "folders"] as const;
+export type ConnectionId = typeof DISCONNECTABLE[number];
+
+export function isConnectionId(v: unknown): v is ConnectionId {
+  return typeof v === "string" && (DISCONNECTABLE as readonly string[]).includes(v);
+}
+
+/**
+ * The saved config without this connection: switched off and its password /
+ * token / key deleted. Other connections are untouched (e.g. disconnecting
+ * Calendar keeps Spreadsheets' Google key; WhatsApp keeps its allow-list and
+ * mode so reconnecting is quick — its login lives in a separate folder).
+ * Folders are not in the config (folder-grants.json) — handled by the route.
+ */
+export function withoutConnection(cfg: any, id: ConnectionId): any {
+  const c = structuredClone(cfg ?? {});
+  c.channels    ??= {};
+  c.tools       ??= {};
+  c.credentials ??= {};
+  switch (id) {
+    case "email":
+      if (c.channels.email) c.channels.email = { enabled: false, provider: c.channels.email.provider, config: {} };
+      delete c.tools.smtp;
+      for (const k of ["gmailPass", "gmailAppPassword", "smtpPass", "agentmailKey"]) delete c.credentials[k];
+      break;
+    case "telegram":
+      c.channels.telegram = { enabled: false, provider: c.channels.telegram?.provider ?? "default", config: {} };
+      for (const k of ["telegramToken", "telegramBotToken", "botToken"]) delete c.credentials[k];
+      break;
+    case "whatsapp":
+      if (c.channels.whatsapp) c.channels.whatsapp.enabled = false;
+      break;
+    case "calendar":
+    case "spreadsheet":
+      c.tools[id] = { enabled: false };
+      break;
+    case "voice":
+      // enabled:false also stops the "use the OpenAI AI key for voice" fallback
+      c.tools.voice = { enabled: false };
+      delete c.credentials.groqApiKey;
+      delete c.credentials.openaiVoiceKey;
+      break;
+    case "folders":
+      break;
+  }
+  return c;
+}
+
+/** The first WhatsApp message, written for how the assistant is linked. */
+export function whatsappHello(mode: "assistant" | "personal", name: string, wakeWord: string): string {
+  const hi = `👋 Hi${name ? ` ${name}` : ""}!`;
+  if (mode === "assistant") {
+    return `${hi} I'm your assistant — this is my own WhatsApp number.\n\n` +
+      "Save it as “My Assistant” and message me here anytime, like a Telegram bot. Try:\n" +
+      "• any important emails today?\n" +
+      "• find my insurance policy and send it to me\n\n" +
+      "I only answer you. Before I send an email or a message for you, I'll always ask you to reply YES.";
+  }
+  return `${hi} I'm your assistant, connected to your WhatsApp.\n\n` +
+    `I only read this “Message yourself” chat, and only messages that start with “${wakeWord}” — ` +
+    "your other chats and your own notes here stay private. Try:\n" +
+    `• ${wakeWord}, any important emails today?\n` +
+    `• ${wakeWord}, find my insurance policy and send it to me\n\n` +
+    "Before I send an email or a message for you, I'll always ask you to reply YES.";
+}
+
+/** Same phone number? Compares digits only ("+65 9123 4567" vs "6591234567"). */
+export function samePhoneNumber(a: unknown, b: unknown): boolean {
+  const da = String(a ?? "").replace(/[^\d]/g, "");
+  const db = String(b ?? "").replace(/[^\d]/g, "");
+  return !!da && da === db;
+}
+
 /** Saved-key slots per online provider, in the order we prefer them. */
 const ONLINE_KEY_SLOTS: Array<[AIProvider, string[]]> = [
   ["openrouter", ["openrouterApiKey"]],

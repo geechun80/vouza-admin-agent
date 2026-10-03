@@ -20,7 +20,7 @@ import { buildTool } from "./registry.js";
 import { readFile, readdir, stat } from "fs/promises";
 import { join, extname } from "path";
 import { createRequire } from "module";
-import { resolveAccess, loadGrants, workspaceDir } from "../files/folderGrants.js";
+import { resolveAccess, loadGrants, workspaceDir, isInsideAgentFolder } from "../files/folderGrants.js";
 import { logger } from "../util/logger.js";
 
 const require = createRequire(import.meta.url);
@@ -182,6 +182,8 @@ export async function searchFiles(
         const full = join(dir, entry.name);
         if (entry.isDirectory()) {
           if (SKIP_DIRS.has(entry.name.toLowerCase())) continue;
+          // A shared folder may contain the assistant's own folder — never search it.
+          if (isInsideAgentFolder(full)) continue;
           stack.push(full);
           continue;
         }

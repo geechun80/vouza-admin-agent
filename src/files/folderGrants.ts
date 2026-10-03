@@ -108,6 +108,22 @@ export function realResolve(inputAbs: string): string {
   return tail.length ? join(real, ...tail) : real;
 }
 
+// ── The agent's own program folder ──────────────────────────────────────────
+
+/**
+ * Inside the agent's own program folder (settings, logins, code), outside its
+ * workspace? Off-limits even when a granted folder contains it.
+ */
+export function isInsideAgentFolder(candidate: string): boolean {
+  const abs = realResolve(resolve(candidate));
+  const projectDir = realResolve(resolve(process.cwd()));
+  if (!isWithin(abs, projectDir)) return false;
+  const ws = workspaceDir();
+  let wsReal = ws;
+  try { wsReal = realResolve(ws); } catch { /* keep ws */ }
+  return !(isWithin(abs, wsReal) || isWithin(abs, ws));
+}
+
 // ── Blocked roots ─────────────────────────────────────────────────────────────
 
 interface BlockedCheck {
@@ -146,12 +162,13 @@ export function checkBlockedRoot(candidate: string): BlockedCheck {
     return { blocked: true, reason: "Cannot grant access to AppData — application data folders are off-limits for safety." };
   }
 
-  // 4. The agent's own project directory, anything inside it, and any parent of it.
-  //    (Inside is blocked too — a grant on the agent's data/ folder would let the
-  //    agent rewrite its own config and grants, which is self-escalation.)
-  const projectDir = realResolve(resolve(process.cwd()));
-  if (isWithin(abs, projectDir) || isWithin(projectDir, abs)) {
-    return { blocked: true, reason: "Cannot grant access to the agent's own program folder (or a parent of it). The agent already has its workspace folder for file tasks." };
+  // 4. The agent's own program folder and anything inside it (a grant on its
+  //    data/ folder would let the agent rewrite its own config and grants —
+  //    self-escalation). A folder that CONTAINS it (e.g. Downloads, where
+  //    people often unzip it) may be granted: resolveAccess() and the file
+  //    search still keep the program folder itself out of reach.
+  if (isInsideAgentFolder(abs)) {
+    return { blocked: true, reason: "That folder is part of the assistant itself, so it can't be shared. Pick a folder with your own files, like Documents." };
   }
 
   // 5. The user profile root itself (subfolders like Downloads/Desktop are fine)
@@ -258,6 +275,12 @@ export function resolveAccess(candidatePath: string): AccessResult {
   try { wsReal = realResolve(ws); } catch { /* keep ws */ }
   if (isWithin(real, wsReal) || isWithin(real, ws)) {
     return { allowed: true, mode: "workspace", resolvedPath: real };
+  }
+
+  // The agent's own program folder stays off-limits even inside a granted
+  // folder (e.g. Downloads\admin-agent when Downloads is shared).
+  if (isInsideAgentFolder(real)) {
+    return { allowed: false, mode: "none", resolvedPath: real };
   }
 
   // Granted folders
